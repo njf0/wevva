@@ -1,0 +1,19 @@
+Screen {
+    align-horizontal: center;
+    align-vertical: top;
+    hatch: right $background-lighten-1;
+}
+
+DataTable {
+    width: auto;
+    background: $background;
+}
+
+
+.hidden {
+    display: none;
+}
+
+*:focus {
+    background: $background;
+}
