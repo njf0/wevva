@@ -2,12 +2,14 @@
 
 `wevva` is a weather TUI built with [Textual](https://textual.textualize.io/) and powered by [Open-Meteo](https://open-meteo.com/).
 
-The goal is a fast, keyboard-first weather experience in the terminal.
+<p align="center">
+  <img src="docs/assets/wevva-main.png" alt="wevva weather TUI screenshot" width="900">
+</p>
 
 ## Highlights
 
 - Place search using Open-Meteo geocoding
-- Current, hourly, and daily forecasts
+- Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
 - Unit preferences (temperature, wind, precipitation)
 - Theme and emoji toggles
 - Interactive setup wizard for defaults
@@ -15,13 +17,21 @@ The goal is a fast, keyboard-first weather experience in the terminal.
 
 ## Quick Start
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+First, install [uv](https://docs.astral.sh/uv/):
+
+```bash
+curl -Ls https://astral.sh/uv/install.sh | sh
+```
+
+Then, using `uvx` (`uv`'s command runner), run `wevva`:
 
 ```bash
 uvx wevva
 ```
 
-Run from this local checkout:
+to launch the app without cloning the repo. This will install `wevva` as a package in a temporary environment and run it from there.
+
+Alternatively, you can clone the repo and run from the local source:
 
 ```bash
 uvx --from . wevva
@@ -62,6 +72,8 @@ uvx wevva --clear-default-location
 ```
 
 ## Library Usage
+
+This library is designed to be used as a TUI, but I have also exposed a minimal set of functions for fetching weather data and geocoding that can be used in other Python contexts. These are available as both async and sync versions, depending on your needs.
 
 Install as a package:
 
@@ -130,3 +142,8 @@ Saved settings include:
 
 - Emoji rendering support varies by terminal/font/locale.
 - TUI is the primary focus, but a lightweight Python API is now exported too.
+
+## Known Issues
+
+- Layout not super flexible, requires a terminal size of at least 100x43 for all elements to show fully.
+- Temperature colour scaling is using the Met Office scale, the colours of which may not play nicely with all themes as they get towards the more extreme ends of the scale.
