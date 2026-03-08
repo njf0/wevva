@@ -72,7 +72,7 @@ class DailyForecast(Container):
     # Events --------------------------------------------------------------
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:  # type: ignore[override]
         """Emit a DaySelected message for the highlighted daily row index."""
-        if event.data_table.id == "min-max-spread-table":
+        if event.data_table.id == "min-max-spread-table" and event.data_table.has_focus:
             # Emit a domain message for other components that may care
             self.post_message(DaySelected(event.cursor_row))
 
