@@ -23,7 +23,7 @@ First, install [uv](https://docs.astral.sh/uv/):
 curl -Ls https://astral.sh/uv/install.sh | sh
 ```
 
-Then, using `uvx` (`uv`'s command runner), run `wevva`:
+Then, using `uvx`, run `wevva`:
 
 ```bash
 uvx wevva
