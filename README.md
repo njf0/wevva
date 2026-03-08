@@ -15,6 +15,10 @@
 - Interactive setup wizard for defaults
 - Reusable Python API (async + sync helpers)
 
+> [!NOTE]
+> - Layout not super flexible, requires a terminal size of at least 100x43 for all elements to show fully.
+> - Temperature colour scaling is using the Met Office scale, the colours of which may not play nicely with all themes as they get towards the more extreme ends of the scale.
+
 ## Quick Start
 
 First, install [uv](https://docs.astral.sh/uv/):
@@ -41,11 +45,12 @@ Requires Python `>=3.12`.
 
 ## First-Time Setup
 
-Run the setup wizard to save defaults:
-
-```bash
-uvx wevva setup
-```
+> [!TIP]
+> Run the setup wizard to save defaults:
+>
+> ```bash
+> uvx wevva setup
+> ```
 
 Save settings without launching:
 
@@ -70,6 +75,10 @@ uvx wevva --temperature-unit fahrenheit --wind-speed-unit mph
 uvx wevva --set-default-location "New York"
 uvx wevva --clear-default-location
 ```
+
+> [!WARNING]
+> - Emoji rendering support varies depending on terminal support. Use `--no-emoji` if buggy.
+> - Colour support also varies. Try `export COLORTERM=truecolor` if colours display strangely.
 
 ## Library Usage
 
@@ -137,13 +146,3 @@ Saved settings include:
 - theme
 - emoji preference
 - default location (and cached resolved location metadata)
-
-## Notes
-
-- Emoji rendering support varies by terminal/font/locale.
-- TUI is the primary focus, but a lightweight Python API is now exported too.
-
-## Known Issues
-
-- Layout not super flexible, requires a terminal size of at least 100x43 for all elements to show fully.
-- Temperature colour scaling is using the Met Office scale, the colours of which may not play nicely with all themes as they get towards the more extreme ends of the scale.
