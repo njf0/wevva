@@ -1,6 +1,6 @@
 [project]
 name = "wevva"
-version = "0.1.0"
+version = "0.1.1"
 description = "Textual TUI for viewing weather via Open-Meteo"
 readme = "README.md"
 requires-python = ">=3.12"
