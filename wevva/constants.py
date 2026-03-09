@@ -8,7 +8,7 @@ DEFAULT_TEMPERATURE_UNIT: str = "celsius"
 DEFAULT_WIND_SPEED_UNIT: str = "kmh"
 DEFAULT_PRECIPITATION_UNIT: str = "mm"
 DEFAULT_THEME: str = "gruvbox"
-DEFAULT_EMOJI_ENABLED: bool = True
+DEFAULT_EMOJI_ENABLED: bool = False
 
 VALID_TEMPERATURE_UNITS: tuple[str, ...] = ("celsius", "fahrenheit")
 VALID_WIND_SPEED_UNITS: tuple[str, ...] = ("kmh", "ms", "mph", "kn")

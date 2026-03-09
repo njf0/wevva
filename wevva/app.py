@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from textual.app import App
 
+from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected, WeatherFetchFailed, WeatherUpdated
@@ -38,7 +39,7 @@ class Wevva(App, inherit_bindings=False):
     def __init__(
         self,
         initial_location: LocationMetadata | None = None,
-        emoji_enabled: bool = True,
+        emoji_enabled: bool = DEFAULT_EMOJI_ENABLED,
         theme_name: str | None = None,
         temperature_unit: str = "celsius",
         wind_speed_unit: str = "kmh",
