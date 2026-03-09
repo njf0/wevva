@@ -11,7 +11,7 @@
 - Place search using Open-Meteo geocoding
 - Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
 - Unit preferences (temperature, wind, precipitation)
-- Theme and emoji toggles
+- Theme toggle and optional emoji rendering
 - Interactive setup wizard for defaults
 - Reusable Python API (async + sync helpers)
 
@@ -64,11 +64,11 @@ uvx wevva setup --no-launch
 # Start normally (uses saved defaults)
 uvx wevva
 
-# Start directly at a location
+# Start directly at a location (picks first geocoding match, might not be what you expect!)
 uvx wevva --location "Edinburgh"
 
 # One-run overrides
-uvx wevva --theme dracula --no-emoji
+uvx wevva --theme dracula --emoji
 uvx wevva --temperature-unit fahrenheit --wind-speed-unit mph
 
 # Manage saved default location
@@ -77,7 +77,7 @@ uvx wevva --clear-default-location
 ```
 
 > [!WARNING]
-> - Emoji rendering support varies depending on terminal support. Use `--no-emoji` if buggy.
+> - Emoji rendering support varies depending on terminal support and is disabled by default. Enable it with `--emoji` (or via `wevva setup`).
 > - Colour support also varies. Try `export COLORTERM=truecolor` if colours display strangely.
 
 ## Library Usage
