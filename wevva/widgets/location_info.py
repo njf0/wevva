@@ -15,17 +15,6 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 from zoneinfo import ZoneInfo
 
-from wevva.utils import normalize_emoji
-
-# Row configuration: (key, emoji, text_label)
-_ROW_CONFIG = [
-    ("date", "📅", "Date"),
-    ("time", "⌚", "Time"),
-    ("tz", "🌐", "Timezone"),
-    ("coords", "🧭", "Coords"),
-    ("elev", "⛰️", "Elev"),
-]
-
 
 class LocationInfo(DataTable):
     """Two-column table with location details (legacy id preserved)."""
@@ -49,13 +38,13 @@ class LocationInfo(DataTable):
         """Initialize the two-column location info table."""
         super().__init__(show_header=False, cursor_type="none", id=id, classes=classes)
         self.border_title = "Location Data"
-        # Start with a narrow label column; we'll adjust width in update()
-        self.add_column("Label", key="label", width=2 if self.app.emoji_enabled else 5)
+        self.add_column("Label", key="label", width=8)
         self.add_column("Value", key="value")
-        # Pre-create rows using config
-        for key, _, _ in _ROW_CONFIG:
-            self.add_row(Text("", style="dim"), Text("", style="bold dim"), key=key)
-        self._cached_labels = None  # Build once on first mount
+        self.add_row(Text("", style="dim"), Text("", style="bold dim"), key="date")
+        self.add_row(Text("", style="dim"), Text("", style="bold dim"), key="time")
+        self.add_row(Text("", style="dim"), Text("", style="bold dim"), key="tz")
+        self.add_row(Text("", style="dim"), Text("", style="bold dim"), key="coords")
+        self.add_row(Text("", style="dim"), Text("", style="bold dim"), key="elev")
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -95,10 +84,6 @@ class LocationInfo(DataTable):
 
     def _update_display(self) -> None:
         """Update table cells using location and forecast metadata."""
-        # Cache labels once (they're static based on emoji_enabled)
-        if self._cached_labels is None:
-            self._cached_labels = self._build_labels()
-
         # Cache theme vars for this update
         theme = self.app.theme_variables
 
@@ -116,12 +101,11 @@ class LocationInfo(DataTable):
         )
         elev_text = self._build_elev_display(data["elev_val"], theme)
 
-        # Update all rows using config
-        self._update_row("date", self._cached_labels["date"], date_text)
-        self._update_row("time", self._cached_labels["time"], time_text)
-        self._update_row("tz", self._cached_labels["tz"], tz_text)
-        self._update_row("coords", self._cached_labels["coords"], coords_text)
-        self._update_row("elev", self._cached_labels["elev"], elev_text)
+        self._update_row("date", "Date", date_text)
+        self._update_row("time", "Time", time_text)
+        self._update_row("tz", "Timezone", tz_text)
+        self._update_row("coords", "Coords", coords_text)
+        self._update_row("elev", "Elev", elev_text)
 
         self.refresh()
 
@@ -153,14 +137,6 @@ class LocationInfo(DataTable):
         if isinstance(obj, dict):
             return obj.get(key)
         return getattr(obj, key, None)
-
-    def _build_labels(self) -> dict[str, str]:
-        """Build row labels (emoji when enabled, text fallback otherwise)."""
-        show_emoji = self.app.emoji_enabled
-        return {
-            key: (normalize_emoji(emoji) if show_emoji else text)
-            for key, emoji, text in _ROW_CONFIG
-        }
 
     def _build_datetime_displays(
         self, tz_identifier: str | None, theme: dict
