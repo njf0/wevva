@@ -1,14 +1,10 @@
-"""Textual TUI for displaying weather forecasts and warnings (mini version).
-
-Public-facing code should be easy to scan; this file adds concise
-comments to highlight major blocks, actions, and message handlers.
-Behavior remains unchanged.
-"""
+"""Textual TUI for displaying weather forecasts."""
 
 from typing import ClassVar
 
 from textual.app import App
 
+from wevva.config import load_preferences, save_preferences
 from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
@@ -20,20 +16,15 @@ from wevva.screens.weather_screen import WeatherScreen
 
 
 class Wevva(App, inherit_bindings=False):
-    """Minimal textual weather app showing current, next 24h, daily and warnings.
+    """Minimal textual weather app showing current, next 24h, daily and warnings."""
 
-    - Message-first architecture: widgets react to `WeatherUpdated`.
-    - Compose once, then update in place for new data.
-    - Keep IDs stable to maintain `wevva.tcss` compatibility.
-    """
-
-    CSS_PATH = "wevva.tcss"  # single theme stylesheet
+    CSS_PATH = 'wevva.tcss'  # single theme stylesheet
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
-        ("q", "quit", "Quit"),  # exit the app
-        ("s", "search", "Search"),  # open place search screen
-        ("r", "refresh", "Refresh"),  # fetch latest forecast
-        ("h", "help", "Help"),  # show quick help
-        ("u", "settings", "Units"),  # open settings
+        ('q', 'quit', 'Quit'),  # exit the app
+        ('s', 'search', 'Search'),  # open place search screen
+        ('r', 'refresh', 'Refresh'),  # fetch latest forecast
+        ('h', 'help', 'Help'),  # show quick help
+        ('u', 'settings', 'Settings'),  # open settings
     ]
 
     def __init__(
@@ -41,9 +32,9 @@ class Wevva(App, inherit_bindings=False):
         initial_location: LocationMetadata | None = None,
         emoji_enabled: bool = DEFAULT_EMOJI_ENABLED,
         theme_name: str | None = None,
-        temperature_unit: str = "celsius",
-        wind_speed_unit: str = "kmh",
-        precipitation_unit: str = "mm",
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+        precipitation_unit: str = 'mm',
         **kwargs,
     ):
         """Initialize application (no postcode required; starts with place search).
@@ -56,9 +47,7 @@ class Wevva(App, inherit_bindings=False):
             wind_speed_unit=wind_speed_unit,
             precipitation_unit=precipitation_unit,
         )
-        self.sub_title = (
-            "Weather data from Open-Meteo"  # static subtitle for all screens
-        )
+        self.sub_title = 'Weather data from Open-Meteo'  # static subtitle for all screens
         self.forecast_metadata = None  # LocationMetadata after first fetch
         # unified location context (holds geocoded place + last forecast metadata)
         self.location = initial_location or LocationMetadata()  # set from CLI or search
@@ -91,10 +80,7 @@ class Wevva(App, inherit_bindings=False):
     # Actions / key bindings
     # ------------------------------------------------------------
     async def action_refresh(self) -> None:
-        """Fetch via controller and broadcast `WeatherUpdated`.
-
-        Uses an in-flight guard to prevent overlapping requests.
-        """
+        """Fetch via controller and broadcast `WeatherUpdated`."""
         if self._refresh_in_flight:
             return
         self._refresh_in_flight = True
@@ -122,36 +108,95 @@ class Wevva(App, inherit_bindings=False):
 
     def action_settings(self) -> None:
         """Open settings screen and handle result via callback."""
+        preferences = load_preferences()
         self.push_screen(
             SettingsScreen(
+                theme_name=self.theme,
+                emoji_enabled=self.emoji_enabled,
                 temperature_unit=self.temperature_unit,
                 wind_speed_unit=self.wind_speed_unit,
                 precipitation_unit=self.precipitation_unit,
+                saved_default_location=preferences.get('default_location'),
+                current_location_label=self._current_location_label(),
             ),
             callback=self._on_settings_result,
         )
 
     async def _on_settings_result(self, result: dict | None) -> None:
-        """Handle settings screen dismiss with optional result."""
-        # If user clicked Apply (result is dict), update units and refresh
-        if result:
-            self.temperature_unit = result["temperature_unit"]
-            self.wind_speed_unit = result["wind_speed_unit"]
-            self.precipitation_unit = result["precipitation_unit"]
+        """Handle settings updates from the modal screen."""
+        if not result:
+            return
 
-            # Update controller with new units
+        new_temp = result['temperature_unit']
+        new_wind = result['wind_speed_unit']
+        new_precip = result['precipitation_unit']
+        new_theme = result['theme']
+        new_emoji_enabled = result['emoji_enabled']
+        default_location_action = result['default_location_action']
+        save_defaults = bool(result.get('save_defaults'))
+
+        units_changed = (
+            new_temp != self.temperature_unit or new_wind != self.wind_speed_unit or new_precip != self.precipitation_unit
+        )
+
+        self.temperature_unit = new_temp
+        self.wind_speed_unit = new_wind
+        self.precipitation_unit = new_precip
+        self.theme = new_theme
+        self.emoji_enabled = new_emoji_enabled
+
+        if units_changed:
             self.controller = WeatherController(
                 temperature_unit=self.temperature_unit,
                 wind_speed_unit=self.wind_speed_unit,
                 precipitation_unit=self.precipitation_unit,
             )
-
-            # Refresh weather with new units
-            if (
-                self.location.latitude is not None
-                and self.location.longitude is not None
-            ):
+            if self.location.latitude is not None and self.location.longitude is not None:
                 await self.action_refresh()
+
+        if save_defaults:
+            save_kwargs: dict = {
+                'temperature_unit': self.temperature_unit,
+                'wind_speed_unit': self.wind_speed_unit,
+                'precipitation_unit': self.precipitation_unit,
+                'theme': self.theme,
+                'emoji_enabled': self.emoji_enabled,
+            }
+            if default_location_action == 'use_current':
+                save_kwargs['default_location'] = self._current_location_label()
+                save_kwargs['default_location_metadata'] = self._location_config_from_current_location()
+            elif default_location_action == 'clear':
+                save_kwargs['default_location'] = None
+                save_kwargs['default_location_metadata'] = None
+
+            save_preferences(**save_kwargs)
+            self.notify('Default settings saved.', severity='information')
+
+    def _current_location_label(self) -> str | None:
+        """Build a readable label for the current in-app location."""
+        if self.location.latitude is None or self.location.longitude is None:
+            return None
+
+        parts = [
+            part.strip() for part in (self.location.name, self.location.admin, self.location.country) if part and part.strip()
+        ]
+        if parts:
+            return ', '.join(parts)
+        return f'{self.location.latitude:.3f}, {self.location.longitude:.3f}'
+
+    def _location_config_from_current_location(self) -> dict:
+        """Serialize current location to config format."""
+        return {
+            'latitude': self.location.latitude,
+            'longitude': self.location.longitude,
+            'elevation': self.location.elevation,
+            'name': self.location.name,
+            'admin': self.location.admin,
+            'country': self.location.country,
+            'country_code': self.location.country_code,
+            'timezone': self.location.timezone,
+            'timezone_abbreviation': self.location.timezone_abbreviation,
+        }
 
     # ---------------- Messages ----------------
     async def on_place_selected(self, message: PlaceSelected) -> None:
@@ -176,9 +221,9 @@ class Wevva(App, inherit_bindings=False):
     async def on_weather_fetch_failed(self, event: WeatherFetchFailed) -> None:
         """Show error notification; return to search if CLI location failed on first fetch."""
         self.notify(
-            f"Refresh failed: {type(event.error).__name__}: {event.error}",
-            title="Weather Fetch Failed",
-            severity="error",
+            f'Refresh failed: {type(event.error).__name__}: {event.error}',
+            title='Weather Fetch Failed',
+            severity='error',
             timeout=5.0,
         )
 

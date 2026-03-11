@@ -54,7 +54,7 @@ You can launch it directly with `uvx wevva`.
 
 - `s` Search for a place
 - `r` Refresh weather for current location
-- `u` Open unit settings
+- `u` Open settings
 - `h` Open this help screen
 - `q` Quit
 - `Esc` Close modal screens
