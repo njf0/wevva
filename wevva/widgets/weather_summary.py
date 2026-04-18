@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
@@ -57,26 +58,26 @@ class WeatherSummary(Container):
 
     def __init__(self) -> None:
         """Initialize child statics."""
-        super().__init__(id="weather-summary")
-        self.border_title = "Weather Summary"
+        super().__init__(id='weather-summary')
+        self.border_title = 'Weather Summary'
 
     def compose(self) -> ComposeResult:  # type: ignore[override]
-        yield Static("", id="weather-summary-condition")
-        yield Static("", id="weather-summary-place")
-        yield Static("", id="weather-summary-datetime")
+        yield Static('', id='weather-summary-condition')
+        yield Static('', id='weather-summary-place')
+        yield Static('', id='weather-summary-datetime')
 
     # Property accessors for child widgets
     @property
     def place(self) -> Static:
-        return self.query_one("#weather-summary-place", Static)
+        return self.query_one('#weather-summary-place', Static)
 
     @property
     def datetime(self) -> Static:
-        return self.query_one("#weather-summary-datetime", Static)
+        return self.query_one('#weather-summary-datetime', Static)
 
     @property
     def condition(self) -> Static:
-        return self.query_one("#weather-summary-condition", Static)
+        return self.query_one('#weather-summary-condition', Static)
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -111,7 +112,7 @@ class WeatherSummary(Container):
         idx = self.selected_index
         theme = self.app.theme_variables
 
-        place = self._format_place()
+        place = self.app.location.name or 'Selected place'
         # Set tooltip with full location hierarchy
         self.place.tooltip = self._build_location_tooltip()
 
@@ -119,50 +120,39 @@ class WeatherSummary(Container):
         emoji, cond_name, cond_color = self._condition_parts(idx, theme)
 
         # Format: '{condition} in {location} on {date} at {time}'
-        self.condition.update(
-            Text.from_markup(f"[bold italic {cond_color}]{cond_name}[/]")
-        )
-        self.place.update(f"[dim][i] in [/dim][b u]{place}[/]")
-        self.datetime.update(
-            f"[dim][i] on [/dim][b]{date_str}[/b] [dim][i]at [/dim][b]{time_str}[/b]"
-        )
+        self.condition.update(Text.from_markup(f'[bold italic {cond_color}]{cond_name}[/]'))
+        self.place.update(Text.from_markup(self._build_place_markup(place)))
+        self.datetime.update(f'[dim][i] on [/dim][b]{date_str}[/b] [dim][i]at [/dim][b]{time_str}[/b]')
 
     def _build_location_tooltip(self) -> str:
         """Build detailed location info for tooltip."""
         loc = self.app.location
 
         # Build unique admin hierarchy (exclude name from admin parts)
-        admin_parts = [p for p in loc.admin.split(";") if p and p != loc.name]
+        admin_parts = [p for p in loc.admin.split(';') if p and p != loc.name]
         location_parts = [loc.name, *admin_parts, loc.country]
 
-        return f"[i][b]{', '.join(location_parts)}[/b][/i]"
+        return f'[i][b]{", ".join(location_parts)}[/b][/i]'
 
-    def _format_place(self) -> str:
-        """Format place name for display (simple version)."""
-        return self.app.location.name or "Selected place"
+    def _build_place_markup(self, place: str) -> str:
+        """Return plain styled place markup."""
+        escaped_place = escape(place)
+        return f'[dim][i] in [/dim][b {self.app.theme_variables.get("foreground")}]{escaped_place}[/]'
 
     def _resolve_time(self, idx: int) -> tuple[str, str]:
         pt = self.hourly.get_point(idx)
-        dt = pt.get("time")
-        return dt.strftime("%A %d %B %Y"), dt.strftime("%H:%M")
+        dt = pt.get('time')
+        return dt.strftime('%A %d %B %Y'), dt.strftime('%H:%M')
 
     def _condition_parts(self, idx: int, theme: dict) -> tuple[str, str, str]:
         """Get emoji, name, and color for the weather condition at given hour."""
-        emoji = (
-            normalize_emoji(self.hourly.get_condition_emoji(idx))
-            if self.app.emoji_enabled
-            else ""
-        )
+        emoji = normalize_emoji(self.hourly.get_condition_emoji(idx)) if self.app.emoji_enabled else ''
         cond_name = self.hourly.get_weather_code(idx, return_emoji=False)
 
         # Get theme color from condition's color_var
         pt = self.hourly.get_point(idx)
-        code = pt.get("weather_code")
+        code = pt.get('weather_code')
         condition = get_condition(code)
-        cond_color = (
-            theme.get(condition.color_var)
-            if (condition and condition.color_var)
-            else theme.get("primary")
-        )
+        cond_color = theme.get(condition.color_var) if (condition and condition.color_var) else theme.get('primary')
 
         return emoji, cond_name, cond_color

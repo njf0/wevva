@@ -63,6 +63,7 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
         *,
         theme_name: str,
         emoji_enabled: bool,
+        warning_language: str,
         temperature_unit: str,
         wind_speed_unit: str,
         precipitation_unit: str,
@@ -73,6 +74,7 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
         super().__init__()
         self.theme_name = theme_name
         self.emoji_enabled = emoji_enabled
+        self.warning_language = warning_language
         self.temperature_unit = temperature_unit
         self.wind_speed_unit = wind_speed_unit
         self.precipitation_unit = precipitation_unit
@@ -104,6 +106,16 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
             yield Static(
                 '[dim]Emoji rendering varies by terminal, font, and locale.[/]',
                 id='emoji-note',
+            )
+
+            yield Label('Warning Language:')
+            yield Select(
+                options=[
+                    ('Auto (provider default)', 'auto'),
+                    ('English', 'en'),
+                ],
+                value=self.warning_language,
+                id='warning-language-select',
             )
 
             yield Label('Temperature Unit:')
@@ -167,6 +179,7 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
         return {
             'theme': self.query_one('#theme-select', Select).value,
             'emoji_enabled': self.query_one('#emoji-select', Select).value == 'enabled',
+            'warning_language': self.query_one('#warning-language-select', Select).value,
             'temperature_unit': self.query_one('#temp-select', Select).value,
             'wind_speed_unit': self.query_one('#wind-select', Select).value,
             'precipitation_unit': self.query_one('#precip-select', Select).value,

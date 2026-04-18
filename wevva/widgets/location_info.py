@@ -189,6 +189,11 @@ class LocationInfo(DataTable):
         """Build formatted coordinate display with theme color."""
         lat = self._fmt_lat(lat_val)
         lon = self._fmt_lon(lon_val)
+        if lat_val is not None and lon_val is not None:
+            url = f"https://www.openstreetmap.org/#map=8/{lat_val:.5f}/{lon_val:.5f}"
+            return Text.from_markup(
+                f"[link={url}][italic {theme.get('accent')}]{lat}[/], [italic {theme.get('accent')}]{lon}[/][/]"
+            )
         return Text.from_markup(
             f"[italic {theme.get('accent')}]{lat}[/], [italic {theme.get('accent')}]{lon}[/]"
         )

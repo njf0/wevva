@@ -5,6 +5,7 @@ Simple classes carry small bits of data between parts of the UI.
 
 from textual.message import Message
 
+from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
 
 
@@ -28,16 +29,27 @@ class SearchQueryReady(Message):
 class WeatherUpdated(Message):
     """Sent when fresh weather data arrives.
 
-    Carries models for current, hourly, and daily data.
+    Carries models for current, hourly, daily, and alerts data.
     """
 
-    def __init__(self, *, metadata, current, hourly, daily):
+    def __init__(
+        self, *, metadata, current, hourly, daily, alerts: list[Alert] | None = None
+    ):
         """Create the message with metadata and models."""
         super().__init__()
         self.metadata = metadata
         self.current = current
         self.hourly = hourly
         self.daily = daily
+        self.alerts = alerts or []
+
+
+class WeatherAlertsUpdated(Message):
+    """Sent when alert data arrives after the main forecast."""
+
+    def __init__(self, alerts: list[Alert] | None = None):
+        super().__init__()
+        self.alerts = alerts or []
 
 
 class WeatherFetchFailed(Message):

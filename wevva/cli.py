@@ -24,6 +24,7 @@ from wevva.constants import (
     DEFAULT_PRECIPITATION_UNIT,
     DEFAULT_TEMPERATURE_UNIT,
     DEFAULT_THEME,
+    DEFAULT_WARNING_LANGUAGE,
     DEFAULT_WIND_SPEED_UNIT,
 )
 from wevva.location_metadata import LocationMetadata
@@ -341,6 +342,11 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
         [("Millimeters (mm)", "mm"), ("Inches (in)", "inch")],
         str(preferences.get("precipitation_unit") or DEFAULT_PRECIPITATION_UNIT),
     )
+    warning_language = _questionary_select(
+        "Choose warning language",
+        [("Auto (provider default)", "auto"), ("English", "en")],
+        str(preferences.get("warning_language") or DEFAULT_WARNING_LANGUAGE),
+    )
 
     use_default_location = bool(
         _require_answer(
@@ -402,6 +408,7 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
         default_location=default_location,
         theme=theme,
         emoji_enabled=emoji_enabled,
+        warning_language=warning_language,
         default_location_metadata=default_location_metadata,
     )
     typer.secho("\nSetup saved.", fg=typer.colors.GREEN)
@@ -501,7 +508,7 @@ def _launch_wevva(
     emoji: bool | None,
     temperature_unit: TemperatureUnit | None,
     wind_speed_unit: WindSpeedUnit | None,
-    precipitation_unit: PrecipitationUnit | None,
+        precipitation_unit: PrecipitationUnit | None,
 ) -> None:
     """Launch the app using saved preferences with optional CLI overrides.
 
@@ -552,12 +559,16 @@ def _launch_wevva(
         if emoji is not None
         else bool(preferences.get("emoji_enabled", DEFAULT_EMOJI_ENABLED))
     )
+    warning_language = str(
+        preferences.get("warning_language", DEFAULT_WARNING_LANGUAGE)
+    )
     initial_location = _resolve_initial_location(preferences, location)
 
     Wevva(
         initial_location=initial_location,
         emoji_enabled=emoji_enabled,
         theme_name=theme_name,
+        warning_language=warning_language,
         temperature_unit=final_temp,
         wind_speed_unit=final_wind,
         precipitation_unit=final_precip,

@@ -13,9 +13,11 @@ from textual.containers import Container
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
+from wevva.alerts import Alert
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
+    WeatherAlertsUpdated,
     WeatherFetchFailed,
     WeatherUpdated,
 )
@@ -27,7 +29,33 @@ from wevva.widgets.context_bar import ContextBar
 from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
+from wevva.widgets.weather_alerts import WeatherAlertCard
 from wevva.widgets.weather_summary import WeatherSummary
+
+ALERT_SEVERITY_RANK = {
+    'extreme': 5,
+    'severe': 4,
+    'moderate': 3,
+    'minor': 2,
+    'unknown': 1,
+    # GeoMet risk color labels.
+    'red': 5,
+    'orange': 4,
+    'amber': 4,
+    'yellow': 3,
+    'green': 2,
+}
+
+
+def alert_sort_key(alert: Alert) -> tuple[int, str, str]:
+    """Sort key for displaying most severe alerts first."""
+    severity = (alert.severity or '').strip().lower()
+    rank = ALERT_SEVERITY_RANK.get(severity, 0)
+    return (
+        -rank,
+        (alert.event or '').lower(),
+        (alert.headline or '').lower(),
+    )
 
 
 class WeatherScreen(Screen[None]):
@@ -40,8 +68,8 @@ class WeatherScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
-        ("c", "open_author", "Credits"),  # Only screen-specific binding
-        ("?", "help", "Help"),  # Context-aware help (AQ or general)
+        ('c', 'open_author', 'Credits'),  # Only screen-specific binding
+        ('?', 'help', 'Help'),  # Context-aware help (AQ or general)
     ]
 
     def __init__(self, *args, **kwargs):
@@ -104,7 +132,17 @@ class WeatherScreen(Screen[None]):
         content-align: center middle;
         width: 100%;
         height: auto;
-        # margin: 0 0 1 0;
+        margin: 0 0 1 0;
+        hatch: right $background-lighten-1;
+    }
+
+    #warnings-row {
+        layout: horizontal;
+        align-horizontal: center;
+        align-vertical: middle;
+        content-align: center middle;
+        width: 100%;
+        height: auto;
         hatch: right $background-lighten-1;
     }
 
@@ -132,13 +170,15 @@ class WeatherScreen(Screen[None]):
     }
 
     #weather-warnings {
-        layout: horizontal;
-        # align-horizontal: left;
-        align-vertical: top;
+        layout: vertical;
+        align-horizontal: center;
+        align-vertical: middle;
         width: auto;
         height: auto;
-        overflow-x: auto;
-        margin: 0 0 1 0;
+        content-align: center middle;
+        overflow-y: auto;
+        # margin: 0 0 1 0;
+        hatch: right $background-lighten-1;
     }
 
     #credits {
@@ -158,39 +198,41 @@ class WeatherScreen(Screen[None]):
         yield self.header
 
         # Main panel content mirrors the prior App layout
-        self.main_panel = Container(id="main-panel")
+        self.main_panel = Container(id='main-panel')
         with self.main_panel:
             # Error banner area (hidden by default)
-            self.error_banner = Static("", id="error-banner")
+            self.error_banner = Static('', id='error-banner')
             self.error_banner.display = False
             yield self.error_banner
 
             # Summary row: formatted text after top info
-            self.summary_row = Container(id="summary-row")
+            self.summary_row = Container(id='summary-row')
             with self.summary_row:
                 self.weather_summary = WeatherSummary()
                 yield self.weather_summary
 
-            # Weather warnings placeholder (kept for ID stability)
-            self.weather_warnings = Container(id="weather-warnings")
-            yield self.weather_warnings
+            # Weather alerts section (legacy container ID kept for CSS stability)
+            self.warnings_row = Container(id='warnings-row')
+            with self.warnings_row:
+                self.weather_warnings = Container(id='weather-warnings')
+                yield self.weather_warnings
 
             # Current conditions: tiles + compact tables
-            self.current_weather = CurrentConditions(classes="current-weather")
+            self.current_weather = CurrentConditions(classes='current-weather')
             yield self.current_weather
 
             # Next 24 hours table (owns HourlyForecast)
-            self.next_24_hours = Container(id="next-24-hours-table")
+            self.next_24_hours = Container(id='next-24-hours-table')
             with self.next_24_hours:
                 yield HourlyForecast()
 
             # Daily forecast (7-day view) - temporarily disabled
-            self.daily_forecast = Container(id="daily-forecast")
+            self.daily_forecast = Container(id='daily-forecast')
             with self.daily_forecast:
                 yield DailyForecast()
 
             # Bottom info bar (misnamed Top) moved to the bottom
-            self.bottom_info_bar = Container(id="lower-row")
+            self.bottom_info_bar = Container(id='lower-row')
             with self.bottom_info_bar:
                 self.context_bar = ContextBar()
                 yield self.context_bar
@@ -206,9 +248,11 @@ class WeatherScreen(Screen[None]):
 
     def on_mount(self) -> None:
         # Hide content until weather data arrives
-        self.sub_title = "Weather data from Open-Meteo"
-        self.app.sub_title = "Weather data from Open-Meteo"
-        self.query_one("#main-panel").display = False
+        self.sub_title = 'Weather data from Open-Meteo'
+        self.app.sub_title = 'Weather data from Open-Meteo'
+        self.query_one('#main-panel').display = False
+        self.warnings_row.display = False
+        self.weather_warnings.display = False
 
     # --- Actions ---
     def action_open_author(self) -> None:
@@ -242,11 +286,12 @@ class WeatherScreen(Screen[None]):
 
         daily = self.query_one(DailyForecast)
         daily.post_message(event)
+        await self._render_alert_cards(event.alerts)
 
         # Reveal main panel and clear errors on success
-        main_panel = self.query_one("#main-panel")
+        main_panel = self.query_one('#main-panel')
         main_panel.display = True
-        self.error_banner.update("")
+        self.error_banner.update('')
         self.error_banner.display = False
 
         # Reveal bottom info bar once data is present
@@ -256,12 +301,30 @@ class WeatherScreen(Screen[None]):
         if self._time_refresh_timer is None:
             self._time_refresh_timer = self.set_interval(1, self._refresh_time_display)
 
+    async def on_weather_alerts_updated(self, event: WeatherAlertsUpdated) -> None:
+        """Render alerts that arrive after the main forecast content."""
+        await self._render_alert_cards(event.alerts)
+
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
         self.context_bar.refresh_time_display()
 
     async def on_weather_fetch_failed(self, event: WeatherFetchFailed) -> None:
-        self.app.notify(f"Weather fetch failed: {event.error}", severity="error")
+        self.app.notify(f'Weather fetch failed: {event.error}', severity='error')
+
+    async def _render_alert_cards(self, alerts: list[Alert]) -> None:
+        """Mount one alert card per alert, or none when there are no alerts."""
+        await self.weather_warnings.remove_children()
+        if not alerts:
+            self.warnings_row.display = False
+            self.weather_warnings.display = False
+            return
+
+        ordered_alerts = sorted(alerts, key=alert_sort_key)
+        cards = [WeatherAlertCard(alert) for alert in ordered_alerts]
+        await self.weather_warnings.mount(*cards)
+        self.warnings_row.display = True
+        self.weather_warnings.display = True
 
     async def on_hour_highlighted(self, message: HourHighlighted) -> None:  # type: ignore[override]
         """Forward hour selection to current conditions row.

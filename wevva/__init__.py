@@ -2,9 +2,12 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from wevva.alerts import Alert, get_alerts
 from wevva.api import (
     LocationNotFoundError,
     WevvaAPIError,
+    alerts_by_coordinates,
+    alerts_by_coordinates_sync,
     forecast_by_coordinates,
     forecast_by_coordinates_sync,
     forecast_by_place,
@@ -25,26 +28,30 @@ HourlyForecast = HourlyOpenMeteoForecast
 DailyForecast = DailyOpenMeteoForecast
 
 __all__ = [
-    "CurrentForecast",
-    "CurrentOpenMeteoForecast",
-    "DailyForecast",
-    "DailyOpenMeteoForecast",
-    "ForecastBundle",
-    "HourlyForecast",
-    "HourlyOpenMeteoForecast",
-    "LocationMetadata",
-    "LocationNotFoundError",
-    "WevvaAPIError",
-    "__version__",
-    "forecast_by_coordinates",
-    "forecast_by_coordinates_sync",
-    "forecast_by_place",
-    "forecast_by_place_sync",
-    "geocode",
-    "geocode_sync",
+    'Alert',
+    'CurrentForecast',
+    'CurrentOpenMeteoForecast',
+    'DailyForecast',
+    'DailyOpenMeteoForecast',
+    'ForecastBundle',
+    'HourlyForecast',
+    'HourlyOpenMeteoForecast',
+    'LocationMetadata',
+    'LocationNotFoundError',
+    'WevvaAPIError',
+    '__version__',
+    'alerts_by_coordinates',
+    'alerts_by_coordinates_sync',
+    'forecast_by_coordinates',
+    'forecast_by_coordinates_sync',
+    'forecast_by_place',
+    'forecast_by_place_sync',
+    'geocode',
+    'geocode_sync',
+    'get_alerts',
 ]
 
 try:
-    __version__ = version("wevva")
+    __version__ = version('wevva')
 except PackageNotFoundError:
-    __version__ = "0.0.0"
+    __version__ = '0.0.0'

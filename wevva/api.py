@@ -6,6 +6,7 @@ import asyncio
 from copy import deepcopy
 from typing import Any, Awaitable, TypeVar
 
+from wevva.alerts import Alert, get_alerts, get_alerts_async
 from wevva.location_metadata import LocationMetadata
 from wevva.models import ForecastBundle
 from wevva.openmeteo import (
@@ -174,6 +175,26 @@ def geocode_sync(
     return _run_sync(geocode(query, count=count, language=language))
 
 
+async def alerts_by_coordinates(
+    *,
+    lat: float,
+    lon: float,
+    country_code: str | None = None,
+) -> list[Alert]:
+    """Fetch active weather alerts for explicit coordinates."""
+    return await get_alerts_async(lat, lon, country_code)
+
+
+def alerts_by_coordinates_sync(
+    *,
+    lat: float,
+    lon: float,
+    country_code: str | None = None,
+) -> list[Alert]:
+    """Synchronous alert lookup for explicit coordinates."""
+    return get_alerts(lat, lon, country_code)
+
+
 async def forecast_by_coordinates(
     *,
     lat: float,
@@ -270,8 +291,11 @@ def forecast_by_place_sync(
 
 
 __all__ = [
+    "Alert",
     "LocationNotFoundError",
     "WevvaAPIError",
+    "alerts_by_coordinates",
+    "alerts_by_coordinates_sync",
     "forecast_by_coordinates",
     "forecast_by_coordinates_sync",
     "forecast_by_place",

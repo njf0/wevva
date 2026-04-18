@@ -17,3 +17,9 @@ DataTable {
 *:focus {
     background: $background;
 }
+
+Tooltip {
+    offset-x: 2;
+    offset-y: 1;
+    max-width: 72;
+}

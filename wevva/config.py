@@ -11,9 +11,11 @@ from wevva.constants import (
     DEFAULT_PRECIPITATION_UNIT,
     DEFAULT_TEMPERATURE_UNIT,
     DEFAULT_THEME,
+    DEFAULT_WARNING_LANGUAGE,
     DEFAULT_WIND_SPEED_UNIT,
     VALID_PRECIPITATION_UNITS,
     VALID_TEMPERATURE_UNITS,
+    VALID_WARNING_LANGUAGES,
     VALID_WIND_SPEED_UNITS,
 )
 
@@ -23,6 +25,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "precipitation_unit": DEFAULT_PRECIPITATION_UNIT,
     "theme": DEFAULT_THEME,
     "emoji_enabled": DEFAULT_EMOJI_ENABLED,
+    "warning_language": DEFAULT_WARNING_LANGUAGE,
     "default_location": None,
     "default_location_metadata": None,
 }
@@ -207,6 +210,11 @@ def load_preferences() -> dict[str, Any]:
         ),
         "theme": _normalize_theme(raw.get("theme")),
         "emoji_enabled": _normalize_emoji_enabled(raw.get("emoji_enabled")),
+        "warning_language": _normalize_unit(
+            raw.get("warning_language"),
+            allowed=VALID_WARNING_LANGUAGES,
+            default=DEFAULT_WARNING_LANGUAGE,
+        ),
         "default_location": _normalize_location(raw.get("default_location")),
         "default_location_metadata": _normalize_location_metadata(
             raw.get("default_location_metadata")
@@ -243,6 +251,7 @@ def save_preferences(
     default_location: str | None | object = _UNSET,
     theme: str | object = _UNSET,
     emoji_enabled: bool | object = _UNSET,
+    warning_language: str | object = _UNSET,
     default_location_metadata: dict[str, Any] | None | object = _UNSET,
 ) -> None:
     """Persist preferences and optionally update display/location values.
@@ -292,6 +301,12 @@ def save_preferences(
         preferences["theme"] = _normalize_theme(theme)
     if emoji_enabled is not _UNSET:
         preferences["emoji_enabled"] = _normalize_emoji_enabled(emoji_enabled)
+    if warning_language is not _UNSET:
+        preferences["warning_language"] = _normalize_unit(
+            warning_language,
+            allowed=VALID_WARNING_LANGUAGES,
+            default=DEFAULT_WARNING_LANGUAGE,
+        )
     if default_location_metadata is not _UNSET:
         preferences["default_location_metadata"] = _normalize_location_metadata(
             default_location_metadata
@@ -326,5 +341,6 @@ def save_default_location(
         default_location=default_location,
         theme=preferences["theme"],
         emoji_enabled=preferences["emoji_enabled"],
+        warning_language=preferences["warning_language"],
         default_location_metadata=default_location_metadata,
     )

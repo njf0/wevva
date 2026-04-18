@@ -1,14 +1,21 @@
 """Textual TUI for displaying weather forecasts."""
 
+import asyncio
 from typing import ClassVar
 
 from textual.app import App
 
+from wevva.alerts import get_alerts_async
 from wevva.config import load_preferences, save_preferences
 from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
-from wevva.messages import PlaceSelected, WeatherFetchFailed, WeatherUpdated
+from wevva.messages import (
+    PlaceSelected,
+    WeatherAlertsUpdated,
+    WeatherFetchFailed,
+    WeatherUpdated,
+)
 from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
@@ -19,6 +26,7 @@ class Wevva(App, inherit_bindings=False):
     """Minimal textual weather app showing current, next 24h, daily and warnings."""
 
     CSS_PATH = 'wevva.tcss'  # single theme stylesheet
+    TOOLTIP_DELAY = 0.15
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ('q', 'quit', 'Quit'),  # exit the app
         ('s', 'search', 'Search'),  # open place search screen
@@ -32,6 +40,7 @@ class Wevva(App, inherit_bindings=False):
         initial_location: LocationMetadata | None = None,
         emoji_enabled: bool = DEFAULT_EMOJI_ENABLED,
         theme_name: str | None = None,
+        warning_language: str = 'auto',
         temperature_unit: str = 'celsius',
         wind_speed_unit: str = 'kmh',
         precipitation_unit: str = 'mm',
@@ -56,8 +65,11 @@ class Wevva(App, inherit_bindings=False):
         self._has_successful_fetch = False
         # guard to prevent overlapping refreshes
         self._refresh_in_flight = False  # debounce concurrent refreshes
+        self._refresh_generation = 0
+        self._alerts_task: asyncio.Task[None] | None = None
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
         self.emoji_enabled = bool(emoji_enabled)
+        self.warning_language = warning_language
         # Store unit preferences for widgets
         self.temperature_unit = temperature_unit
         self.wind_speed_unit = wind_speed_unit
@@ -84,6 +96,9 @@ class Wevva(App, inherit_bindings=False):
         if self._refresh_in_flight:
             return
         self._refresh_in_flight = True
+        self._refresh_generation += 1
+        refresh_generation = self._refresh_generation
+        self._cancel_alerts_task()
         try:
             event = await self.controller.fetch(
                 lat=self.location.latitude,
@@ -92,6 +107,7 @@ class Wevva(App, inherit_bindings=False):
             )
             # Forward fresh data to the weather screen
             self.weather_screen.post_message(event)
+            self._schedule_alert_refresh(refresh_generation)
         except Exception as e:
             # Forward error to the weather screen to surface it
             self.weather_screen.post_message(WeatherFetchFailed(e))
@@ -113,6 +129,7 @@ class Wevva(App, inherit_bindings=False):
             SettingsScreen(
                 theme_name=self.theme,
                 emoji_enabled=self.emoji_enabled,
+                warning_language=self.warning_language,
                 temperature_unit=self.temperature_unit,
                 wind_speed_unit=self.wind_speed_unit,
                 precipitation_unit=self.precipitation_unit,
@@ -132,18 +149,21 @@ class Wevva(App, inherit_bindings=False):
         new_precip = result['precipitation_unit']
         new_theme = result['theme']
         new_emoji_enabled = result['emoji_enabled']
+        new_warning_language = result['warning_language']
         default_location_action = result['default_location_action']
         save_defaults = bool(result.get('save_defaults'))
 
         units_changed = (
             new_temp != self.temperature_unit or new_wind != self.wind_speed_unit or new_precip != self.precipitation_unit
         )
+        warning_language_changed = new_warning_language != self.warning_language
 
         self.temperature_unit = new_temp
         self.wind_speed_unit = new_wind
         self.precipitation_unit = new_precip
         self.theme = new_theme
         self.emoji_enabled = new_emoji_enabled
+        self.warning_language = new_warning_language
 
         if units_changed:
             self.controller = WeatherController(
@@ -153,6 +173,10 @@ class Wevva(App, inherit_bindings=False):
             )
             if self.location.latitude is not None and self.location.longitude is not None:
                 await self.action_refresh()
+        elif warning_language_changed and self.location.latitude is not None and self.location.longitude is not None:
+            self._refresh_generation += 1
+            self._cancel_alerts_task()
+            self._schedule_alert_refresh(self._refresh_generation)
 
         if save_defaults:
             save_kwargs: dict = {
@@ -161,6 +185,7 @@ class Wevva(App, inherit_bindings=False):
                 'precipitation_unit': self.precipitation_unit,
                 'theme': self.theme,
                 'emoji_enabled': self.emoji_enabled,
+                'warning_language': self.warning_language,
             }
             if default_location_action == 'use_current':
                 save_kwargs['default_location'] = self._current_location_label()
@@ -230,3 +255,51 @@ class Wevva(App, inherit_bindings=False):
         # If CLI location failed on first fetch, return to search for recovery
         if self.started_with_cli_location and not self._has_successful_fetch:
             self.push_screen(SearchScreen())
+
+    def _cancel_alerts_task(self) -> None:
+        """Cancel any in-flight background alert fetch."""
+        if self._alerts_task is not None and not self._alerts_task.done():
+            self._alerts_task.cancel()
+        self._alerts_task = None
+
+    def _schedule_alert_refresh(self, refresh_generation: int) -> None:
+        """Start a background alert fetch for the current location."""
+        lat = self.location.latitude
+        lon = self.location.longitude
+        if lat is None or lon is None:
+            return
+        self._alerts_task = asyncio.create_task(
+            self._fetch_alerts_for_location(
+                lat=lat,
+                lon=lon,
+                country_code=self.location.country_code,
+                refresh_generation=refresh_generation,
+            )
+        )
+
+    async def _fetch_alerts_for_location(
+        self,
+        *,
+        lat: float,
+        lon: float,
+        country_code: str,
+        refresh_generation: int,
+    ) -> None:
+        """Fetch alerts in the background and post them if still current."""
+        try:
+            alerts = await get_alerts_async(
+                lat,
+                lon,
+                country_code or None,
+                self.warning_language,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            alerts = []
+
+        if refresh_generation != self._refresh_generation:
+            return
+        if self.location.latitude != lat or self.location.longitude != lon:
+            return
+        self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))

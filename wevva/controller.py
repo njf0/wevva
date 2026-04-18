@@ -48,7 +48,7 @@ class WeatherController:
     async def fetch(
         self, *, lat: float, lon: float, country_code: str = ""
     ) -> WeatherUpdated:
-        """Fetch weather and air quality by coordinates and return a `WeatherUpdated` message."""
+        """Fetch weather and air quality for coordinates."""
         # 1) Get raw API response (single call covering current/hourly/daily)
         data: dict[str, Any] = await fetch_weather(
             lat=lat,

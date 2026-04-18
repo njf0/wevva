@@ -65,6 +65,12 @@ You can launch it directly with `uvx wevva`.
 - Highlighting rows/columns updates linked weather context.
 - If a fetch fails, use `r` to retry or `s` to choose another place.
 
+## Alerts
+
+- Active weather alerts are shown on the main weather screen when present.
+- Alerts load separately from the main forecast, so slower warning providers do not hold up the rest of the UI.
+- Where a provider includes an official warning URL, `wevva` shows a direct link on the alert card.
+
 ## CLI Highlights
 
 - `wevva setup` launches guided setup for defaults.
