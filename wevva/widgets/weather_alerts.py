@@ -17,6 +17,8 @@ SEVERITY_THEME_KEYS: dict[str, str] = {
     'moderate': 'warning',
     'minor': 'accent',
 }
+
+
 class WeatherAlertCard(Static):
     """One alert card with severity-aware theme coloring."""
 
@@ -45,8 +47,8 @@ class WeatherAlertCard(Static):
     def _update_display(self) -> None:
         theme = self.app.theme_variables
         severity_key = SEVERITY_THEME_KEYS.get((self.alert.severity or '').lower())
-        severity_color = theme.get(severity_key, 'accent')
-        severity_color_text = theme.get(f'text-{severity_key}') if severity_key else None
+        severity_color = theme.get(severity_key, theme.get('accent'))
+        severity_color_text = theme.get(f'text-{severity_key}', theme.get('text-accent'))
 
         if severity_color:
             self.styles.border = ('round', severity_color)
@@ -91,9 +93,7 @@ class WeatherAlertCard(Static):
         if not url:
             return None
 
-        return Text.from_markup(
-            f'[link={url}][dim underline]View official warning[/][/]'
-        )
+        return Text.from_markup(f'[link={url}][dim underline]View official warning[/][/]')
 
     def _display_event(self) -> str:
         event = (self.alert.event or self.alert.headline or 'Weather Alert').strip()
