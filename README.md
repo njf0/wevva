@@ -83,14 +83,17 @@ uvx wevva --clear-default-location
 
 ## Weather Alerts
 
+<p align="center">
+  <img src="docs/assets/warning.PNG" alt="wevva weather alert card screenshot" width="900">
+</p>
+
 - Weather alerts are using my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many active alerts in the country.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert card so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 
-<p align="center">
-  <img src="docs/assets/warning.PNG" alt="wevva weather alert card screenshot" width="900">
-</p>
+> [!TIP]
+> Hover over the alert to show a tooltip with the full warning description from the provider.
 
 ## Library Usage
 
