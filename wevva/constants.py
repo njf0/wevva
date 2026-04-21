@@ -4,17 +4,17 @@ Keep simple numbers in one place to avoid magic values.
 """
 
 # Unit defaults and allowed values
-DEFAULT_TEMPERATURE_UNIT: str = "celsius"
-DEFAULT_WIND_SPEED_UNIT: str = "kmh"
-DEFAULT_PRECIPITATION_UNIT: str = "mm"
-DEFAULT_THEME: str = "gruvbox"
+DEFAULT_TEMPERATURE_UNIT: str = 'celsius'
+DEFAULT_WIND_SPEED_UNIT: str = 'kmh'
+DEFAULT_PRECIPITATION_UNIT: str = 'mm'
+DEFAULT_THEME: str = 'gruvbox'
 DEFAULT_EMOJI_ENABLED: bool = False
-DEFAULT_WARNING_LANGUAGE: str = "auto"
+DEFAULT_WARNING_LANGUAGE: str = 'auto'
 
-VALID_TEMPERATURE_UNITS: tuple[str, ...] = ("celsius", "fahrenheit")
-VALID_WIND_SPEED_UNITS: tuple[str, ...] = ("kmh", "ms", "mph", "kn")
-VALID_PRECIPITATION_UNITS: tuple[str, ...] = ("mm", "inch")
-VALID_WARNING_LANGUAGES: tuple[str, ...] = ("auto", "en")
+VALID_TEMPERATURE_UNITS: tuple[str, ...] = ('celsius', 'fahrenheit')
+VALID_WIND_SPEED_UNITS: tuple[str, ...] = ('kmh', 'ms', 'mph', 'kn')
+VALID_PRECIPITATION_UNITS: tuple[str, ...] = ('mm', 'inch')
+VALID_WARNING_LANGUAGES: tuple[str, ...] = ('auto', 'en')
 
 # Forecast display settings
 HOURS_WINDOW: int = 24  # Hours shown in the hourly view

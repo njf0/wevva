@@ -28,7 +28,7 @@ def normalize_emoji(emoji: str, target_width: int = 2) -> str:
 
     # Pad if needed
     if width < target_width:
-        return emoji + " " * (target_width - width)
+        return emoji + ' ' * (target_width - width)
 
     return emoji
 
@@ -56,7 +56,7 @@ def norm_character_width(cell: str, norm_width: bool = True) -> tuple[str, int]:
 
     # Pad to target width if needed
     if actual_width < target_width:
-        padded_cell = cell + " " * (target_width - actual_width)
+        padded_cell = cell + ' ' * (target_width - actual_width)
     else:
         padded_cell = cell
 
@@ -80,11 +80,11 @@ def date_suffix(day: int) -> str:
 
     """
     if not isinstance(day, int):
-        raise TypeError("day must be an integer")
+        raise TypeError('day must be an integer')
 
     # Special cases: 11th, 12th, 13th
     if 11 <= day % 100 <= 13:
-        return "th"
+        return 'th'
 
     # Regular pattern based on last digit
-    return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')

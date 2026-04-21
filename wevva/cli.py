@@ -4,6 +4,7 @@ Examples:
   wevva
   wevva -l "Edinburgh"
   wevva setup
+
 """
 
 from __future__ import annotations
@@ -35,15 +36,15 @@ app = typer.Typer(add_completion=False, invoke_without_command=True)
 # Questionary style tokens use its grammar (qmark, question, answer, pointer, etc.).
 SETUP_STYLE = Style(
     [
-        ("qmark", "fg:#5fd7ff bold"),
-        ("question", "fg:#8be9fd bold"),
-        ("answer", "fg:#50fa7b bold"),
-        ("pointer", "fg:#ffb86c bold"),
-        ("highlighted", "fg:#ffb86c bold"),
-        ("selected", "fg:#50fa7b"),
-        ("instruction", "fg:#6272a4 italic"),
-        ("text", "fg:#f8f8f2"),
-        ("disabled", "fg:#6c7086 italic"),
+        ('qmark', 'fg:#5fd7ff bold'),
+        ('question', 'fg:#8be9fd bold'),
+        ('answer', 'fg:#50fa7b bold'),
+        ('pointer', 'fg:#ffb86c bold'),
+        ('highlighted', 'fg:#ffb86c bold'),
+        ('selected', 'fg:#50fa7b'),
+        ('instruction', 'fg:#6272a4 italic'),
+        ('text', 'fg:#f8f8f2'),
+        ('disabled', 'fg:#6c7086 italic'),
     ]
 )
 
@@ -60,34 +61,35 @@ def _to_ident(name: str) -> str:
     -------
     str
         Enum-safe identifier.
+
     """
-    return "".join(ch if ch.isalnum() else "_" for ch in name).upper()
+    return ''.join(ch if ch.isalnum() else '_' for ch in name).upper()
 
 
-ThemeName = Enum("ThemeName", {_to_ident(n): n for n in BUILTIN_THEMES}, type=str)
+ThemeName = Enum('ThemeName', {_to_ident(n): n for n in BUILTIN_THEMES}, type=str)
 
 
 class TemperatureUnit(str, Enum):
     """Temperature unit options."""
 
-    CELSIUS = "celsius"
-    FAHRENHEIT = "fahrenheit"
+    CELSIUS = 'celsius'
+    FAHRENHEIT = 'fahrenheit'
 
 
 class WindSpeedUnit(str, Enum):
     """Wind speed unit options."""
 
-    KMH = "kmh"
-    MS = "ms"
-    MPH = "mph"
-    KNOTS = "kn"
+    KMH = 'kmh'
+    MS = 'ms'
+    MPH = 'mph'
+    KNOTS = 'kn'
 
 
 class PrecipitationUnit(str, Enum):
     """Precipitation unit options."""
 
-    MM = "mm"
-    INCH = "inch"
+    MM = 'mm'
+    INCH = 'inch'
 
 
 def _require_answer(answer: Any) -> Any:
@@ -102,9 +104,10 @@ def _require_answer(answer: Any) -> Any:
     -------
     Any
         Non-``None`` answer value.
+
     """
     if answer is None:
-        typer.secho("Setup cancelled.", fg=typer.colors.YELLOW)
+        typer.secho('Setup cancelled.', fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
     return answer
 
@@ -121,13 +124,14 @@ def _format_place(place: dict[str, Any]) -> str:
     -------
     str
         Human-readable location label.
+
     """
-    name = place.get("name") or "?"
-    admin = (place.get("admin") or "").replace(";", ", ")
-    country = place.get("country") or "?"
+    name = place.get('name') or '?'
+    admin = (place.get('admin') or '').replace(';', ', ')
+    country = place.get('country') or '?'
     if admin:
-        return f"{name}, {admin}, {country}"
-    return f"{name}, {country}"
+        return f'{name}, {admin}, {country}'
+    return f'{name}, {country}'
 
 
 def _location_metadata_from_place(place: dict[str, Any]) -> LocationMetadata:
@@ -142,15 +146,16 @@ def _location_metadata_from_place(place: dict[str, Any]) -> LocationMetadata:
     -------
     LocationMetadata
         Normalized location metadata object.
+
     """
     return LocationMetadata(
-        latitude=place.get("latitude"),
-        longitude=place.get("longitude"),
-        name=place.get("name") or "",
-        admin=place.get("admin") or "",
-        country=place.get("country") or "",
-        country_code=place.get("country_code") or "",
-        timezone=place.get("tz_identifier") or place.get("timezone") or "",
+        latitude=place.get('latitude'),
+        longitude=place.get('longitude'),
+        name=place.get('name') or '',
+        admin=place.get('admin') or '',
+        country=place.get('country') or '',
+        country_code=place.get('country_code') or '',
+        timezone=place.get('tz_identifier') or place.get('timezone') or '',
     )
 
 
@@ -166,17 +171,18 @@ def _location_config_from_metadata(location: LocationMetadata) -> dict[str, Any]
     -------
     dict[str, Any]
         JSON-serializable location metadata.
+
     """
     return {
-        "latitude": location.latitude,
-        "longitude": location.longitude,
-        "elevation": location.elevation,
-        "name": location.name,
-        "admin": location.admin,
-        "country": location.country,
-        "country_code": location.country_code,
-        "timezone": location.timezone,
-        "timezone_abbreviation": location.timezone_abbreviation,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'elevation': location.elevation,
+        'name': location.name,
+        'admin': location.admin,
+        'country': location.country,
+        'country_code': location.country_code,
+        'timezone': location.timezone,
+        'timezone_abbreviation': location.timezone_abbreviation,
     }
 
 
@@ -192,25 +198,24 @@ def _location_from_saved_metadata(raw: Any) -> LocationMetadata | None:
     -------
     LocationMetadata | None
         Parsed location object or ``None`` when metadata is invalid.
+
     """
     if not isinstance(raw, dict):
         return None
-    lat = raw.get("latitude")
-    lon = raw.get("longitude")
+    lat = raw.get('latitude')
+    lon = raw.get('longitude')
     if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
         return None
     return LocationMetadata(
         latitude=float(lat),
         longitude=float(lon),
-        elevation=int(raw["elevation"])
-        if isinstance(raw.get("elevation"), (int, float))
-        else None,
-        name=raw.get("name") or "",
-        admin=raw.get("admin") or "",
-        country=raw.get("country") or "",
-        country_code=raw.get("country_code") or "",
-        timezone=raw.get("timezone") or "",
-        timezone_abbreviation=raw.get("timezone_abbreviation") or "",
+        elevation=int(raw['elevation']) if isinstance(raw.get('elevation'), (int, float)) else None,
+        name=raw.get('name') or '',
+        admin=raw.get('admin') or '',
+        country=raw.get('country') or '',
+        country_code=raw.get('country_code') or '',
+        timezone=raw.get('timezone') or '',
+        timezone_abbreviation=raw.get('timezone_abbreviation') or '',
     )
 
 
@@ -228,11 +233,12 @@ def _lookup_places(query: str, *, count: int = 1) -> list[dict[str, Any]]:
     -------
     list[dict[str, Any]]
         Normalized geocoding candidates.
+
     """
     try:
-        return asyncio.run(search_places(query, count=count, language="en"))
+        return asyncio.run(search_places(query, count=count, language='en'))
     except Exception as error:
-        typer.secho(f"Geocoding failed: {error}", fg=typer.colors.RED)
+        typer.secho(f'Geocoding failed: {error}', fg=typer.colors.RED)
         return []
 
 
@@ -250,6 +256,7 @@ def _resolve_first_location(
     -------
     tuple[LocationMetadata | None, dict[str, Any] | None]
         Parsed location metadata and the raw geocoding entry.
+
     """
     results = _lookup_places(query, count=1)
     if not results:
@@ -258,9 +265,7 @@ def _resolve_first_location(
     return _location_metadata_from_place(place), place
 
 
-def _questionary_select(
-    title: str, options: list[tuple[str, str]], current: str
-) -> str:
+def _questionary_select(title: str, options: list[tuple[str, str]], current: str) -> str:
     """Show a styled single-select prompt and return selected value.
 
     Parameters
@@ -276,16 +281,12 @@ def _questionary_select(
     -------
     str
         Selected option value.
+
     """
     ordered = options[:]
     ordered.sort(key=lambda item: item[1] != current)
-    choices = [
-        Choice(title=f"{label}{' (current)' if value == current else ''}", value=value)
-        for label, value in ordered
-    ]
-    return _require_answer(
-        questionary.select(title, choices=choices, style=SETUP_STYLE).ask()
-    )
+    choices = [Choice(title=f'{label}{" (current)" if value == current else ""}', value=value) for label, value in ordered]
+    return _require_answer(questionary.select(title, choices=choices, style=SETUP_STYLE).ask())
 
 
 def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
@@ -300,59 +301,60 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
     -------
     dict[str, Any]
         Reloaded preferences after saving setup selections.
+
     """
-    typer.secho("\nWevva setup wizard\n", fg=typer.colors.CYAN, bold=True)
+    typer.secho('\nWevva setup wizard\n', fg=typer.colors.CYAN, bold=True)
 
     theme = _questionary_select(
-        "Choose default theme",
+        'Choose default theme',
         [(name, name) for name in BUILTIN_THEMES],
-        str(preferences.get("theme") or DEFAULT_THEME),
+        str(preferences.get('theme') or DEFAULT_THEME),
     )
     typer.secho(
-        "Note: emoji rendering depends on your terminal, font, and locale settings.",
+        'Note: emoji rendering depends on your terminal, font, and locale settings.',
         fg=typer.colors.YELLOW,
     )
     emoji_enabled = bool(
         _require_answer(
             questionary.confirm(
-                "Enable emoji rendering by default? (Support varies by terminal/font)",
-                default=bool(preferences.get("emoji_enabled", DEFAULT_EMOJI_ENABLED)),
+                'Enable emoji rendering by default? (Support varies by terminal/font)',
+                default=bool(preferences.get('emoji_enabled', DEFAULT_EMOJI_ENABLED)),
                 style=SETUP_STYLE,
             ).ask()
         )
     )
 
     temperature_unit = _questionary_select(
-        "Choose temperature unit",
-        [("Celsius (°C)", "celsius"), ("Fahrenheit (°F)", "fahrenheit")],
-        str(preferences.get("temperature_unit") or DEFAULT_TEMPERATURE_UNIT),
+        'Choose temperature unit',
+        [('Celsius (°C)', 'celsius'), ('Fahrenheit (°F)', 'fahrenheit')],
+        str(preferences.get('temperature_unit') or DEFAULT_TEMPERATURE_UNIT),
     )
     wind_speed_unit = _questionary_select(
-        "Choose wind speed unit",
+        'Choose wind speed unit',
         [
-            ("Kilometers per hour (km/h)", "kmh"),
-            ("Meters per second (m/s)", "ms"),
-            ("Miles per hour (mph)", "mph"),
-            ("Knots (kn)", "kn"),
+            ('Kilometers per hour (km/h)', 'kmh'),
+            ('Meters per second (m/s)', 'ms'),
+            ('Miles per hour (mph)', 'mph'),
+            ('Knots (kn)', 'kn'),
         ],
-        str(preferences.get("wind_speed_unit") or DEFAULT_WIND_SPEED_UNIT),
+        str(preferences.get('wind_speed_unit') or DEFAULT_WIND_SPEED_UNIT),
     )
     precipitation_unit = _questionary_select(
-        "Choose precipitation unit",
-        [("Millimeters (mm)", "mm"), ("Inches (in)", "inch")],
-        str(preferences.get("precipitation_unit") or DEFAULT_PRECIPITATION_UNIT),
+        'Choose precipitation unit',
+        [('Millimeters (mm)', 'mm'), ('Inches (in)', 'inch')],
+        str(preferences.get('precipitation_unit') or DEFAULT_PRECIPITATION_UNIT),
     )
     warning_language = _questionary_select(
-        "Choose warning language",
-        [("Auto (provider default)", "auto"), ("English", "en")],
-        str(preferences.get("warning_language") or DEFAULT_WARNING_LANGUAGE),
+        'Choose warning language',
+        [('Auto (provider default)', 'auto'), ('English', 'en')],
+        str(preferences.get('warning_language') or DEFAULT_WARNING_LANGUAGE),
     )
 
     use_default_location = bool(
         _require_answer(
             questionary.confirm(
-                "Set a default location?",
-                default=bool(preferences.get("default_location")),
+                'Set a default location?',
+                default=bool(preferences.get('default_location')),
                 style=SETUP_STYLE,
             ).ask()
         )
@@ -360,11 +362,11 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
     default_location: str | None = None
     default_location_metadata: dict[str, Any] | None = None
     if use_default_location:
-        current_location = str(preferences.get("default_location") or "")
+        current_location = str(preferences.get('default_location') or '')
         location_query = str(
             _require_answer(
                 questionary.text(
-                    "Location search",
+                    'Location search',
                     default=current_location,
                     style=SETUP_STYLE,
                 ).ask()
@@ -375,24 +377,19 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
             if candidates:
                 selected = _require_answer(
                     questionary.select(
-                        "Select default location",
-                        choices=[
-                            Choice(title=_format_place(place), value=place)
-                            for place in candidates
-                        ],
+                        'Select default location',
+                        choices=[Choice(title=_format_place(place), value=place) for place in candidates],
                         style=SETUP_STYLE,
                     ).ask()
                 )
                 selected_location = _location_metadata_from_place(selected)
                 default_location = _format_place(selected)
-                default_location_metadata = _location_config_from_metadata(
-                    selected_location
-                )
+                default_location_metadata = _location_config_from_metadata(selected_location)
             else:
                 save_raw = bool(
                     _require_answer(
                         questionary.confirm(
-                            "No geocoding matches found. Save raw location text anyway?",
+                            'No geocoding matches found. Save raw location text anyway?',
                             default=True,
                             style=SETUP_STYLE,
                         ).ask()
@@ -411,13 +408,11 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
         warning_language=warning_language,
         default_location_metadata=default_location_metadata,
     )
-    typer.secho("\nSetup saved.", fg=typer.colors.GREEN)
+    typer.secho('\nSetup saved.', fg=typer.colors.GREEN)
     return load_preferences()
 
 
-def _resolve_initial_location(
-    preferences: dict[str, Any], cli_location: str | None
-) -> LocationMetadata | None:
+def _resolve_initial_location(preferences: dict[str, Any], cli_location: str | None) -> LocationMetadata | None:
     """Resolve startup location with CLI and config precedence.
 
     Parameters
@@ -431,22 +426,19 @@ def _resolve_initial_location(
     -------
     LocationMetadata | None
         Initial location metadata for app startup.
+
     """
     if cli_location:
         location, _ = _resolve_first_location(cli_location)
         if location is None:
-            typer.secho(
-                "No results found; starting with search screen.", fg=typer.colors.YELLOW
-            )
+            typer.secho('No results found; starting with search screen.', fg=typer.colors.YELLOW)
         return location
 
-    from_metadata = _location_from_saved_metadata(
-        preferences.get("default_location_metadata")
-    )
+    from_metadata = _location_from_saved_metadata(preferences.get('default_location_metadata'))
     if from_metadata is not None:
         return from_metadata
 
-    saved_query = preferences.get("default_location")
+    saved_query = preferences.get('default_location')
     if isinstance(saved_query, str) and saved_query.strip():
         location, _ = _resolve_first_location(saved_query)
         if location is not None:
@@ -476,10 +468,11 @@ def _apply_default_location_mutations(
     -------
     dict[str, Any]
         Reloaded preferences after applying updates.
+
     """
     if clear_default_location:
         save_default_location(None, default_location_metadata=None)
-        typer.secho("Cleared saved default location.", fg=typer.colors.GREEN)
+        typer.secho('Cleared saved default location.', fg=typer.colors.GREEN)
 
     if set_default_location:
         location_meta, place = _resolve_first_location(set_default_location)
@@ -489,11 +482,11 @@ def _apply_default_location_mutations(
                 label,
                 default_location_metadata=_location_config_from_metadata(location_meta),
             )
-            typer.secho(f"Saved default location: {label}", fg=typer.colors.GREEN)
+            typer.secho(f'Saved default location: {label}', fg=typer.colors.GREEN)
         else:
             save_default_location(set_default_location, default_location_metadata=None)
             typer.secho(
-                "Saved location text, but geocoding failed; Wevva will retry at launch.",
+                'Saved location text, but geocoding failed; Wevva will retry at launch.',
                 fg=typer.colors.YELLOW,
             )
 
@@ -508,7 +501,7 @@ def _launch_wevva(
     emoji: bool | None,
     temperature_unit: TemperatureUnit | None,
     wind_speed_unit: WindSpeedUnit | None,
-        precipitation_unit: PrecipitationUnit | None,
+    precipitation_unit: PrecipitationUnit | None,
 ) -> None:
     """Launch the app using saved preferences with optional CLI overrides.
 
@@ -533,35 +526,20 @@ def _launch_wevva(
     -------
     None
         Runs the Textual app.
+
     """
-    final_temp = (
-        temperature_unit.value
-        if temperature_unit
-        else preferences.get("temperature_unit", DEFAULT_TEMPERATURE_UNIT)
-    )
-    final_wind = (
-        wind_speed_unit.value
-        if wind_speed_unit
-        else preferences.get("wind_speed_unit", DEFAULT_WIND_SPEED_UNIT)
-    )
+    final_temp = temperature_unit.value if temperature_unit else preferences.get('temperature_unit', DEFAULT_TEMPERATURE_UNIT)
+    final_wind = wind_speed_unit.value if wind_speed_unit else preferences.get('wind_speed_unit', DEFAULT_WIND_SPEED_UNIT)
     final_precip = (
-        precipitation_unit.value
-        if precipitation_unit
-        else preferences.get("precipitation_unit", DEFAULT_PRECIPITATION_UNIT)
+        precipitation_unit.value if precipitation_unit else preferences.get('precipitation_unit', DEFAULT_PRECIPITATION_UNIT)
     )
 
-    saved_theme = preferences.get("theme")
+    saved_theme = preferences.get('theme')
     if not isinstance(saved_theme, str) or saved_theme not in BUILTIN_THEMES:
         saved_theme = DEFAULT_THEME
     theme_name = theme.value if theme else saved_theme
-    emoji_enabled = (
-        emoji
-        if emoji is not None
-        else bool(preferences.get("emoji_enabled", DEFAULT_EMOJI_ENABLED))
-    )
-    warning_language = str(
-        preferences.get("warning_language", DEFAULT_WARNING_LANGUAGE)
-    )
+    emoji_enabled = emoji if emoji is not None else bool(preferences.get('emoji_enabled', DEFAULT_EMOJI_ENABLED))
+    warning_language = str(preferences.get('warning_language', DEFAULT_WARNING_LANGUAGE))
     initial_location = _resolve_initial_location(preferences, location)
 
     Wevva(
@@ -580,48 +558,48 @@ def main(
     ctx: typer.Context,
     location: str | None = typer.Option(
         None,
-        "--location",
-        "-l",
-        help="Location name to start at, bypassing search screen.",
+        '--location',
+        '-l',
+        help='Location name to start at, bypassing search screen.',
     ),
     set_default_location: str | None = typer.Option(
         None,
-        "--set-default-location",
-        help="Save a default location used when --location is not supplied.",
+        '--set-default-location',
+        help='Save a default location used when --location is not supplied.',
     ),
     clear_default_location: bool = typer.Option(
         False,
-        "--clear-default-location",
-        help="Clear any saved default location.",
+        '--clear-default-location',
+        help='Clear any saved default location.',
     ),
     theme: ThemeName | None = typer.Option(
         None,
-        "--theme",
-        "-t",
-        help="Textual theme to use (defaults to saved preference).",
+        '--theme',
+        '-t',
+        help='Textual theme to use (defaults to saved preference).',
     ),
     emoji: bool | None = typer.Option(
         None,
-        "--emoji/--no-emoji",
-        help="Enable or disable emoji globally (support varies by terminal/font; defaults to saved preference).",
+        '--emoji/--no-emoji',
+        help='Enable or disable emoji globally (support varies by terminal/font; defaults to saved preference).',
     ),
     temperature_unit: TemperatureUnit | None = typer.Option(
         None,
-        "--temperature-unit",
-        "-temp",
-        help="Temperature unit (defaults to saved preference)",
+        '--temperature-unit',
+        '-temp',
+        help='Temperature unit (defaults to saved preference)',
     ),
     wind_speed_unit: WindSpeedUnit | None = typer.Option(
         None,
-        "--wind-speed-unit",
-        "-wind",
-        help="Wind speed unit (defaults to saved preference)",
+        '--wind-speed-unit',
+        '-wind',
+        help='Wind speed unit (defaults to saved preference)',
     ),
     precipitation_unit: PrecipitationUnit | None = typer.Option(
         None,
-        "--precipitation-unit",
-        "-precip",
-        help="Precipitation unit (defaults to saved preference)",
+        '--precipitation-unit',
+        '-precip',
+        help='Precipitation unit (defaults to saved preference)',
     ),
 ) -> None:
     """Launch the Wevva TUI."""
@@ -645,9 +623,7 @@ def main(
 
 @app.command()
 def setup(
-    no_launch: bool = typer.Option(
-        False, "--no-launch", help="Save setup and exit without launching the TUI."
-    ),
+    no_launch: bool = typer.Option(False, '--no-launch', help='Save setup and exit without launching the TUI.'),
 ) -> None:
     """Run interactive setup for defaults using a styled questionary flow."""
     preferences = load_preferences()

@@ -33,7 +33,7 @@ class OpenMeteoForecast:
     Holds metadata, units, and the timeseries.
     """
 
-    BASE_URL = "https://api.open-meteo.com/v1/forecast"
+    BASE_URL = 'https://api.open-meteo.com/v1/forecast'
 
     def __init__(self, metadata: LocationMetadata, units: dict, timeseries: list):
         self.forecast_metadata = metadata
@@ -61,21 +61,12 @@ class OpenMeteoForecast:
         -------
         tuple[str, str, str]
             Normalized tuple of ``(temperature_unit, wind_speed_unit, precipitation_unit)``.
+
         """
-        normalized_temp = (
-            temperature_unit
-            if temperature_unit in VALID_TEMPERATURE_UNITS
-            else DEFAULT_TEMPERATURE_UNIT
-        )
-        normalized_wind = (
-            wind_speed_unit
-            if wind_speed_unit in VALID_WIND_SPEED_UNITS
-            else DEFAULT_WIND_SPEED_UNIT
-        )
+        normalized_temp = temperature_unit if temperature_unit in VALID_TEMPERATURE_UNITS else DEFAULT_TEMPERATURE_UNIT
+        normalized_wind = wind_speed_unit if wind_speed_unit in VALID_WIND_SPEED_UNITS else DEFAULT_WIND_SPEED_UNIT
         normalized_precip = (
-            precipitation_unit
-            if precipitation_unit in VALID_PRECIPITATION_UNITS
-            else DEFAULT_PRECIPITATION_UNIT
+            precipitation_unit if precipitation_unit in VALID_PRECIPITATION_UNITS else DEFAULT_PRECIPITATION_UNIT
         )
         return normalized_temp, normalized_wind, normalized_precip
 
@@ -83,9 +74,9 @@ class OpenMeteoForecast:
     def build_params(
         lat: float,
         lon: float,
-        temperature_unit: str = "celsius",
-        wind_speed_unit: str = "kmh",
-        precipitation_unit: str = "mm",
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+        precipitation_unit: str = 'mm',
     ) -> dict:
         """Build params for a single API call covering all forecast types.
 
@@ -104,73 +95,71 @@ class OpenMeteoForecast:
 
         """
         params = {
-            "latitude": lat,
-            "longitude": lon,
-            "timezone": "auto",
-            "current": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "apparent_temperature",
-                "precipitation_probability",
-                "precipitation",
-                "weather_code",
-                "surface_pressure",
-                "is_day",
-                "cloud_cover",
-                "visibility",
-                "wind_speed_10m",
-                "wind_gusts_10m",
-                "wind_direction_10m",
-                "uv_index",
+            'latitude': lat,
+            'longitude': lon,
+            'timezone': 'auto',
+            'current': [
+                'temperature_2m',
+                'relative_humidity_2m',
+                'apparent_temperature',
+                'precipitation_probability',
+                'precipitation',
+                'weather_code',
+                'surface_pressure',
+                'is_day',
+                'cloud_cover',
+                'visibility',
+                'wind_speed_10m',
+                'wind_gusts_10m',
+                'wind_direction_10m',
+                'uv_index',
             ],
-            "hourly": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "apparent_temperature",
-                "precipitation_probability",
-                "precipitation",
-                "rain",
-                "showers",
-                "snowfall",
-                "is_day",
-                "weather_code",
-                "surface_pressure",
-                "cloud_cover",
-                "visibility",
-                "wind_speed_10m",
-                "wind_gusts_10m",
-                "wind_direction_10m",
-                "uv_index",
+            'hourly': [
+                'temperature_2m',
+                'relative_humidity_2m',
+                'apparent_temperature',
+                'precipitation_probability',
+                'precipitation',
+                'rain',
+                'showers',
+                'snowfall',
+                'is_day',
+                'weather_code',
+                'surface_pressure',
+                'cloud_cover',
+                'visibility',
+                'wind_speed_10m',
+                'wind_gusts_10m',
+                'wind_direction_10m',
+                'uv_index',
             ],
-            "daily": [
-                "weather_code",
-                "temperature_2m_max",
-                "temperature_2m_min",
-                "sunrise",
-                "sunset",
-                "daylight_duration",
-                "precipitation_sum",
-                "precipitation_probability_max",
-                "wind_speed_10m_max",
-                "wind_gusts_10m_max",
-                "wind_direction_10m_dominant",
+            'daily': [
+                'weather_code',
+                'temperature_2m_max',
+                'temperature_2m_min',
+                'sunrise',
+                'sunset',
+                'daylight_duration',
+                'precipitation_sum',
+                'precipitation_probability_max',
+                'wind_speed_10m_max',
+                'wind_gusts_10m_max',
+                'wind_direction_10m_dominant',
             ],
         }
 
         # Normalize unit choices and only send params when they differ from API defaults.
-        temperature_unit, wind_speed_unit, precipitation_unit = (
-            OpenMeteoForecast.normalize_units(
-                temperature_unit,
-                wind_speed_unit,
-                precipitation_unit,
-            )
+        temperature_unit, wind_speed_unit, precipitation_unit = OpenMeteoForecast.normalize_units(
+            temperature_unit,
+            wind_speed_unit,
+            precipitation_unit,
         )
         if temperature_unit != DEFAULT_TEMPERATURE_UNIT:
-            params["temperature_unit"] = temperature_unit
+            params['temperature_unit'] = temperature_unit
         if wind_speed_unit != DEFAULT_WIND_SPEED_UNIT:
-            params["wind_speed_unit"] = wind_speed_unit
+            params['wind_speed_unit'] = wind_speed_unit
         if precipitation_unit != DEFAULT_PRECIPITATION_UNIT:
-            params["precipitation_unit"] = precipitation_unit
+            params['precipitation_unit'] = precipitation_unit
 
         return params
 
@@ -179,14 +168,12 @@ class OpenMeteoForecast:
         cls,
         lat: float,
         lon: float,
-        temperature_unit: str = "celsius",
-        wind_speed_unit: str = "kmh",
-        precipitation_unit: str = "mm",
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+        precipitation_unit: str = 'mm',
     ) -> dict:
         """Fetch the full Open-Meteo API response for all forecast types."""
-        params = cls.build_params(
-            lat, lon, temperature_unit, wind_speed_unit, precipitation_unit
-        )
+        params = cls.build_params(lat, lon, temperature_unit, wind_speed_unit, precipitation_unit)
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(cls.BASE_URL, params=params)
             response.raise_for_status()
@@ -196,19 +183,17 @@ class OpenMeteoForecast:
     def extract_metadata(response: dict) -> LocationMetadata:
         # Return LocationMetadata with API-provided fields
         return LocationMetadata(
-            latitude=response.get("latitude"),
-            longitude=response.get("longitude"),
-            elevation=int(response.get("elevation", 0))
-            if response.get("elevation") is not None
-            else None,
-            timezone=response.get("timezone") or "",
-            timezone_abbreviation=response.get("timezone_abbreviation") or "",
+            latitude=response.get('latitude'),
+            longitude=response.get('longitude'),
+            elevation=int(response.get('elevation', 0)) if response.get('elevation') is not None else None,
+            timezone=response.get('timezone') or '',
+            timezone_abbreviation=response.get('timezone_abbreviation') or '',
         )
 
     @staticmethod
     def extract_units(response: dict, key: str) -> dict:
         """Extract units dict from API response, returning as-is."""
-        return response.get(f"{key}_units", {})
+        return response.get(f'{key}_units', {})
 
     def _get_metadata(
         self,
@@ -216,13 +201,11 @@ class OpenMeteoForecast:
     ) -> LocationMetadata:
         """Store metadata (latitude, longitude, elevation, timezone)."""
         self.forecast_metadata = LocationMetadata(
-            latitude=response.get("latitude"),
-            longitude=response.get("longitude"),
-            elevation=int(response.get("elevation", 0))
-            if response.get("elevation") is not None
-            else None,
-            timezone=response.get("timezone") or "",
-            timezone_abbreviation=response.get("timezone_abbreviation") or "",
+            latitude=response.get('latitude'),
+            longitude=response.get('longitude'),
+            elevation=int(response.get('elevation', 0)) if response.get('elevation') is not None else None,
+            timezone=response.get('timezone') or '',
+            timezone_abbreviation=response.get('timezone_abbreviation') or '',
         )
         return self.forecast_metadata
 
@@ -232,7 +215,7 @@ class OpenMeteoForecast:
         key: str,
     ) -> Dict[str, str]:
         """Store units for the forecast variables (hourly/daily/etc)."""
-        units = response.get(f"{key}_units", {})
+        units = response.get(f'{key}_units', {})
         self.forecast_units.update(units)
 
     def get_point(self, offset: int = 0) -> Optional[Dict[str, Any]]:
@@ -259,7 +242,7 @@ class CurrentOpenMeteoForecast(OpenMeteoForecast):
         result = [{}]
         for key, value in ts.items():
             processed_value = value
-            if key == "time":
+            if key == 'time':
                 entry_time = datetime.fromisoformat(value)
                 if entry_time.tzinfo is None:
                     entry_time = entry_time.replace(tzinfo=tzinfo)
@@ -278,60 +261,60 @@ class CurrentOpenMeteoForecast(OpenMeteoForecast):
         self._get_metadata(full_api_response)
 
         # Parse and store units by supplying the 'daily' section
-        self._get_units(full_api_response, "current")
+        self._get_units(full_api_response, 'current')
 
         # Parse timeseries by supplying the full response
         self._get_timeseries(full_api_response)
 
     def get_time(self) -> str:
         """Get the time of the current weather observation."""
-        t = self.forecast_timeseries[0].get("time")
+        t = self.forecast_timeseries[0].get('time')
         if isinstance(t, str):
             t = datetime.fromisoformat(t)
-        return t.isoformat() if t else ""
+        return t.isoformat() if t else ''
 
     def get_temperature(self) -> float | None:
         """Get air temperature at 2m."""
-        return round(self.forecast_timeseries[0].get("temperature_2m"))
+        return round(self.forecast_timeseries[0].get('temperature_2m'))
 
     def get_feels_like(self) -> float | None:
         """Get apparent temperature (feels like)."""
-        return round(self.forecast_timeseries[0].get("apparent_temperature"))
+        return round(self.forecast_timeseries[0].get('apparent_temperature'))
 
     def get_humidity(self) -> float | None:
         """Get relative humidity at 2m."""
-        return round(self.forecast_timeseries[0].get("relative_humidity_2m"))
+        return round(self.forecast_timeseries[0].get('relative_humidity_2m'))
 
     def get_wind_speed(self) -> float | None:
         """Get wind speed at 10m in the configured API unit."""
-        ws = self.forecast_timeseries[0].get("wind_speed_10m")
+        ws = self.forecast_timeseries[0].get('wind_speed_10m')
         return round(ws) if ws is not None else None
 
     def get_wind_gust(self) -> float | None:
         """Get wind gusts at 10m in the configured API unit."""
-        gust = self.forecast_timeseries[0].get("wind_gusts_10m")
+        gust = self.forecast_timeseries[0].get('wind_gusts_10m')
         return round(gust) if gust is not None else None
 
     def get_wind_direction(self) -> float | None:
         """Get wind direction at 10m (degrees, may not be present)."""
-        return self.forecast_timeseries[0].get("wind_direction_10m")
+        return self.forecast_timeseries[0].get('wind_direction_10m')
 
     def get_pressure(self) -> float | None:
         """Get surface pressure (may not be present)."""
-        return round(self.forecast_timeseries[0].get("surface_pressure"))
+        return round(self.forecast_timeseries[0].get('surface_pressure'))
 
     def get_precipitation(self) -> float | None:
         """Get precipitation (mm or %, may not be present)."""
-        return self.forecast_timeseries[0].get("precipitation")
+        return self.forecast_timeseries[0].get('precipitation')
 
     def get_condition(self) -> str:
         """Get weather code or description (not always present in current endpoint)."""
-        code = self.forecast_timeseries[0].get("weather_code")
-        return str(code) if code is not None else ""
+        code = self.forecast_timeseries[0].get('weather_code')
+        return str(code) if code is not None else ''
 
     def get_is_day(self) -> int | None:
         """Get is_day flag (1 for day, 0 for night, may not be present)."""
-        return self.forecast_timeseries[0].get("is_day")
+        return self.forecast_timeseries[0].get('is_day')
 
 
 class HourlyOpenMeteoForecast(OpenMeteoForecast):
@@ -346,7 +329,7 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
         if not ts:
             self.forecast_timeseries = []
             return
-        times = ts.get("time", [])
+        times = ts.get('time', [])
         variables = list(ts.keys())
         tz_name = self.forecast_metadata.timezone
         tzinfo = ZoneInfo(tz_name)
@@ -366,18 +349,16 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
         # Keep all future hours provided by the API (allows tabbing across days)
         for idx in range(start_idx, len(times)):
             entry = {var: ts[var][idx] for var in variables}
-            entry_time = datetime.fromisoformat(entry["time"])
+            entry_time = datetime.fromisoformat(entry['time'])
             if entry_time.tzinfo is None:
                 entry_time = entry_time.replace(tzinfo=tzinfo)
-            entry["time"] = entry_time
+            entry['time'] = entry_time
             # Compute a display emoji now so widgets can rely on it (handles clear-night crescent)
-            code = entry.get("weather_code")
+            code = entry.get('weather_code')
             cond = get_condition(code) if code is not None else None
             if cond:
-                is_day_flag = entry.get("is_day")
-                entry["weather_emoji"] = (
-                    cond.night_emoji if is_day_flag == 0 else cond.day_emoji
-                )
+                is_day_flag = entry.get('is_day')
+                entry['weather_emoji'] = cond.night_emoji if is_day_flag == 0 else cond.day_emoji
 
             result.append(entry)
         self.forecast_timeseries = result
@@ -393,98 +374,94 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
         self._get_metadata(full_api_response)
 
         # Parse and store units by supplying the 'hourly' section
-        self._get_units(full_api_response, "hourly")
+        self._get_units(full_api_response, 'hourly')
 
         # Parse timeseries by supplying the full response
         self._get_timeseries(full_api_response)
 
     def get_temperature(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("temperature_2m")
+        return point.get('temperature_2m')
 
     def get_humidity(self, offset: int = 0) -> float | None:
         """Get relative humidity at 2m for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("relative_humidity_2m"))
+        return round(point.get('relative_humidity_2m'))
 
     def get_feels_temperature(self, offset: int = 0) -> float | None:
         """Get apparent temperature at 2m for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("apparent_temperature"))
+        return round(point.get('apparent_temperature'))
 
     def get_precipitation_probability(self, offset: int = 0) -> float | None:
         """Get precipitation probability for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("precipitation_probability"))
+        return round(point.get('precipitation_probability'))
 
     def get_precipitation(self, offset: int = 0) -> float | None:
         """Get precipitation for a given hour."""
         point = self.get_point(offset)
-        return point.get("precipitation")
+        return point.get('precipitation')
 
     def get_rain(self, offset: int = 0) -> float | None:
         """Get rain amount for a given hour."""
         point = self.get_point(offset)
-        return point.get("rain")
+        return point.get('rain')
 
     def get_showers(self, offset: int = 0) -> float | None:
         """Get showers amount for a given hour."""
         point = self.get_point(offset)
-        return point.get("showers")
+        return point.get('showers')
 
     def get_snowfall(self, offset: int = 0) -> float | None:
         """Get snowfall amount for a given hour."""
         point = self.get_point(offset)
-        return point.get("snowfall")
+        return point.get('snowfall')
 
     def get_weather_code(self, offset: int = 0, return_emoji: bool = False) -> str:
         """Get weather code for a given hour."""
         point = self.get_point(offset)
-        code = point.get("weather_code")
+        code = point.get('weather_code')
         cond = get_condition(code) if code is not None else None
         if not cond:
             return str(code)
         if return_emoji:
             # Prefer precomputed emoji (set during parsing), fall back to cond + is_day
-            return point.get("weather_emoji") or (
-                cond.night_emoji if point.get("is_day") == 0 else cond.day_emoji
-            )
+            return point.get('weather_emoji') or (cond.night_emoji if point.get('is_day') == 0 else cond.day_emoji)
         return cond.name
 
     # New helpers for abbreviation/emoji
     def get_condition_abbreviation(self, offset: int = 0) -> str:
         point = self.get_point(offset)
-        code = point.get("weather_code")
+        code = point.get('weather_code')
         cond = get_condition(code) if code is not None else None
         return cond.abbr if cond else str(code)
 
     def get_condition_emoji(self, offset: int = 0) -> str:
         point = self.get_point(offset)
-        code = point.get("weather_code")
+        code = point.get('weather_code')
         cond = get_condition(code) if code is not None else None
         if not cond:
-            return ""
+            return ''
         # Prefer precomputed emoji (set during parsing)
-        return point.get("weather_emoji") or (
-            cond.night_emoji if point.get("is_day") == 0 else cond.day_emoji
-        )
+        return point.get('weather_emoji') or (cond.night_emoji if point.get('is_day') == 0 else cond.day_emoji)
 
     def get_surface_pressure(self, offset: int = 0) -> float | None:
         """Get surface pressure for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("surface_pressure"))
+        return round(point.get('surface_pressure'))
 
     def get_cloud_cover(self, offset: int = 0) -> float | None:
         """Get cloud cover for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("cloud_cover"))
+        return round(point.get('cloud_cover'))
 
     def get_visibility(self, offset: int = 0) -> float | None:
         """Get visibility for a given hour."""
         point = self.get_point(offset)
         if not point:
             return None
-        vis = point.get("visibility")
+        vis = point.get('visibility')
         if vis is None:
             return None
         # Open-Meteo returns visibility in meters; we display rounded kilometers.
@@ -494,46 +471,46 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
     def get_wind_speed(self, offset: int = 0) -> float | None:
         """Get wind speed at 10m for a given hour in the configured API unit."""
         point = self.get_point(offset)
-        return point.get("wind_speed_10m")
+        return point.get('wind_speed_10m')
 
     def get_wind_gust(self, offset: int = 0) -> float | None:
         """Get wind gusts at 10m for a given hour in the configured API unit."""
         point = self.get_point(offset)
-        return round(point.get("wind_gusts_10m"))
+        return round(point.get('wind_gusts_10m'))
 
     def get_wind_direction(self, offset: int = 0) -> float | None:
         """Get wind direction at 10m for a given hour."""
         point = self.get_point(offset)
-        return bearing_to_direction(point.get("wind_direction_10m"))
+        return bearing_to_direction(point.get('wind_direction_10m'))
 
     def get_uv_index(self, offset: int = 0) -> float | None:
         """Get UV index for a given hour."""
         point = self.get_point(offset)
-        return round(point.get("uv_index"))
+        return round(point.get('uv_index'))
 
     def get_us_aqi(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("us_aqi")
+        return point.get('us_aqi')
 
     def get_european_aqi(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("european_aqi")
+        return point.get('european_aqi')
 
     def get_pm2_5(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("pm2_5")
+        return point.get('pm2_5')
 
     def get_pm10(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("pm10")
+        return point.get('pm10')
 
     def get_ozone(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("ozone")
+        return point.get('ozone')
 
     def get_grass_pollen(self, offset: int = 0) -> float | None:
         point = self.get_point(offset)
-        return point.get("grass_pollen")
+        return point.get('grass_pollen')
 
 
 class DailyOpenMeteoForecast(OpenMeteoForecast):
@@ -548,15 +525,15 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         if not ts:
             self.forecast_timeseries = []
             return
-        times = ts.get("time", [])
+        times = ts.get('time', [])
         variables = list(ts.keys())
 
         result = []
         for idx, _ in enumerate(times):
             entry = {var: ts[var][idx] for var in variables}
-            if "time" in entry:
-                entry["time"] = datetime.fromisoformat(entry["time"]).date()
-            for field in ("sunrise", "sunset"):
+            if 'time' in entry:
+                entry['time'] = datetime.fromisoformat(entry['time']).date()
+            for field in ('sunrise', 'sunset'):
                 if field in entry:
                     entry[field] = datetime.fromisoformat(entry[field])
             result.append(entry)
@@ -573,7 +550,7 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         self._get_metadata(full_api_response)
 
         # Parse and store units by supplying the 'daily' section
-        self._get_units(full_api_response, "daily")
+        self._get_units(full_api_response, 'daily')
 
         # Parse timeseries by supplying the full response
         self._get_timeseries(full_api_response)
@@ -583,31 +560,31 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("temperature_2m_min")
+        return point.get('temperature_2m_min')
 
     def get_temperature_max(self, offset: int = 0) -> float | None:
         """Get maximum 2m temperature for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("temperature_2m_max")
+        return point.get('temperature_2m_max')
 
     def get_precipitation(self, offset: int = 0) -> float | None:
         """Get precipitation sum for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("precipitation_sum")
+        return point.get('precipitation_sum')
 
     def get_precipitation_probability(self, offset: int = 0) -> float | None:
         """Get precipitation probability for a given day (not always present)."""
         point = self.get_point(offset)
-        return round(point.get("precipitation_probability_max"))
+        return round(point.get('precipitation_probability_max'))
 
     def get_weather_code(self, offset: int = 0, return_emoji: bool = False) -> str:
         """Get weather code for a given day."""
         point = self.get_point(offset)
-        code = point.get("weather_code")
+        code = point.get('weather_code')
         cond = get_condition(code) if code is not None else None
         if not cond:
             return str(code)
@@ -617,7 +594,7 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
 
     def get_condition_abbreviation(self, offset: int = 0) -> str:
         point = self.get_point(offset)
-        code = point.get("weather_code")
+        code = point.get('weather_code')
         cond = get_condition(code) if code is not None else None
         return cond.abbr if cond else str(code)
 
@@ -626,42 +603,42 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("wind_speed_10m_max")
+        return point.get('wind_speed_10m_max')
 
     def get_wind_gust(self, offset: int = 0) -> float | None:
         """Get max wind gusts at 10m for a given day in the configured API unit."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("wind_gusts_10m_max")
+        return point.get('wind_gusts_10m_max')
 
     def get_wind_direction(self, offset: int = 0) -> float | None:
         """Get dominant wind direction at 10m for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return bearing_to_direction(point.get("wind_direction_10m_dominant"))
+        return bearing_to_direction(point.get('wind_direction_10m_dominant'))
 
     def get_sunrise(self, offset: int = 0) -> Optional[str]:
         """Get sunrise time for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("sunrise")
+        return point.get('sunrise')
 
     def get_sunset(self, offset: int = 0) -> Optional[str]:
         """Get sunset time for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("sunset")
+        return point.get('sunset')
 
     def get_daylight_duration(self, offset: int = 0) -> Optional[int]:
         """Get daylight duration (in seconds) for a given day."""
         point = self.get_point(offset)
         if not point:
             return None
-        return point.get("daylight_duration")
+        return point.get('daylight_duration')
 
 
 # def fetch_all_forecasts(lat: float, lon: float):
@@ -677,7 +654,7 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
 #     return current, hourly, daily
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import asyncio
 
     async def main():
@@ -685,12 +662,12 @@ if __name__ == "__main__":
         lat, lon = 51.5074, -0.1278  # London
         response = await OpenMeteoForecast.fetch_all(lat, lon)
         metadata = OpenMeteoForecast.extract_metadata(response)
-        daily_units = OpenMeteoForecast.extract_units(response, "daily")
-        daily = DailyOpenMeteoForecast(metadata, daily_units, response.get("daily", {}))
+        daily_units = OpenMeteoForecast.extract_units(response, 'daily')
+        daily = DailyOpenMeteoForecast(metadata, daily_units, response.get('daily', {}))
 
-        print("Metadata:")
+        print('Metadata:')
         print(metadata)
-        print("Sunset tomorrow:")
-        print(f" {daily.get_sunset(1)}")
+        print('Sunset tomorrow:')
+        print(f' {daily.get_sunset(1)}')
 
     asyncio.run(main())

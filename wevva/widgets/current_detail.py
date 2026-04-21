@@ -34,30 +34,22 @@ class CurrentDetailTable(DataTable):
     def __init__(
         self,
         *,
-        id: str = "current-weather-detail-table",
-        classes: str = "weather-widget",
+        id: str = 'current-weather-detail-table',
+        classes: str = 'weather-widget',
     ):
-        super().__init__(show_header=False, cursor_type="none", id=id, classes=classes)
-        self.border_title = "Detail"
-        self.add_column("Field", key="field")
-        self.add_column("Value", key="value", width=7)
+        super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
+        self.border_title = 'Detail'
+        self.add_column('Field', key='field')
+        self.add_column('Value', key='value', width=7)
+        self.add_row(Text('Humidity', style='dim'), Text('', style='bold'), key='humidity')
+        self.add_row(Text('Cloud Cov.', style='dim'), Text('', style='bold'), key='cloud_cover')
         self.add_row(
-            Text("Cloud Cov.", style="dim"), Text("", style="bold"), key="cloud_cover"
+            Text('Visibility', style='dim'),
+            Text('', style='bold'),
+            key='visibility',
         )
-        self.add_row(
-            Text("Humidity", style="dim"), Text("", style="bold dim"), key="humidity"
-        )
-        self.add_row(
-            Text("UV Index", style="dim"), Text("", style="bold dim"), key="uv_index"
-        )
-        self.add_row(
-            Text("Visibility", style="dim"),
-            Text("", style="bold dim"),
-            key="visibility",
-        )
-        self.add_row(
-            Text("Pressure", style="dim"), Text("", style="bold dim"), key="pressure"
-        )
+        self.add_row(Text('UV Index', style='dim'), Text('', style='bold'), key='uv_index')
+        self.add_row(Text('Pressure', style='dim'), Text('', style='bold'), key='pressure')
 
     def on_mount(
         self,
@@ -90,17 +82,15 @@ class CurrentDetailTable(DataTable):
 
         # Field configuration: (row_key, getter_method_name, theme_color_key, unit_key, display_unit)
         fields = [
-            ("cloud_cover", "get_cloud_cover", "foreground", "cloud_cover", None),
-            ("humidity", "get_humidity", "secondary", "relative_humidity_2m", None),
-            ("uv_index", "get_uv_index", "warning", "uv_index", None),
-            ("visibility", "get_visibility", "accent", None, "km"),
-            ("pressure", "get_surface_pressure", "error", "surface_pressure", None),
+            ('cloud_cover', 'get_cloud_cover', 'text-primary', 'cloud_cover', None),
+            ('humidity', 'get_humidity', 'text-secondary', 'relative_humidity_2m', None),
+            ('visibility', 'get_visibility', 'text-warning', None, 'km'),
+            ('uv_index', 'get_uv_index', 'text-accent', 'uv_index', None),
+            ('pressure', 'get_surface_pressure', 'text-error', 'surface_pressure', None),
         ]
 
         for row_key, getter_name, color_key, unit_key, display_unit in fields:
-            self._update_detail_cell(
-                row_key, getter_name, theme_vars.get(color_key), unit_key, display_unit
-            )
+            self._update_detail_cell(row_key, getter_name, theme_vars.get(color_key), unit_key, display_unit)
 
         self.refresh()
 
@@ -129,9 +119,9 @@ class CurrentDetailTable(DataTable):
         if display_unit:
             unit = display_unit
         elif unit_key:
-            unit = self.hourly_model.forecast_units.get(unit_key, "")
+            unit = self.hourly_model.forecast_units.get(unit_key, '')
         else:
-            unit = ""
+            unit = ''
 
-        text = Text.from_markup(f"[bold {colour}]{value}[/][{colour}]{unit}[/]")
-        self.update_cell(row_key, "value", text, update_width=True)
+        text = Text.from_markup(f'[bold {colour}]{value}[/][{colour}]{unit}[/]')
+        self.update_cell(row_key, 'value', text, update_width=True)

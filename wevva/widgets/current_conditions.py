@@ -37,15 +37,15 @@ class CurrentConditions(Container):
 
     def compose(self) -> ComposeResult:
         """Create the temp/rain/wind tiles and the detail table."""
-        yield WeatherWidget("Temperature", id="ww-temp")
+        yield WeatherWidget('Temperature', id='ww-temp')
         yield PrecipWidget()
-        yield WeatherWidget("Wind", id="ww-wind")
+        yield WeatherWidget('Wind', id='ww-wind')
         yield CurrentDetailTable()
 
     # Property accessors for child widgets
     @property
     def temp(self) -> WeatherWidget:
-        return self.query_one("#ww-temp", WeatherWidget)
+        return self.query_one('#ww-temp', WeatherWidget)
 
     @property
     def precip(self) -> PrecipWidget:
@@ -53,7 +53,7 @@ class CurrentConditions(Container):
 
     @property
     def wind(self) -> WeatherWidget:
-        return self.query_one("#ww-wind", WeatherWidget)
+        return self.query_one('#ww-wind', WeatherWidget)
 
     @property
     def detail(self) -> CurrentDetailTable:
@@ -98,15 +98,15 @@ class CurrentConditions(Container):
         feels = self.hourly_model.get_feels_temperature(self.hour_index)
 
         # Get temperature unit from app for color scale
-        temp_unit = getattr(self.app, "temperature_unit", "celsius")
+        temp_unit = getattr(self.app, 'temperature_unit', 'celsius')
         colour = temp_colour(t, hex=True, unit=temp_unit)
         feels_colour = temp_colour(feels, hex=True, unit=temp_unit)
 
-        t_unit = self.hourly_model.forecast_units.get("temperature_2m", "°C")
+        t_unit = self.hourly_model.forecast_units.get('temperature_2m', '°C')
 
         self.temp.set(
             t,
-            f"[i]Feels like [{feels_colour}]{feels}{t_unit}[/]",
+            f'[i]Feels like [{feels_colour}]{feels}{t_unit}[/]',
             colour=colour,
             units=t_unit,
         )
@@ -117,23 +117,19 @@ class CurrentConditions(Container):
         gust = self.hourly_model.get_wind_gust(self.hour_index)
         wdir = self.hourly_model.get_wind_direction(self.hour_index)
 
-        ws_unit = self.hourly_model.forecast_units.get("wind_speed_10m", "mph")
+        ws_unit = self.hourly_model.forecast_units.get('wind_speed_10m', 'mph')
         theme_vars = self.app.theme_variables
 
         # Colour based on wind speed
-        wind_max = theme_vars["accent"]
-        s_colour = wind_colour(
-            ws, hex=True, min_colour=theme_vars["foreground"], max_colour=wind_max
-        )
-        g_colour = wind_colour(
-            gust, hex=True, min_colour=theme_vars["foreground"], max_colour=wind_max
-        )
+        wind_max = theme_vars['accent']
+        s_colour = wind_colour(ws, hex=True, min_colour=theme_vars['foreground'], max_colour=wind_max)
+        g_colour = wind_colour(gust, hex=True, min_colour=theme_vars['foreground'], max_colour=wind_max)
 
         self.wind.set(
             ws,
-            f"[i]Gusts of [dim {g_colour}]{gust}{ws_unit}[/]",
+            f'[i]Gusts of [dim {g_colour}]{gust}{ws_unit}[/]',
             colour=s_colour,
-            units=f"{ws_unit} {wdir}",
+            units=f'{ws_unit} {wdir}',
         )
 
     # Messages ------------------------------------------------------------

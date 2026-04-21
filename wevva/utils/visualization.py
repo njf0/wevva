@@ -24,9 +24,9 @@ def create_temp_blocks(temps: list[float], width: int = 3) -> list[str]:
 
     if temp_range == 0:
         # All temps are the same - use mid-level block
-        return ["▄" * width] * len(temps)
+        return ['▄' * width] * len(temps)
 
-    blocks = "▁▂▃▄▅▆▇█"
+    blocks = '▁▂▃▄▅▆▇█'
 
     result = []
     for temp in temps:
@@ -49,7 +49,7 @@ def create_rain_blocks(rain: list[float], width: int = 3) -> list[str]:
         List of block strings, one per rain value
 
     """
-    blocks = "▁▂▃▄▅▆▇█"
+    blocks = '▁▂▃▄▅▆▇█'
 
     result = []
     for value in rain:

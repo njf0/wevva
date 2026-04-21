@@ -33,7 +33,7 @@ async def search_places(
     query: str,
     *,
     count: int = SEARCH_MAX_RESULTS,
-    language: str = "en",
+    language: str = 'en',
     timeout: float = REQUEST_TIMEOUT_S,
 ) -> list[dict[str, Any]]:
     """Find places and return simple entries.
@@ -48,11 +48,11 @@ async def search_places(
 
     async with httpx.AsyncClient() as client:
         qp = quote_plus(q)
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={qp}&count={count}&language={language}&format=json"
+        url = f'https://geocoding-api.open-meteo.com/v1/search?name={qp}&count={count}&language={language}&format=json'
         resp = await client.get(url, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
-        results = data.get("results", [])
+        results = data.get('results', [])
 
     return normalize_places(results)
 
@@ -62,7 +62,7 @@ async def reverse_geocode(
     longitude: float,
     *,
     count: int = 1,
-    language: str = "en",
+    language: str = 'en',
     timeout: float = REQUEST_TIMEOUT_S,
 ) -> list[dict[str, Any]]:
     """Backward-compatible alias for coordinate geocoding."""
@@ -80,7 +80,7 @@ async def geocode_coordinates(
     longitude: float,
     *,
     count: int = 1,
-    language: str = "en",
+    language: str = 'en',
     timeout: float = REQUEST_TIMEOUT_S,
     max_distance_km: float = 300.0,
 ) -> list[dict[str, Any]]:
@@ -90,7 +90,7 @@ async def geocode_coordinates(
     uses coordinate text with the search endpoint and ranks by nearest match.
     Results may be empty for some coordinates.
     """
-    query = f"{latitude:.5f},{longitude:.5f}"
+    query = f'{latitude:.5f},{longitude:.5f}'
     try:
         candidates = await search_places(
             query,
@@ -103,8 +103,8 @@ async def geocode_coordinates(
 
     ranked: list[tuple[float, dict[str, Any]]] = []
     for place in candidates:
-        lat = place.get("latitude")
-        lon = place.get("longitude")
+        lat = place.get('latitude')
+        lon = place.get('longitude')
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
             continue
         distance_km = haversine_km(latitude, longitude, float(lat), float(lon))
@@ -124,34 +124,37 @@ def normalize_places(results: Any) -> list[dict[str, Any]]:
     for place in results:
         if not isinstance(place, dict):
             continue
-        name = place.get("name", "")
-        country_name = place.get("country", "")
-        country_code = place.get("country_code", "")
+        name = place.get('name', '')
+        country_name = place.get('country', '')
+        country_code = place.get('country_code', '')
         if not country_name:
             matched = pycountry.countries.get(alpha_2=country_code)
             try:
-                country_name = matched.name if matched else "?"
+                country_name = matched.name if matched else '?'
             except AttributeError:
-                country_name = "?"
-        lat = place.get("latitude")
-        lon = place.get("longitude")
-        tz_identifier = place.get("timezone", "")
-        admin1 = place.get("admin1", "")
-        admin2 = place.get("admin2", "")
-        admin3 = place.get("admin3", "")
-        admin4 = place.get("admin4", "")
+                country_name = '?'
+        lat = place.get('latitude')
+        lon = place.get('longitude')
+        tz_identifier = place.get('timezone', '')
+        admin1 = place.get('admin1', '')
+        admin2 = place.get('admin2', '')
+        admin3 = place.get('admin3', '')
+        admin4 = place.get('admin4', '')
         admin_parts = [a for a in [admin1, admin2, admin3, admin4] if a][:2][::-1]
-        admin_str = ";".join(admin_parts)
+        admin_str = ';'.join(admin_parts)
+
+        if lat is None or lon is None:
+            continue
 
         normalized.append(
             {
-                "latitude": lat,
-                "longitude": lon,
-                "name": name,
-                "admin": admin_str,
-                "country_code": country_code,
-                "country": country_name,
-                "tz_identifier": tz_identifier,
+                'latitude': lat,
+                'longitude': lon,
+                'name': name,
+                'admin': admin_str,
+                'country_code': country_code,
+                'country': country_name,
+                'tz_identifier': tz_identifier,
             }
         )
 
@@ -168,9 +171,6 @@ def haversine_km(
     radius_km = 6371.0
     d_lat = radians(lat2 - lat1)
     d_lon = radians(lon2 - lon1)
-    a = (
-        sin(d_lat / 2) ** 2
-        + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
-    )
+    a = sin(d_lat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
     c = 2 * asin(sqrt(a))
     return radius_km * c

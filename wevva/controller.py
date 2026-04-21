@@ -29,9 +29,9 @@ class WeatherController:
 
     def __init__(
         self,
-        temperature_unit: str = "celsius",
-        wind_speed_unit: str = "kmh",
-        precipitation_unit: str = "mm",
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+        precipitation_unit: str = 'mm',
     ):
         """Initialize controller with unit preferences.
 
@@ -45,9 +45,7 @@ class WeatherController:
         self.wind_speed_unit = wind_speed_unit
         self.precipitation_unit = precipitation_unit
 
-    async def fetch(
-        self, *, lat: float, lon: float, country_code: str = ""
-    ) -> WeatherUpdated:
+    async def fetch(self, *, lat: float, lon: float, country_code: str = '') -> WeatherUpdated:
         """Fetch weather and air quality for coordinates."""
         # 1) Get raw API response (single call covering current/hourly/daily)
         data: dict[str, Any] = await fetch_weather(
@@ -62,14 +60,14 @@ class WeatherController:
         meta = OpenMeteoForecast.extract_metadata(data)
 
         # 3) Extract API-provided units for each forecast section
-        units_current = OpenMeteoForecast.extract_units(data, key="current")
-        units_hourly = OpenMeteoForecast.extract_units(data, key="hourly")
-        units_daily = OpenMeteoForecast.extract_units(data, key="daily")
+        units_current = OpenMeteoForecast.extract_units(data, key='current')
+        units_hourly = OpenMeteoForecast.extract_units(data, key='hourly')
+        units_daily = OpenMeteoForecast.extract_units(data, key='daily')
 
         # 4) Fetch air quality data (hourly)
 
         # Use the same time window as the weather hourly timeseries
-        times = data.get("hourly", {}).get("time", [])
+        times = data.get('hourly', {}).get('time', [])
         start = times[0] if times else None
         end = times[-1] if times else None
         air_quality = None
@@ -77,18 +75,18 @@ class WeatherController:
             air_quality = await fetch_air_quality(lat, lon, start, end, country_code)
 
         # 5) Merge air quality fields into hourly timeseries
-        hourly_data = data.get("hourly", {})
-        if air_quality and "hourly" in air_quality:
-            aq_hourly = air_quality["hourly"]
-            weather_times = hourly_data.get("time", [])
+        hourly_data = data.get('hourly', {})
+        if air_quality and 'hourly' in air_quality:
+            aq_hourly = air_quality['hourly']
+            weather_times = hourly_data.get('time', [])
             n = len(weather_times)
             for field in [
-                "us_aqi",
-                "european_aqi",
-                "pm2_5",
-                "pm10",
-                "ozone",
-                "grass_pollen",
+                'us_aqi',
+                'european_aqi',
+                'pm2_5',
+                'pm10',
+                'ozone',
+                'grass_pollen',
             ]:
                 if field in aq_hourly:
                     aq_values = aq_hourly[field]
@@ -100,9 +98,9 @@ class WeatherController:
                     hourly_data[field] = aq_values
 
         # 6) Build models for each forecast view
-        current = CurrentOpenMeteoForecast(meta, units_current, data.get("current", {}))
+        current = CurrentOpenMeteoForecast(meta, units_current, data.get('current', {}))
         hourly = HourlyOpenMeteoForecast(meta, units_hourly, hourly_data)
-        daily = DailyOpenMeteoForecast(meta, units_daily, data.get("daily", {}))
+        daily = DailyOpenMeteoForecast(meta, units_daily, data.get('daily', {}))
 
         # 7) Return unified message consumed by the App and widgets
         return WeatherUpdated(

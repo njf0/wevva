@@ -11,9 +11,9 @@ from textual.widgets.option_list import Option
 from wevva.location_metadata import LocationMetadata
 
 # Status message option IDs
-_STATUS_SEARCHING = "status-searching"
-_STATUS_ERROR = "status-error"
-_STATUS_NO_RESULTS = "status-no-results"
+_STATUS_SEARCHING = 'status-searching'
+_STATUS_ERROR = 'status-error'
+_STATUS_NO_RESULTS = 'status-no-results'
 
 
 class SearchResultsList(OptionList):
@@ -29,20 +29,20 @@ class SearchResultsList(OptionList):
     """
 
     def __init__(self):
-        super().__init__(id="place-search-results")
+        super().__init__(id='place-search-results')
         self._place_cache: dict[str, dict] = {}  # Maps option ID to place metadata
 
     def show_searching(self) -> None:
         """Display 'Searching...' status message."""
-        self._update_status(_STATUS_SEARCHING, "Searching…")
+        self._update_status(_STATUS_SEARCHING, 'Searching…')
 
     def show_error(self, error: Exception) -> None:
         """Display error message."""
-        self._update_status(_STATUS_ERROR, f"Error: {error}")
+        self._update_status(_STATUS_ERROR, f'Error: {error}')
 
     def show_no_results(self) -> None:
         """Display 'No results found' message."""
-        self._update_status(_STATUS_NO_RESULTS, "No results found")
+        self._update_status(_STATUS_NO_RESULTS, 'No results found')
 
     def update_results(self, places: list[dict]) -> None:
         """Update list with search results.
@@ -71,13 +71,13 @@ class SearchResultsList(OptionList):
 
         place = self._place_cache[option_id]
         return LocationMetadata(
-            latitude=place.get("latitude"),
-            longitude=place.get("longitude"),
-            name=place.get("name") or "",
-            admin=place.get("admin") or "",
-            country=place.get("country") or "",
-            country_code=place.get("country_code") or "",
-            timezone=place.get("tz_identifier") or "",
+            latitude=place.get('latitude'),
+            longitude=place.get('longitude'),
+            name=place.get('name') or '',
+            admin=place.get('admin') or '',
+            country=place.get('country') or '',
+            country_code=place.get('country_code') or '',
+            timezone=place.get('tz_identifier') or '',
         )
 
     def get_single_result(self) -> LocationMetadata | None:
@@ -101,22 +101,22 @@ class SearchResultsList(OptionList):
 
     def _build_place_id(self, place: dict) -> str:
         """Build stable unique ID for a place."""
-        name = place.get("name", "")
-        country_code = place.get("country_code", "")
-        lat = place.get("latitude", 0)
-        lon = place.get("longitude", 0)
-        tz = place.get("tz_identifier", "")
-        return f"geo:{name}|{country_code}|{lat:.3f},{lon:.3f}|{tz}"
+        name = place.get('name', '')
+        country_code = place.get('country_code', '')
+        lat = place.get('latitude', 0)
+        lon = place.get('longitude', 0)
+        tz = place.get('tz_identifier', '')
+        return f'geo:{name}|{country_code}|{lat:.3f},{lon:.3f}|{tz}'
 
     def _format_place_label(self, place: dict) -> str:
         """Format place as rich text label."""
-        name = place.get("name", "")
-        country = place.get("country", "")
-        admin = place.get("admin", "").split(";")
+        name = place.get('name', '')
+        country = place.get('country', '')
+        admin = place.get('admin', '').split(';')
 
-        label = f"[bold]{name}[/]\n[dim italic]"
+        label = f'[bold]{name}[/]\n[dim italic]'
         if admin:
-            label += f"{', '.join([a for a in admin if a != name])}[/]\n"
-        label += f"{country}\n"
+            label += f'{", ".join([a for a in admin if a != name])}[/]\n'
+        label += f'{country}\n'
 
         return label

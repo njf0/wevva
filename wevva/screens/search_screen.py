@@ -19,10 +19,10 @@ from wevva.widgets.search_dialog import SearchDialog
 class SearchScreen(ModalScreen[None]):
     """Modal screen for place search - coordinates API calls with SearchDialog widget."""
 
-    BINDINGS = [("escape", "dismiss", "Close")]
+    BINDINGS = [('escape', 'dismiss', 'Close')]
 
     def compose(self) -> ComposeResult:  # type: ignore[override]
-        yield Header(show_clock=True, id="place-search-header")
+        yield Header(show_clock=True, id='place-search-header')
         yield SearchDialog()
         yield Footer()
 
@@ -37,7 +37,7 @@ class SearchScreen(ModalScreen[None]):
             places = await search_places(
                 event.query,
                 count=SEARCH_MAX_RESULTS,
-                language="en",
+                language='en',
                 timeout=REQUEST_TIMEOUT_S,
             )
         except Exception as e:

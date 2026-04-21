@@ -16,7 +16,7 @@ class AuthorScreen(ModalScreen[None]):
     """Simple screen showing author info and credits."""
 
     BINDINGS = [
-        ("escape", "dismiss", "Close"),
+        ('escape', 'dismiss', 'Close'),
     ]
 
     DEFAULT_CSS = """
@@ -62,20 +62,18 @@ class AuthorScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         theme = self.app.theme_variables
         yield Header(show_clock=True)
-        with Container(id="author-box"):
-            yield Static("Wevva", id="title")
+        with Container(id='author-box'):
+            yield Static('Wevva', id='title')
 
             # Author info
-            author_text = Text.from_markup(
-                f"[bold {theme.get('primary')}]Nick Ferguson[/]\n[dim]nick.ferguson@ed.ac.uk[/]"
-            )
-            yield Static(author_text, id="author-info")
+            author_text = Text.from_markup(f'[bold {theme.get("primary")}]Nick Ferguson[/]\n[dim]nick.ferguson@ed.ac.uk[/]')
+            yield Static(author_text, id='author-info')
 
             # Credits
             credits_text = Text.from_markup(
                 f'[bold {theme.get("secondary")}]Credits[/]\n\nWeather data from [@click=app.open_url("https://open-meteo.com")]Open-Meteo[/]'
             )
-            yield Static(credits_text, id="credits")
+            yield Static(credits_text, id='credits')
         yield Footer()
 
     def action_pop_screen(self) -> None:

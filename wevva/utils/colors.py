@@ -6,9 +6,9 @@ Provides color interpolation and temperature/wind/rain color mapping.
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     """Convert a hex color like "#RRGGBB" to an RGB tuple."""
-    v = value.strip().lstrip("#")
+    v = value.strip().lstrip('#')
     if len(v) != 6:
-        raise ValueError("hex value must be 6 characters")
+        raise ValueError('hex value must be 6 characters')
     r = int(v[0:2], 16)
     g = int(v[2:4], 16)
     b = int(v[4:6], 16)
@@ -18,7 +18,7 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
 def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     """Convert an RGB tuple to a hex string like "#RRGGBB"."""
     r, g, b = rgb
-    return f"#{r:02x}{g:02x}{b:02x}"
+    return f'#{r:02x}{g:02x}{b:02x}'
 
 
 def _interpolate_color(
@@ -49,7 +49,7 @@ def _interpolate_color(
 
 # Temperature color scales (threshold: RGB)
 _TEMP_SCALES = {
-    "met_interpolated_celsius": [
+    'met_interpolated_celsius': [
         (-40, (1, 8, 30)),
         (-39, (1, 8, 32)),
         (-38, (1, 9, 35)),
@@ -132,7 +132,7 @@ _TEMP_SCALES = {
         (39, (68, 0, 16)),
         (40, (58, 0, 14)),
     ],
-    "met_interpolated_fahrenheit": [
+    'met_interpolated_fahrenheit': [
         (-40, (1, 8, 30)),  # -40°F
         (-34, (1, 9, 35)),  # -30°F
         (-29, (2, 11, 43)),  # -20°F
@@ -164,14 +164,14 @@ _TEMP_SCALES = {
 }
 
 # Backward compatibility alias
-_TEMP_SCALES["met_interpolated"] = _TEMP_SCALES["met_interpolated_celsius"]
+_TEMP_SCALES['met_interpolated'] = _TEMP_SCALES['met_interpolated_celsius']
 
 
 def temp_colour(
     temp: float,
-    scale: str = "met_interpolated",
+    scale: str = 'met_interpolated',
     hex: bool = False,
-    unit: str = "celsius",
+    unit: str = 'celsius',
 ) -> str | tuple[int, int, int]:
     """Get color for temperature using meteorological color scales.
 
@@ -188,16 +188,16 @@ def temp_colour(
     temp = float(temp)
 
     # Auto-detect scale based on unit if using default
-    if scale == "met_interpolated":
-        if unit == "fahrenheit":
-            scale_key = "met_interpolated_fahrenheit"
+    if scale == 'met_interpolated':
+        if unit == 'fahrenheit':
+            scale_key = 'met_interpolated_fahrenheit'
         else:
-            scale_key = "met_interpolated_celsius"
+            scale_key = 'met_interpolated_celsius'
     else:
         scale_key = scale
 
     # Get the appropriate scale
-    temp_colors = _TEMP_SCALES.get(scale_key, _TEMP_SCALES["met_interpolated_celsius"])
+    temp_colors = _TEMP_SCALES.get(scale_key, _TEMP_SCALES['met_interpolated_celsius'])
 
     # Find matching threshold
     color = temp_colors[-1][1]  # Default to warmest color

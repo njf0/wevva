@@ -15,9 +15,9 @@ from wevva.widgets.weather_widget import WeatherWidget
 
 # Precipitation type configuration: (type_name, getter_method, theme_var_key)
 _PRECIP_TYPES = [
-    ("rain", "get_rain", "primary"),
-    ("showers", "get_showers", "secondary"),
-    ("snow", "get_snowfall", "foreground"),
+    ('rain', 'get_rain', 'primary'),
+    ('showers', 'get_showers', 'secondary'),
+    ('snow', 'get_snowfall', 'foreground'),
 ]
 
 
@@ -28,9 +28,9 @@ class PrecipWidget(WeatherWidget):
     hourly_model: reactive[Any | None] = reactive(None)
     hour_index: reactive[int] = reactive(0)
 
-    def __init__(self, *, id: str = "ww-precip", classes: str = "weather-widget"):
+    def __init__(self, *, id: str = 'ww-precip', classes: str = 'weather-widget'):
         """Initialize the precipitation widget with a title and styling."""
-        super().__init__(title="Precipitation", id=id, classes=classes)
+        super().__init__(title='Precipitation', id=id, classes=classes)
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -58,19 +58,19 @@ class PrecipWidget(WeatherWidget):
         label, amount, colour_hex = self._get_dominant_precip_type(theme_vars)
 
         # Get precipitation unit from forecast
-        precip_unit = self.hourly_model.forecast_units.get("precipitation", "mm")
+        precip_unit = self.hourly_model.forecast_units.get('precipitation', 'mm')
 
         # Colour digits by probability
         prob_colour = rain_colour(
             prob,
             hex=True,
-            min_colour=theme_vars["foreground"],
-            max_colour=theme_vars.get("primary"),
+            min_colour=theme_vars['foreground'],
+            max_colour=theme_vars.get('primary'),
         )
 
         # Build lower text showing dominant type and amount
-        lower = f"[i][{colour_hex}]{amount}{precip_unit}/hr[/] {label}[/]"
-        self.set(prob, lower_text=lower, colour=prob_colour, units="%")
+        lower = f'[i][{colour_hex}]{amount}{precip_unit}/hr[/] {label}[/]'
+        self.set(prob, lower_text=lower, colour=prob_colour, units='%')
         self.refresh()
 
     def _get_dominant_precip_type(self, theme_vars: dict) -> tuple[str, float, str]:
@@ -92,5 +92,5 @@ class PrecipWidget(WeatherWidget):
         # If all amounts are zero, return 'precip.'
         max_type = max(precip_data, key=lambda t: t[1])
         if max_type[1] == 0:
-            return "precip.", 0, self.app.theme_variables.get("foreground")
+            return 'precip.', 0, self.app.theme_variables.get('foreground')
         return max_type

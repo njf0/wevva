@@ -7,9 +7,9 @@ async def fetch_weather(
     *,
     lat: float,
     lon: float,
-    temperature_unit: str = "celsius",
-    wind_speed_unit: str = "kmh",
-    precipitation_unit: str = "mm",
+    temperature_unit: str = 'celsius',
+    wind_speed_unit: str = 'kmh',
+    precipitation_unit: str = 'mm',
 ) -> dict:
     """Use OpenMeteo API to fetch weather data for given latitude and longitude.
 
@@ -30,7 +30,7 @@ async def fetch_weather(
     )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import asyncio
 
     async def main():

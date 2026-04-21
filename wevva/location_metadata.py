@@ -21,14 +21,14 @@ class LocationMetadata:
     elevation: int | None = None
 
     # Place identification
-    name: str = ""
-    admin: str = ""  # Administrative region (e.g., "Scotland")
-    country: str = ""
-    country_code: str = ""
+    name: str = ''
+    admin: str = ''  # Administrative region (e.g., "Scotland")
+    country: str = ''
+    country_code: str = ''
 
     # Timezone info
-    timezone: str = ""  # IANA identifier (e.g., "Europe/London")
-    timezone_abbreviation: str = ""  # e.g., "GMT", "BST"
+    timezone: str = ''  # IANA identifier (e.g., "Europe/London")
+    timezone_abbreviation: str = ''  # e.g., "GMT", "BST"
 
     @property
     def tz_identifier(self) -> str:

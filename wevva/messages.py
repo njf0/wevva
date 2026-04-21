@@ -32,9 +32,7 @@ class WeatherUpdated(Message):
     Carries models for current, hourly, daily, and alerts data.
     """
 
-    def __init__(
-        self, *, metadata, current, hourly, daily, alerts: list[Alert] | None = None
-    ):
+    def __init__(self, *, metadata, current, hourly, daily, alerts: list[Alert] | None = None):
         """Create the message with metadata and models."""
         super().__init__()
         self.metadata = metadata

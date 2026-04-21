@@ -21,17 +21,17 @@ from wevva.utils.visualization import create_rain_blocks, create_temp_blocks
 
 __all__ = [
     # Colors
-    "rain_colour",
-    "temp_colour",
-    "wind_colour",
+    'rain_colour',
+    'temp_colour',
+    'wind_colour',
     # Formatting
-    "date_suffix",
-    "norm_character_width",
-    "normalize_emoji",
+    'date_suffix',
+    'norm_character_width',
+    'normalize_emoji',
     # Geographic
-    "bearing_to_direction",
-    "country_code_to_flag",
+    'bearing_to_direction',
+    'country_code_to_flag',
     # Visualization
-    "create_rain_blocks",
-    "create_temp_blocks",
+    'create_rain_blocks',
+    'create_temp_blocks',
 ]

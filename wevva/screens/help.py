@@ -12,7 +12,7 @@ from textual.widgets import Footer, Markdown
 class HelpScreen(ModalScreen[None]):
     # Keyboard shortcut to close
     BINDINGS = [
-        ("escape", "dismiss('')", "Close"),
+        ('escape', "dismiss('')", 'Close'),
     ]
 
     DEFAULT_CSS = """
@@ -35,8 +35,8 @@ class HelpScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         # Build a simple box + markdown content
-        with Container(id="help-container") as container:
-            container.border_title = "Wevva Help"
+        with Container(id='help-container') as container:
+            container.border_title = 'Wevva Help'
             yield Markdown(
                 """
 ## Wevva Quick Guide

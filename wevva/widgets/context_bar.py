@@ -93,11 +93,7 @@ class ContextBar(Container):
 
     def refresh_time_display(self) -> None:
         """Public method to refresh time display (called by timer)."""
-        if (
-            self.is_mounted
-            and self.forecast_metadata is not None
-            and self.daily_model is not None
-        ):
+        if self.is_mounted and self.forecast_metadata is not None and self.daily_model is not None:
             # Call public refresh methods on child widgets to force time updates
             self.location.refresh_display()
             self.astronomy.refresh_display()

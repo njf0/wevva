@@ -20,14 +20,14 @@ from wevva.constants import (
 )
 
 DEFAULT_PREFERENCES: dict[str, Any] = {
-    "temperature_unit": DEFAULT_TEMPERATURE_UNIT,
-    "wind_speed_unit": DEFAULT_WIND_SPEED_UNIT,
-    "precipitation_unit": DEFAULT_PRECIPITATION_UNIT,
-    "theme": DEFAULT_THEME,
-    "emoji_enabled": DEFAULT_EMOJI_ENABLED,
-    "warning_language": DEFAULT_WARNING_LANGUAGE,
-    "default_location": None,
-    "default_location_metadata": None,
+    'temperature_unit': DEFAULT_TEMPERATURE_UNIT,
+    'wind_speed_unit': DEFAULT_WIND_SPEED_UNIT,
+    'precipitation_unit': DEFAULT_PRECIPITATION_UNIT,
+    'theme': DEFAULT_THEME,
+    'emoji_enabled': DEFAULT_EMOJI_ENABLED,
+    'warning_language': DEFAULT_WARNING_LANGUAGE,
+    'default_location': None,
+    'default_location_metadata': None,
 }
 
 _UNSET = object()
@@ -49,6 +49,7 @@ def _normalize_unit(value: Any, *, allowed: tuple[str, ...], default: str) -> st
     -------
     str
         A valid unit value.
+
     """
     if isinstance(value, str) and value in allowed:
         return value
@@ -67,6 +68,7 @@ def _normalize_location(value: Any) -> str | None:
     -------
     str | None
         A stripped location string, or ``None`` when empty/invalid.
+
     """
     if not isinstance(value, str):
         return None
@@ -86,6 +88,7 @@ def _normalize_theme(value: Any) -> str:
     -------
     str
         Normalized theme string.
+
     """
     if isinstance(value, str):
         theme = value.strip()
@@ -106,6 +109,7 @@ def _normalize_emoji_enabled(value: Any) -> bool:
     -------
     bool
         ``True`` when emoji rendering should be enabled.
+
     """
     if isinstance(value, bool):
         return value
@@ -124,34 +128,33 @@ def _normalize_location_metadata(value: Any) -> dict[str, Any] | None:
     -------
     dict[str, Any] | None
         Normalized metadata dict with coordinates, or ``None`` when invalid.
+
     """
     if not isinstance(value, dict):
         return None
 
-    latitude = value.get("latitude")
-    longitude = value.get("longitude")
-    if not isinstance(latitude, (int, float)) or not isinstance(
-        longitude, (int, float)
-    ):
+    latitude = value.get('latitude')
+    longitude = value.get('longitude')
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
         return None
 
     def _string_field(key: str) -> str:
         raw = value.get(key)
-        return raw.strip() if isinstance(raw, str) else ""
+        return raw.strip() if isinstance(raw, str) else ''
 
-    elevation_raw = value.get("elevation")
+    elevation_raw = value.get('elevation')
     elevation = int(elevation_raw) if isinstance(elevation_raw, (int, float)) else None
 
     return {
-        "latitude": float(latitude),
-        "longitude": float(longitude),
-        "elevation": elevation,
-        "name": _string_field("name"),
-        "admin": _string_field("admin"),
-        "country": _string_field("country"),
-        "country_code": _string_field("country_code"),
-        "timezone": _string_field("timezone"),
-        "timezone_abbreviation": _string_field("timezone_abbreviation"),
+        'latitude': float(latitude),
+        'longitude': float(longitude),
+        'elevation': elevation,
+        'name': _string_field('name'),
+        'admin': _string_field('admin'),
+        'country': _string_field('country'),
+        'country_code': _string_field('country_code'),
+        'timezone': _string_field('timezone'),
+        'timezone_abbreviation': _string_field('timezone_abbreviation'),
     }
 
 
@@ -162,11 +165,12 @@ def get_config_path() -> Path:
     -------
     Path
         Path to ``~/.config/wevva/config.json``.
+
     """
     # Ensure the standard per-user config directory exists.
-    config_dir = Path.home() / ".config" / "wevva"
+    config_dir = Path.home() / '.config' / 'wevva'
     config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "config.json"
+    return config_dir / 'config.json'
 
 
 def load_preferences() -> dict[str, Any]:
@@ -176,6 +180,7 @@ def load_preferences() -> dict[str, Any]:
     -------
     dict[str, Any]
         Validated preference values for display, units, and default location.
+
     """
     config_path = get_config_path()
     if not config_path.exists():
@@ -193,32 +198,30 @@ def load_preferences() -> dict[str, Any]:
 
     # Normalize every persisted field so downstream code sees valid values.
     return {
-        "temperature_unit": _normalize_unit(
-            raw.get("temperature_unit"),
+        'temperature_unit': _normalize_unit(
+            raw.get('temperature_unit'),
             allowed=VALID_TEMPERATURE_UNITS,
             default=DEFAULT_TEMPERATURE_UNIT,
         ),
-        "wind_speed_unit": _normalize_unit(
-            raw.get("wind_speed_unit"),
+        'wind_speed_unit': _normalize_unit(
+            raw.get('wind_speed_unit'),
             allowed=VALID_WIND_SPEED_UNITS,
             default=DEFAULT_WIND_SPEED_UNIT,
         ),
-        "precipitation_unit": _normalize_unit(
-            raw.get("precipitation_unit"),
+        'precipitation_unit': _normalize_unit(
+            raw.get('precipitation_unit'),
             allowed=VALID_PRECIPITATION_UNITS,
             default=DEFAULT_PRECIPITATION_UNIT,
         ),
-        "theme": _normalize_theme(raw.get("theme")),
-        "emoji_enabled": _normalize_emoji_enabled(raw.get("emoji_enabled")),
-        "warning_language": _normalize_unit(
-            raw.get("warning_language"),
+        'theme': _normalize_theme(raw.get('theme')),
+        'emoji_enabled': _normalize_emoji_enabled(raw.get('emoji_enabled')),
+        'warning_language': _normalize_unit(
+            raw.get('warning_language'),
             allowed=VALID_WARNING_LANGUAGES,
             default=DEFAULT_WARNING_LANGUAGE,
         ),
-        "default_location": _normalize_location(raw.get("default_location")),
-        "default_location_metadata": _normalize_location_metadata(
-            raw.get("default_location_metadata")
-        ),
+        'default_location': _normalize_location(raw.get('default_location')),
+        'default_location_metadata': _normalize_location_metadata(raw.get('default_location_metadata')),
     }
 
 
@@ -234,10 +237,11 @@ def _write_preferences(preferences: dict[str, Any]) -> None:
     -------
     None
         The config file is updated in place.
+
     """
     config_path = get_config_path()
     try:
-        with open(config_path, "w") as f:
+        with open(config_path, 'w') as f:
             json.dump(preferences, f, indent=2)
     except OSError:
         # Avoid crashing the TUI when config cannot be written.
@@ -277,40 +281,39 @@ def save_preferences(
     -------
     None
         Preferences are written to disk when possible.
+
     """
     # Start from existing preferences so partial updates preserve other fields.
     preferences = load_preferences()
-    preferences["temperature_unit"] = _normalize_unit(
+    preferences['temperature_unit'] = _normalize_unit(
         temperature_unit,
         allowed=VALID_TEMPERATURE_UNITS,
         default=DEFAULT_TEMPERATURE_UNIT,
     )
-    preferences["wind_speed_unit"] = _normalize_unit(
+    preferences['wind_speed_unit'] = _normalize_unit(
         wind_speed_unit,
         allowed=VALID_WIND_SPEED_UNITS,
         default=DEFAULT_WIND_SPEED_UNIT,
     )
-    preferences["precipitation_unit"] = _normalize_unit(
+    preferences['precipitation_unit'] = _normalize_unit(
         precipitation_unit,
         allowed=VALID_PRECIPITATION_UNITS,
         default=DEFAULT_PRECIPITATION_UNIT,
     )
     if default_location is not _UNSET:
-        preferences["default_location"] = _normalize_location(default_location)
+        preferences['default_location'] = _normalize_location(default_location)
     if theme is not _UNSET:
-        preferences["theme"] = _normalize_theme(theme)
+        preferences['theme'] = _normalize_theme(theme)
     if emoji_enabled is not _UNSET:
-        preferences["emoji_enabled"] = _normalize_emoji_enabled(emoji_enabled)
+        preferences['emoji_enabled'] = _normalize_emoji_enabled(emoji_enabled)
     if warning_language is not _UNSET:
-        preferences["warning_language"] = _normalize_unit(
+        preferences['warning_language'] = _normalize_unit(
             warning_language,
             allowed=VALID_WARNING_LANGUAGES,
             default=DEFAULT_WARNING_LANGUAGE,
         )
     if default_location_metadata is not _UNSET:
-        preferences["default_location_metadata"] = _normalize_location_metadata(
-            default_location_metadata
-        )
+        preferences['default_location_metadata'] = _normalize_location_metadata(default_location_metadata)
 
     _write_preferences(preferences)
 
@@ -332,15 +335,16 @@ def save_default_location(
     -------
     None
         Preferences are written to disk when possible.
+
     """
     preferences = load_preferences()
     save_preferences(
-        temperature_unit=preferences["temperature_unit"],
-        wind_speed_unit=preferences["wind_speed_unit"],
-        precipitation_unit=preferences["precipitation_unit"],
+        temperature_unit=preferences['temperature_unit'],
+        wind_speed_unit=preferences['wind_speed_unit'],
+        precipitation_unit=preferences['precipitation_unit'],
         default_location=default_location,
-        theme=preferences["theme"],
-        emoji_enabled=preferences["emoji_enabled"],
-        warning_language=preferences["warning_language"],
+        theme=preferences['theme'],
+        emoji_enabled=preferences['emoji_enabled'],
+        warning_language=preferences['warning_language'],
         default_location_metadata=default_location_metadata,
     )

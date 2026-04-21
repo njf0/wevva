@@ -17,24 +17,22 @@ from zoneinfo import ZoneInfo
 
 # Moon phase calculation constants
 _LUNATION_DAYS = 29.53058867  # Average lunar month duration
-_MOON_EPOCH = datetime.datetime(
-    2000, 1, 6, 18, 14, tzinfo=datetime.timezone.utc
-)  # Known new moon
+_MOON_EPOCH = datetime.datetime(2000, 1, 6, 18, 14, tzinfo=datetime.timezone.utc)  # Known new moon
 
 # Moon phase names (8 phases)
 _MOON_PHASE_NAMES = [
-    "New Moon",
-    "Waxing Crescent",
-    "First Quarter",
-    "Waxing Gibbous",
-    "Full Moon",
-    "Waning Gibbous",
-    "Last Quarter",
-    "Waning Crescent",
+    'New Moon',
+    'Waxing Crescent',
+    'First Quarter',
+    'Waxing Gibbous',
+    'Full Moon',
+    'Waning Gibbous',
+    'Last Quarter',
+    'Waning Crescent',
 ]
 
 # Moon phase emoji (corresponding to names above)
-_MOON_PHASE_EMOJI = ["🌚", "🌒", "🌓", "🌔", "🌝", "🌖", "🌗", "🌘"]
+_MOON_PHASE_EMOJI = ['🌚', '🌒', '🌓', '🌔', '🌝', '🌖', '🌗', '🌘']
 
 
 class AstronomyInfo(DataTable):
@@ -58,8 +56,8 @@ class AstronomyInfo(DataTable):
     def __init__(
         self,
         *,
-        id: str = "astronomy-info",
-        classes: str = "weather-widget",
+        id: str = 'astronomy-info',
+        classes: str = 'weather-widget',
     ):
         """Initialize the astronomy info table.
 
@@ -71,23 +69,15 @@ class AstronomyInfo(DataTable):
             CSS classes for styling (default: 'weather-widget').
 
         """
-        super().__init__(show_header=False, cursor_type="none", id=id, classes=classes)
-        self.border_title = "Sun & Moon"
-        self.add_column("Field", key="field")
-        self.add_column("Value", key="value")
-        self.add_row(
-            Text("Rise", style="dim"), Text("", style="bold dim"), key="sunrise"
-        )
-        self.add_row(
-            Text("Day", style="dim"), Text("", style="bold dim"), key="daylight"
-        )
-        self.add_row(Text("Set", style="dim"), Text("", style="bold dim"), key="sunset")
-        self.add_row(
-            Text("Moon", style="dim"), Text("", style="bold dim"), key="moon_illum"
-        )
-        self.add_row(
-            Text("Phase", style="dim"), Text("", style="bold dim"), key="moon_phase"
-        )
+        super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
+        self.border_title = 'Sun & Moon'
+        self.add_column('Field', key='field', width=5)
+        self.add_column('Value', key='value', width=19)
+        self.add_row(Text('Rise', style='dim'), Text('', style='bold'), key='sunrise')
+        self.add_row(Text('Day', style='dim'), Text('', style='bold'), key='daylight')
+        self.add_row(Text('Set', style='dim'), Text('', style='bold'), key='sunset')
+        self.add_row(Text('Moon', style='dim'), Text('', style='bold'), key='moon_illum')
+        self.add_row(Text('Phase', style='dim'), Text('', style='bold'), key='moon_phase')
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -124,18 +114,16 @@ class AstronomyInfo(DataTable):
         now = datetime.datetime.now(tzinfo)
 
         self.update_cell(
-            "sunrise",
-            "value",
-            self._format_sun_time(sunrise_dt, now, theme_vars.get("warning")),
+            'sunrise',
+            'value',
+            self._format_sun_time(sunrise_dt, now, theme_vars.get('text-warning')),
             update_width=True,
         )
+        self.update_cell('daylight', 'value', self._format_daylight(), update_width=True)
         self.update_cell(
-            "daylight", "value", self._format_daylight(), update_width=True
-        )
-        self.update_cell(
-            "sunset",
-            "value",
-            self._format_sun_time(sunset_dt, now, theme_vars.get("error")),
+            'sunset',
+            'value',
+            self._format_sun_time(sunset_dt, now, theme_vars.get('text-error')),
             update_width=True,
         )
 
@@ -143,10 +131,8 @@ class AstronomyInfo(DataTable):
         moon_illum = self._calculate_moon_illumination()
         moon_phase = self._format_moon_phase(theme_vars)
 
-        self.update_cell(
-            "moon_illum", "value", Text(moon_illum, style="bold dim"), update_width=True
-        )
-        self.update_cell("moon_phase", "value", moon_phase, update_width=True)
+        self.update_cell('moon_illum', 'value', Text(moon_illum, style='bold dim'), update_width=True)
+        self.update_cell('moon_phase', 'value', moon_phase, update_width=True)
         self.refresh()
 
     # Helper methods --------------------------------------------------
@@ -157,65 +143,53 @@ class AstronomyInfo(DataTable):
             return ZoneInfo(tz_name)
         return datetime.datetime.now().astimezone().tzinfo
 
-    def _ensure_timezone(
-        self, dt: datetime.datetime, tzinfo: datetime.tzinfo
-    ) -> datetime.datetime:
+    def _ensure_timezone(self, dt: datetime.datetime, tzinfo: datetime.tzinfo) -> datetime.datetime:
         """Ensure datetime has timezone info."""
         if dt.tzinfo is None:
             return dt.replace(tzinfo=tzinfo)
         return dt
 
-    def _format_time_delta(
-        self, target: datetime.datetime, now: datetime.datetime
-    ) -> str:
+    def _format_time_delta(self, target: datetime.datetime, now: datetime.datetime) -> str:
         """Format time delta as human-readable string like '(in 2h 15m)' or '(30m ago)'."""
         seconds = int((target - now).total_seconds())
 
         if seconds == 0:
-            return "(now)"
+            return '(now)'
 
         is_future = seconds > 0
         seconds = abs(seconds)
         hours, rem = divmod(seconds, 3600)
         minutes = rem // 60
 
-        time_part = f"{hours}h " if hours > 0 else ""
-        time_part += f"{minutes}m"
+        time_part = f'{hours}h ' if hours > 0 else ''
+        time_part += f'{minutes}m'
 
-        return f"(in {time_part})" if is_future else f"({time_part} ago)"
+        return f'(in {time_part})' if is_future else f'({time_part} ago)'
 
-    def _format_sun_time(
-        self, dt: datetime.datetime, now: datetime.datetime, colour: str
-    ) -> Text:
+    def _format_sun_time(self, dt: datetime.datetime, now: datetime.datetime, colour: str) -> Text:
         """Format sunrise/sunset time with relative delta."""
-        time_str = dt.strftime("%H:%M")
+        time_str = dt.strftime('%H:%M')
         delta_str = self._format_time_delta(dt, now)
-        return Text.from_markup(
-            f"[bold {colour}]{time_str}[/] [{colour}]{delta_str}[/]"
-        )
+        return Text.from_markup(f'[bold {colour}]{time_str}[/] [{colour}]{delta_str}[/]')
 
     def _format_daylight(self) -> Text:
         """Format daylight duration as hours and minutes."""
         ddur = self.daily_model.get_daylight_duration(0) or 0
 
         if not ddur:
-            return Text.from_markup(
-                f"[bold {self.app.theme_variables.get('accent')}]N/A[/]"
-            )
+            return Text.from_markup(f'[bold {self.app.theme_variables.get("text-accent")}]N/A[/]')
 
         hours = int(ddur // 3600)
         minutes = int((ddur % 3600) // 60)
-        daylight_text = f"{hours}h {minutes}m"
+        daylight_text = f'{hours}h {minutes}m'
 
-        return Text.from_markup(
-            f"[bold {self.app.theme_variables.get('accent')}]{daylight_text}[/]"
-        )
+        return Text.from_markup(f'[bold {self.app.theme_variables.get("text-accent")}]{daylight_text}[/]')
 
     def _calculate_moon_illumination(self) -> str:
         """Calculate current moon illumination percentage."""
         phase = self._get_moon_phase_value()
         illum = 0.5 * (1 - math.cos(2 * math.pi * phase)) * 100
-        return f"{illum:.0f}%"
+        return f'{illum:.0f}%'
 
     def _get_moon_phase_value(self) -> float:
         """Calculate moon phase as a value between 0 and 1."""
@@ -231,10 +205,10 @@ class AstronomyInfo(DataTable):
         index = int((phase * 8) + 0.5) % 8
 
         name = _MOON_PHASE_NAMES[index]
-        colour = theme_vars.get("text-warning")
+        colour = theme_vars.get('text-warning')
 
         if self.app.emoji_enabled:
             emoji = _MOON_PHASE_EMOJI[index]
-            return Text.from_markup(f"{emoji} [italic {colour}]{name}[/]")
+            return Text.from_markup(f'{emoji} [italic {colour}]{name}[/]')
         else:
-            return Text.from_markup(f"[italic {colour}]{name}[/]")
+            return Text.from_markup(f'[italic {colour}]{name}[/]')

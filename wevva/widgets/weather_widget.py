@@ -54,12 +54,12 @@ class WeatherWidget(Widget):
         Remaining kwargs go to the base widget (e.g., id, classes).
         """
         # Extract our options (with defaults) from kwargs
-        value = kwargs.pop("value", "—")
-        lower_text = kwargs.pop("lower_text", "")
-        colour = kwargs.pop("colour", None)
-        top_text = kwargs.pop("top_text", "")
-        units = kwargs.pop("units", "")
-        show_spacer = kwargs.pop("show_spacer", True)
+        value = kwargs.pop('value', '—')
+        lower_text = kwargs.pop('lower_text', '')
+        colour = kwargs.pop('colour', None)
+        top_text = kwargs.pop('top_text', '')
+        units = kwargs.pop('units', '')
+        show_spacer = kwargs.pop('show_spacer', True)
         super().__init__(**kwargs)
         self._value = str(value)
         self._lower_text = lower_text
@@ -72,21 +72,21 @@ class WeatherWidget(Widget):
     def compose(self):  # type: ignore[override]
         """Build child widgets; include a top line only if set."""
         if self._top_text:
-            self._top = Static(Text.from_markup(self._top_text), id="top")
+            self._top = Static(Text.from_markup(self._top_text), id='top')
             yield self._top
 
         # Horizontal row for digits and units
-        with Horizontal(id="digits-row"):
-            self._digits = Digits(str(self._value), id="digits")
+        with Horizontal(id='digits-row'):
+            self._digits = Digits(str(self._value), id='digits')
             yield self._digits
-            self._units_widget = Static(Text.from_markup(self._units), id="units")
+            self._units_widget = Static(Text.from_markup(self._units), id='units')
             yield self._units_widget
 
         if self._show_spacer:
-            self._spacer = Static("", id="spacer")
+            self._spacer = Static('', id='spacer')
             yield self._spacer
 
-        self._lower = Static(Text.from_markup(self._lower_text), id="lower")
+        self._lower = Static(Text.from_markup(self._lower_text), id='lower')
         yield self._lower
 
         if self._colour:
@@ -96,16 +96,14 @@ class WeatherWidget(Widget):
     def set(
         self,
         value: str | float | int,
-        lower_text: str | Text = "",
+        lower_text: str | Text = '',
         colour: str | None = None,
         top_text: str | Text | None = None,
         units: str | Text | None = None,
     ):
         """Update value and texts (colour/top text/units are optional)."""
         self._value = str(value)
-        self._lower_text = (
-            lower_text if isinstance(lower_text, str) else lower_text.plain
-        )
+        self._lower_text = lower_text if isinstance(lower_text, str) else lower_text.plain
         if top_text is not None:
             self._top_text = top_text if isinstance(top_text, str) else top_text.plain
         if units is not None:
@@ -113,7 +111,7 @@ class WeatherWidget(Widget):
         if colour:
             self._colour = colour
 
-        if not hasattr(self, "_digits") or not isinstance(self._digits, Digits):
+        if not hasattr(self, '_digits') or not isinstance(self._digits, Digits):
             return  # compose not yet run
 
         # Update digits value and colour
@@ -122,9 +120,9 @@ class WeatherWidget(Widget):
             self._digits.styles.color = colour
 
         # Update text widgets
-        if top_text is not None and hasattr(self, "_top"):
+        if top_text is not None and hasattr(self, '_top'):
             self._update_text_widget(self._top, top_text)
-        if units is not None and hasattr(self, "_units_widget"):
+        if units is not None and hasattr(self, '_units_widget'):
             self._update_text_widget(self._units_widget, units)
         self._update_text_widget(self._lower, lower_text)
         self.refresh()
