@@ -163,6 +163,7 @@ class HourlyForecast(Container):
 
     def _build_tab_label_for_date(self, d: datetime.date) -> Text:
         """Build a tab label for a given date (updates min/max colors)."""
+        theme_vars = self.app.theme_variables
         first_date = self.hourly_model.forecast_timeseries[0]['time'].date()
         if d == first_date:
             horizon = min(HOURS_WINDOW, len(self.hourly_model.forecast_timeseries))
@@ -172,8 +173,20 @@ class HourlyForecast(Container):
             temp_unit = getattr(self.app, 'temperature_unit', 'celsius')
             tmin = min(temps)
             tmax = max(temps)
-            cmin = temp_colour(tmin, hex=True, unit=temp_unit)
-            cmax = temp_colour(tmax, hex=True, unit=temp_unit)
+            cmin = temp_colour(
+                tmin,
+                scale='theme_temperature',
+                hex=True,
+                unit=temp_unit,
+                theme_colours=theme_vars,
+            )
+            cmax = temp_colour(
+                tmax,
+                scale='theme_temperature',
+                hex=True,
+                unit=temp_unit,
+                theme_colours=theme_vars,
+            )
             return Text.from_markup(f'Next 24 Hours [bold {cmin}]{int(tmin)}°[/]-[bold {cmax}]{int(tmax)}°[/]')
 
         date_str = d.strftime('%A')
@@ -183,8 +196,20 @@ class HourlyForecast(Container):
             temp_unit = getattr(self.app, 'temperature_unit', 'celsius')
             tmin = self.daily_model.get_temperature_min(row_index)
             tmax = self.daily_model.get_temperature_max(row_index)
-            cmin = temp_colour(tmin, hex=True, unit=temp_unit)
-            cmax = temp_colour(tmax, hex=True, unit=temp_unit)
+            cmin = temp_colour(
+                tmin,
+                scale='theme_temperature',
+                hex=True,
+                unit=temp_unit,
+                theme_colours=theme_vars,
+            )
+            cmax = temp_colour(
+                tmax,
+                scale='theme_temperature',
+                hex=True,
+                unit=temp_unit,
+                theme_colours=theme_vars,
+            )
             return Text.from_markup(f"""{date_str} [bold {cmin}]{int(tmin)}°[/]-[bold {cmax}]{int(tmax)}°[/]""")
 
     def _update_for_date(self, date: Any) -> None:
@@ -265,13 +290,20 @@ class HourlyForecast(Container):
 
     def _update_temp_rows(self, temps: list[float]) -> None:
         """Update temperature blocks and values rows."""
+        theme_vars = self.app.theme_variables
         tblocks = create_temp_blocks(temps, width=4)
         tunit = self.hourly_model.forecast_units.get('temperature_2m', '°C')
         temp_unit = getattr(self.app, 'temperature_unit', 'celsius')
 
         for i, t in enumerate(temps):
             col_key = self._col_keys[i]
-            colour = temp_colour(t, hex=True, unit=temp_unit)
+            colour = temp_colour(
+                t,
+                scale='theme_temperature',
+                hex=True,
+                unit=temp_unit,
+                theme_colours=theme_vars,
+            )
             self.table.update_cell(
                 'temp_blocks',
                 col_key,
@@ -289,10 +321,14 @@ class HourlyForecast(Container):
         rblocks = create_rain_blocks(rains, width=4)
         runit = self.hourly_model.forecast_units.get('precipitation_probability', '%')
         rain_max = theme_vars['primary']
+        previous_label = None
 
         for i, r in enumerate(rains):
             col_key = self._col_keys[i]
             colour = rain_colour(r, hex=True, min_colour=theme_vars['foreground'], max_colour=rain_max)
+            label = f'{r:.0f}{runit}'
+            display_label = '· ·' if label == previous_label and label in {'0%', '100%'} else label
+            previous_label = label
             self.table.update_cell(
                 'rain_blocks',
                 col_key,
@@ -301,7 +337,7 @@ class HourlyForecast(Container):
             self.table.update_cell(
                 'rain_values',
                 col_key,
-                Text(f'{r:.0f}{runit}', style=f'bold {colour}', justify='center'),
+                Text(display_label, style=f'bold {colour}', justify='center'),
             )
 
     def _update_wind_rows(self, winds: list[float]) -> None:
@@ -309,7 +345,7 @@ class HourlyForecast(Container):
         theme_vars = self.app.theme_variables
         wblocks = create_temp_blocks(winds, width=4)
         wunit = self.hourly_model.forecast_units.get('wind_speed_10m', 'mph')
-        wind_max = theme_vars['accent']
+        wind_max = theme_vars['secondary']
 
         for i, wv in enumerate(winds):
             col_key = self._col_keys[i]

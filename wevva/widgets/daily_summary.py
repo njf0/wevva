@@ -96,8 +96,20 @@ class DailySummaryTable(DataTable):
         min_temp = self.daily_model.get_temperature_min(model_idx)
         max_temp = self.daily_model.get_temperature_max(model_idx)
         temp_unit_pref = getattr(self.app, 'temperature_unit', 'celsius')
-        min_colour = temp_colour(min_temp, hex=True, unit=temp_unit_pref)
-        max_colour = temp_colour(max_temp, hex=True, unit=temp_unit_pref)
+        min_colour = temp_colour(
+            min_temp,
+            scale='theme_temperature',
+            hex=True,
+            unit=temp_unit_pref,
+            theme_colours=theme_vars,
+        )
+        max_colour = temp_colour(
+            max_temp,
+            scale='theme_temperature',
+            hex=True,
+            unit=temp_unit_pref,
+            theme_colours=theme_vars,
+        )
         temp_unit = self._units.get('temperature_2m_min', '°C')[0]
         min_max_cell = Text('')
         min_max_cell.append(f'{min_temp:.0f}{temp_unit}', style=f'bold {min_colour}')
@@ -124,7 +136,7 @@ class DailySummaryTable(DataTable):
         precip_cell.justify = 'right'
 
         # === Wind speed, gusts ===
-        wind_max = theme_vars['accent']
+        wind_max = theme_vars['secondary']
         wind_speed = self.daily_model.get_wind_speed(model_idx)
         wind_gust = self.daily_model.get_wind_gust(model_idx)
         wind_dir = self.daily_model.get_wind_direction(model_idx)

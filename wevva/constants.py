@@ -7,7 +7,7 @@ Keep simple numbers in one place to avoid magic values.
 DEFAULT_TEMPERATURE_UNIT: str = 'celsius'
 DEFAULT_WIND_SPEED_UNIT: str = 'kmh'
 DEFAULT_PRECIPITATION_UNIT: str = 'mm'
-DEFAULT_THEME: str = 'gruvbox'
+DEFAULT_THEME: str = 'nord'
 DEFAULT_EMOJI_ENABLED: bool = False
 DEFAULT_WARNING_LANGUAGE: str = 'auto'
 

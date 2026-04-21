@@ -3,6 +3,8 @@
 Provides color interpolation and temperature/wind/rain color mapping.
 """
 
+from collections.abc import Mapping, Sequence
+
 
 def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     """Convert a hex color like "#RRGGBB" to an RGB tuple."""
@@ -45,6 +47,97 @@ def _interpolate_color(
     rgb = tuple(int(low[i] + (high[i] - low[i]) * fraction) for i in range(3))
 
     return _rgb_to_hex(rgb) if hex_output else rgb
+
+
+ThemeStop = tuple[float, str]
+
+_THEME_TEMP_STOPS_CELSIUS: tuple[ThemeStop, ...] = (
+    # (-20, 'secondary'),
+    # (-10, 'primary'),
+    # (0, 'accent'),
+    # (10, 'success'),
+    # (20, 'warning'),
+    # (30, 'error'),
+    (-20, 'secondary'),
+    (0, 'primary'),
+    (10, 'success'),
+    (20, 'warning'),
+    (30, 'error'),
+)
+
+_THEME_TEMP_STOPS_FAHRENHEIT: tuple[ThemeStop, ...] = tuple(
+    (round(celsius * 9 / 5 + 32), colour_name) for celsius, colour_name in _THEME_TEMP_STOPS_CELSIUS
+)
+
+
+def _resolve_theme_colour(theme_colours: Mapping[str, str], name: str) -> str | None:
+    """Resolve a named theme color with a small fallback chain."""
+    fallbacks = {
+        'secondary': ('secondary', 'primary', 'accent', 'foreground'),
+        'primary': ('primary', 'accent', 'foreground'),
+        'accent': ('accent', 'secondary', 'primary', 'foreground'),
+        'success': ('success', 'accent', 'primary', 'foreground'),
+        'foreground': ('foreground', 'text', 'primary'),
+        'warning': ('warning', 'accent', 'primary', 'foreground'),
+        'error': ('error', 'warning', 'accent', 'foreground'),
+    }
+    for candidate in fallbacks.get(name, (name, 'foreground')):
+        colour = theme_colours.get(candidate)
+        if isinstance(colour, str) and colour.strip():
+            return colour
+    return None
+
+
+def _theme_temperature_colour(
+    temp: float,
+    *,
+    theme_colours: Mapping[str, str] | None,
+    theme_stops: Sequence[ThemeStop] | None = None,
+    unit: str = 'celsius',
+    hex_output: bool = False,
+) -> str | tuple[int, int, int] | None:
+    """Interpolate temperature using named colors from the active theme."""
+    if theme_colours is None:
+        return None
+
+    stops = tuple(theme_stops or (_THEME_TEMP_STOPS_FAHRENHEIT if unit == 'fahrenheit' else _THEME_TEMP_STOPS_CELSIUS))
+    if not stops:
+        return None
+
+    stops = tuple(sorted(stops, key=lambda stop: stop[0]))
+    if temp <= stops[0][0]:
+        colour = _resolve_theme_colour(theme_colours, stops[0][1])
+        if colour is None:
+            return None
+        try:
+            rgb = _hex_to_rgb(colour)
+        except ValueError:
+            return None
+        return _rgb_to_hex(rgb) if hex_output else rgb
+
+    if temp >= stops[-1][0]:
+        colour = _resolve_theme_colour(theme_colours, stops[-1][1])
+        if colour is None:
+            return None
+        try:
+            rgb = _hex_to_rgb(colour)
+        except ValueError:
+            return None
+        return _rgb_to_hex(rgb) if hex_output else rgb
+
+    for (low_temp, low_name), (high_temp, high_name) in zip(stops, stops[1:]):
+        if low_temp <= temp <= high_temp:
+            low_colour = _resolve_theme_colour(theme_colours, low_name)
+            high_colour = _resolve_theme_colour(theme_colours, high_name)
+            if low_colour is None or high_colour is None:
+                return None
+            fraction = (temp - low_temp) / (high_temp - low_temp)
+            try:
+                return _interpolate_color(fraction, low_colour, high_colour, hex_output)
+            except ValueError:
+                return None
+
+    return None
 
 
 # Temperature color scales (threshold: RGB)
@@ -172,20 +265,36 @@ def temp_colour(
     scale: str = 'met_interpolated',
     hex: bool = False,
     unit: str = 'celsius',
+    *,
+    theme_colours: Mapping[str, str] | None = None,
+    theme_stops: Sequence[ThemeStop] | None = None,
 ) -> str | tuple[int, int, int]:
     """Get color for temperature using meteorological color scales.
 
     Args:
         temp: Temperature value (in the unit specified)
-        scale: Color scale to use ('met_interpolated' for auto-detect)
+        scale: Color scale to use ('met_interpolated' or 'theme_temperature')
         hex: Return hex string if True, RGB tuple if False
         unit: Temperature unit - 'celsius' or 'fahrenheit'
+        theme_colours: Textual theme variables used by the theme temperature scale
+        theme_stops: Optional custom sequence of ``(temperature, theme_colour_name)`` stops
 
     Returns:
         Color as hex string or RGB tuple based on temperature thresholds
 
     """
     temp = float(temp)
+
+    if scale == 'theme_temperature':
+        theme_colour = _theme_temperature_colour(
+            temp,
+            theme_colours=theme_colours,
+            theme_stops=theme_stops,
+            unit=unit,
+            hex_output=hex,
+        )
+        if theme_colour is not None:
+            return theme_colour
 
     # Auto-detect scale based on unit if using default
     if scale == 'met_interpolated':

@@ -98,9 +98,22 @@ class CurrentConditions(Container):
         feels = self.hourly_model.get_feels_temperature(self.hour_index)
 
         # Get temperature unit from app for color scale
+        theme_vars = self.app.theme_variables
         temp_unit = getattr(self.app, 'temperature_unit', 'celsius')
-        colour = temp_colour(t, hex=True, unit=temp_unit)
-        feels_colour = temp_colour(feels, hex=True, unit=temp_unit)
+        colour = temp_colour(
+            t,
+            scale='theme_temperature',
+            hex=True,
+            unit=temp_unit,
+            theme_colours=theme_vars,
+        )
+        feels_colour = temp_colour(
+            feels,
+            scale='theme_temperature',
+            hex=True,
+            unit=temp_unit,
+            theme_colours=theme_vars,
+        )
 
         t_unit = self.hourly_model.forecast_units.get('temperature_2m', '°C')
 
@@ -121,13 +134,13 @@ class CurrentConditions(Container):
         theme_vars = self.app.theme_variables
 
         # Colour based on wind speed
-        wind_max = theme_vars['accent']
+        wind_max = theme_vars['secondary']
         s_colour = wind_colour(ws, hex=True, min_colour=theme_vars['foreground'], max_colour=wind_max)
         g_colour = wind_colour(gust, hex=True, min_colour=theme_vars['foreground'], max_colour=wind_max)
 
         self.wind.set(
             ws,
-            f'[i]Gusts of [dim {g_colour}]{gust}{ws_unit}[/]',
+            f'[i]Gusts of [{g_colour}]{gust}{ws_unit}[/]',
             colour=s_colour,
             units=f'{ws_unit} {wdir}',
         )
