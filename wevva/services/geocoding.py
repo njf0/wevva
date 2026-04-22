@@ -135,6 +135,7 @@ def normalize_places(results: Any) -> list[dict[str, Any]]:
                 country_name = '?'
         lat = place.get('latitude')
         lon = place.get('longitude')
+        elevation = place.get('elevation')
         tz_identifier = place.get('timezone', '')
         admin1 = place.get('admin1', '')
         admin2 = place.get('admin2', '')
@@ -150,6 +151,7 @@ def normalize_places(results: Any) -> list[dict[str, Any]]:
             {
                 'latitude': lat,
                 'longitude': lon,
+                'elevation': elevation,
                 'name': name,
                 'admin': admin_str,
                 'country_code': country_code,

@@ -22,7 +22,7 @@ class SearchResultsList(OptionList):
     DEFAULT_CSS = """
     SearchResultsList {
         height: auto;
-        max-height: 14;
+        max-height: 16;
         width: 100%;
         scrollbar-size-vertical: 1;
     }
@@ -79,6 +79,7 @@ class SearchResultsList(OptionList):
         return LocationMetadata(
             latitude=place.get('latitude'),
             longitude=place.get('longitude'),
+            elevation=place.get('elevation'),
             name=place.get('name') or '',
             admin=place.get('admin') or '',
             country=place.get('country') or '',
@@ -131,5 +132,33 @@ class SearchResultsList(OptionList):
         if admin_parts:
             label += f'[dim italic]{", ".join(admin_parts)}[/]\n'
         label += country
+        coordinates = self._format_coordinates(place)
+        elevation = self._format_elevation(place)
+        if coordinates or elevation:
+            label += '\n'
+            if coordinates:
+                label += f'[dim italic]{coordinates}[/]'
+            if coordinates and elevation:
+                label += '[dim] · [/]'
+            if elevation:
+                label += f'[bold dim]{elevation}[/]'
 
         return label
+
+    def _format_coordinates(self, place: dict) -> str:
+        """Format coordinates with hemisphere suffixes."""
+        lat = place.get('latitude')
+        lon = place.get('longitude')
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            return ''
+
+        lat_suffix = 'N' if lat >= 0 else 'S'
+        lon_suffix = 'E' if lon >= 0 else 'W'
+        return f'{abs(lat):.3f}°{lat_suffix}, {abs(lon):.3f}°{lon_suffix}'
+
+    def _format_elevation(self, place: dict) -> str:
+        """Format elevation when available."""
+        elevation = place.get('elevation')
+        if isinstance(elevation, (int, float)):
+            return f'{elevation:.0f}m'
+        return ''
