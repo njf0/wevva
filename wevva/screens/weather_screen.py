@@ -29,6 +29,7 @@ from wevva.widgets.context_bar import ContextBar
 from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
+from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.weather_alerts import WeatherAlertCard
 from wevva.widgets.weather_summary import WeatherSummary
 
@@ -199,6 +200,9 @@ class WeatherScreen(Screen[None]):
 
         # Main panel content mirrors the prior App layout
         self.main_panel = Container(id='main-panel')
+        self.saved_locations_sidebar = SavedLocationsSidebar()
+        yield self.saved_locations_sidebar
+
         with self.main_panel:
             # Error banner area (hidden by default)
             self.error_banner = Static('', id='error-banner')
@@ -253,6 +257,32 @@ class WeatherScreen(Screen[None]):
         self.query_one('#main-panel').display = False
         self.warnings_row.display = False
         self.weather_warnings.display = False
+        self.update_saved_locations_sidebar()
+        if not getattr(self.app, 'saved_locations', []):
+            self.saved_locations_sidebar.display = False
+
+    def update_saved_locations_sidebar(self) -> None:
+        """Sync saved-location sidebar from app state."""
+        if not hasattr(self, 'saved_locations_sidebar'):
+            return
+        locations = getattr(self.app, 'saved_locations', [])
+        self.saved_locations_sidebar.set_locations(locations)
+        if locations:
+            self.saved_locations_sidebar.display = True
+
+    def toggle_saved_locations_sidebar(self) -> None:
+        """Show or hide the saved-location sidebar."""
+        if not hasattr(self, 'saved_locations_sidebar'):
+            return
+        if not self.saved_locations_sidebar.is_mounted:
+            return
+        self.saved_locations_sidebar.display = not self.saved_locations_sidebar.display
+
+    def update_saved_location_weather(self, location, summary: str) -> None:
+        """Update compact weather text for one saved location."""
+        if not hasattr(self, 'saved_locations_sidebar'):
+            return
+        self.saved_locations_sidebar.update_weather_summary(location, summary)
 
     # --- Actions ---
     def action_open_author(self) -> None:

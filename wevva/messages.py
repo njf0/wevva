@@ -26,6 +26,26 @@ class SearchQueryReady(Message):
         self.query = query
 
 
+class SavedLocationSelected(Message):
+    """Sent when the user chooses a saved location."""
+
+    def __init__(self, *, location: LocationMetadata):
+        super().__init__()
+        self.location = location
+
+
+class SaveCurrentLocationRequested(Message):
+    """Sent when the user asks to save the active location."""
+
+
+class DeleteSavedLocationRequested(Message):
+    """Sent when the user asks to delete a saved location."""
+
+    def __init__(self, *, location: LocationMetadata):
+        super().__init__()
+        self.location = location
+
+
 class WeatherUpdated(Message):
     """Sent when fresh weather data arrives.
 

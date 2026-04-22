@@ -18,6 +18,7 @@ from wevva.constants import (
     VALID_WARNING_LANGUAGES,
     VALID_WIND_SPEED_UNITS,
 )
+from wevva.location_metadata import LocationMetadata
 
 DEFAULT_PREFERENCES: dict[str, Any] = {
     'temperature_unit': DEFAULT_TEMPERATURE_UNIT,
@@ -28,6 +29,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     'warning_language': DEFAULT_WARNING_LANGUAGE,
     'default_location': None,
     'default_location_metadata': None,
+    'saved_locations': [],
 }
 
 _UNSET = object()
@@ -158,6 +160,82 @@ def _normalize_location_metadata(value: Any) -> dict[str, Any] | None:
     }
 
 
+def location_label(location: LocationMetadata | dict[str, Any]) -> str:
+    """Build a readable stable label for a saved location."""
+    if isinstance(location, LocationMetadata):
+        latitude = location.latitude
+        longitude = location.longitude
+        parts = [location.name, location.admin, location.country]
+    else:
+        latitude = location.get('latitude')
+        longitude = location.get('longitude')
+        parts = [location.get('name'), location.get('admin'), location.get('country')]
+
+    clean_parts = [str(part).strip() for part in parts if isinstance(part, str) and part.strip()]
+    if clean_parts:
+        return ', '.join(clean_parts)
+    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+        return f'{latitude:.3f}, {longitude:.3f}'
+    return 'Unknown location'
+
+
+def location_key(location: LocationMetadata | dict[str, Any]) -> str:
+    """Return a coordinate key for saved-location de-duplication."""
+    if isinstance(location, LocationMetadata):
+        latitude = location.latitude
+        longitude = location.longitude
+    else:
+        latitude = location.get('latitude')
+        longitude = location.get('longitude')
+
+    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+        return f'{float(latitude):.4f},{float(longitude):.4f}'
+    return location_label(location).casefold()
+
+
+def location_metadata_from_config(raw: Any) -> LocationMetadata | None:
+    """Build ``LocationMetadata`` from normalized config data."""
+    metadata = _normalize_location_metadata(raw)
+    if metadata is None:
+        return None
+    return LocationMetadata(**metadata)
+
+
+def location_config_from_metadata(location: LocationMetadata) -> dict[str, Any]:
+    """Serialize ``LocationMetadata`` for config persistence."""
+    return {
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'elevation': location.elevation,
+        'name': location.name,
+        'admin': location.admin,
+        'country': location.country,
+        'country_code': location.country_code,
+        'timezone': location.timezone,
+        'timezone_abbreviation': location.timezone_abbreviation,
+    }
+
+
+def _sort_saved_locations(locations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort saved locations by display label."""
+    return sorted(locations, key=lambda item: location_label(item).casefold())
+
+
+def _normalize_saved_locations(value: Any) -> list[dict[str, Any]]:
+    """Normalize, de-duplicate, and sort saved location metadata."""
+    if not isinstance(value, list):
+        return []
+
+    locations_by_key: dict[str, dict[str, Any]] = {}
+    for item in value:
+        metadata = _normalize_location_metadata(item)
+        if metadata is None:
+            continue
+        locations_by_key[location_key(metadata)] = metadata
+
+    return _sort_saved_locations(list(locations_by_key.values()))
+
+
 def get_config_path() -> Path:
     """Return the config path, creating directories when needed.
 
@@ -196,6 +274,11 @@ def load_preferences() -> dict[str, Any]:
     if not isinstance(raw, dict):
         return dict(DEFAULT_PREFERENCES)
 
+    default_location_metadata = _normalize_location_metadata(raw.get('default_location_metadata'))
+    saved_locations = _normalize_saved_locations(raw.get('saved_locations'))
+    if not saved_locations and default_location_metadata is not None:
+        saved_locations = [default_location_metadata]
+
     # Normalize every persisted field so downstream code sees valid values.
     return {
         'temperature_unit': _normalize_unit(
@@ -221,7 +304,8 @@ def load_preferences() -> dict[str, Any]:
             default=DEFAULT_WARNING_LANGUAGE,
         ),
         'default_location': _normalize_location(raw.get('default_location')),
-        'default_location_metadata': _normalize_location_metadata(raw.get('default_location_metadata')),
+        'default_location_metadata': default_location_metadata,
+        'saved_locations': saved_locations,
     }
 
 
@@ -257,6 +341,7 @@ def save_preferences(
     emoji_enabled: bool | object = _UNSET,
     warning_language: str | object = _UNSET,
     default_location_metadata: dict[str, Any] | None | object = _UNSET,
+    saved_locations: list[dict[str, Any]] | object = _UNSET,
 ) -> None:
     """Persist preferences and optionally update display/location values.
 
@@ -314,8 +399,46 @@ def save_preferences(
         )
     if default_location_metadata is not _UNSET:
         preferences['default_location_metadata'] = _normalize_location_metadata(default_location_metadata)
+    if saved_locations is not _UNSET:
+        preferences['saved_locations'] = _normalize_saved_locations(saved_locations)
 
     _write_preferences(preferences)
+
+
+def save_saved_locations(saved_locations: list[dict[str, Any]]) -> None:
+    """Persist saved locations while preserving other preferences."""
+    preferences = load_preferences()
+    save_preferences(
+        temperature_unit=preferences['temperature_unit'],
+        wind_speed_unit=preferences['wind_speed_unit'],
+        precipitation_unit=preferences['precipitation_unit'],
+        theme=preferences['theme'],
+        emoji_enabled=preferences['emoji_enabled'],
+        warning_language=preferences['warning_language'],
+        saved_locations=saved_locations,
+    )
+
+
+def add_saved_location(location: LocationMetadata) -> list[dict[str, Any]]:
+    """Add one saved location and return the updated sorted list."""
+    preferences = load_preferences()
+    saved_locations = list(preferences.get('saved_locations') or [])
+    saved_locations.append(location_config_from_metadata(location))
+    saved_locations = _normalize_saved_locations(saved_locations)
+    save_saved_locations(saved_locations)
+    return saved_locations
+
+
+def remove_saved_location(location: LocationMetadata) -> list[dict[str, Any]]:
+    """Remove one saved location by coordinate key and return the updated list."""
+    preferences = load_preferences()
+    remove_key = location_key(location)
+    saved_locations = [
+        item for item in preferences.get('saved_locations', []) if location_key(item) != remove_key
+    ]
+    saved_locations = _normalize_saved_locations(saved_locations)
+    save_saved_locations(saved_locations)
+    return saved_locations
 
 
 def save_default_location(

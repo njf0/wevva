@@ -6,12 +6,25 @@ from typing import ClassVar
 from textual.app import App
 
 from wevva.alerts import get_alerts_async
-from wevva.config import load_preferences, save_preferences
+from wevva.config import (
+    add_saved_location,
+    load_preferences,
+    location_config_from_metadata,
+    location_key,
+    location_label,
+    location_metadata_from_config,
+    remove_saved_location,
+    save_preferences,
+)
+from wevva.conditions import get_condition
 from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
+    DeleteSavedLocationRequested,
     PlaceSelected,
+    SaveCurrentLocationRequested,
+    SavedLocationSelected,
     WeatherAlertsUpdated,
     WeatherFetchFailed,
     WeatherUpdated,
@@ -20,6 +33,8 @@ from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.services.weather import fetch_weather
+from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
 class Wevva(App, inherit_bindings=False):
@@ -31,6 +46,7 @@ class Wevva(App, inherit_bindings=False):
         ('q', 'quit', 'Quit'),  # exit the app
         ('s', 'search', 'Search'),  # open place search screen
         ('r', 'refresh', 'Refresh'),  # fetch latest forecast
+        ('l', 'toggle_locations', 'Locations'),  # show/hide saved locations
         ('h', 'help', 'Help'),  # show quick help
         ('u', 'settings', 'Settings'),  # open settings
     ]
@@ -44,6 +60,7 @@ class Wevva(App, inherit_bindings=False):
         temperature_unit: str = 'celsius',
         wind_speed_unit: str = 'kmh',
         precipitation_unit: str = 'mm',
+        saved_locations: list[LocationMetadata] | None = None,
         **kwargs,
     ):
         """Initialize application (no postcode required; starts with place search).
@@ -67,6 +84,7 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_in_flight = False  # debounce concurrent refreshes
         self._refresh_generation = 0
         self._alerts_task: asyncio.Task[None] | None = None
+        self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
         self.emoji_enabled = bool(emoji_enabled)
         self.warning_language = warning_language
@@ -74,6 +92,7 @@ class Wevva(App, inherit_bindings=False):
         self.temperature_unit = temperature_unit
         self.wind_speed_unit = wind_speed_unit
         self.precipitation_unit = precipitation_unit
+        self.saved_locations = sorted(saved_locations or [], key=lambda item: location_label(item).casefold())
         # Initialize main weather screen once
         self.weather_screen = WeatherScreen()
         # Theme selection from CLI (validated by Textual during assignment)
@@ -84,6 +103,7 @@ class Wevva(App, inherit_bindings=False):
         """Start with search screen, or if location provided via CLI, fetch weather directly."""
         if self.location.latitude is not None and self.location.longitude is not None:
             self.push_screen(self.weather_screen)
+            self._schedule_saved_weather_refresh()
             await self.action_refresh()
         else:
             self.push_screen(SearchScreen())
@@ -94,6 +114,9 @@ class Wevva(App, inherit_bindings=False):
     async def action_refresh(self) -> None:
         """Fetch via controller and broadcast `WeatherUpdated`."""
         if self._refresh_in_flight:
+            return
+        if self.location.latitude is None or self.location.longitude is None:
+            self.notify('Choose a location before refreshing.', severity='warning')
             return
         self._refresh_in_flight = True
         self._refresh_generation += 1
@@ -121,6 +144,10 @@ class Wevva(App, inherit_bindings=False):
     def action_help(self):  # textual binding: 'h'
         """Open help screen."""
         self.push_screen(HelpScreen())
+
+    def action_toggle_locations(self) -> None:
+        """Toggle the saved-location sidebar."""
+        self.weather_screen.toggle_saved_locations_sidebar()
 
     def action_settings(self) -> None:
         """Open settings screen and handle result via callback."""
@@ -178,6 +205,9 @@ class Wevva(App, inherit_bindings=False):
             self._cancel_alerts_task()
             self._schedule_alert_refresh(self._refresh_generation)
 
+        if units_changed:
+            self._schedule_saved_weather_refresh()
+
         if save_defaults:
             save_kwargs: dict = {
                 'temperature_unit': self.temperature_unit,
@@ -211,17 +241,70 @@ class Wevva(App, inherit_bindings=False):
 
     def _location_config_from_current_location(self) -> dict:
         """Serialize current location to config format."""
-        return {
-            'latitude': self.location.latitude,
-            'longitude': self.location.longitude,
-            'elevation': self.location.elevation,
-            'name': self.location.name,
-            'admin': self.location.admin,
-            'country': self.location.country,
-            'country_code': self.location.country_code,
-            'timezone': self.location.timezone,
-            'timezone_abbreviation': self.location.timezone_abbreviation,
-        }
+        return location_config_from_metadata(self.location)
+
+    def _set_saved_locations_from_config(self, saved_locations: list[dict]) -> None:
+        """Adopt normalized saved-location config data."""
+        locations = [location_metadata_from_config(item) for item in saved_locations]
+        self.saved_locations = sorted(
+            [location for location in locations if location is not None],
+            key=lambda item: location_label(item).casefold(),
+        )
+        self.weather_screen.update_saved_locations_sidebar()
+
+    def _schedule_saved_weather_refresh(self) -> None:
+        """Fetch compact weather summaries for all saved locations."""
+        for task in self._saved_weather_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._saved_weather_tasks = {}
+
+        for location in self.saved_locations:
+            key = location_key(location)
+            self._saved_weather_tasks[key] = asyncio.create_task(self._fetch_saved_weather_summary(location))
+
+    async def _fetch_saved_weather_summary(self, location: LocationMetadata) -> None:
+        """Fetch compact current condition text for the sidebar."""
+        if location.latitude is None or location.longitude is None:
+            return
+
+        try:
+            data = await fetch_weather(
+                lat=location.latitude,
+                lon=location.longitude,
+                temperature_unit=self.temperature_unit,
+                wind_speed_unit=self.wind_speed_unit,
+                precipitation_unit=self.precipitation_unit,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            summary = SavedLocationWeatherSummary(error=True)
+        else:
+            current = data.get('current', {})
+            units = data.get('current_units', {})
+            temp = current.get('temperature_2m')
+            code = current.get('weather_code')
+            condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+            summary = SavedLocationWeatherSummary(
+                temperature=temp if isinstance(temp, (int, float)) else None,
+                temperature_unit=units.get('temperature_2m', '°C'),
+                condition=condition,
+            )
+
+        self.weather_screen.update_saved_location_weather(location, summary)
+
+    def _saved_weather_summary_from_event(self, event: WeatherUpdated) -> SavedLocationWeatherSummary:
+        """Build sidebar weather summary from the full forecast event."""
+        point = event.hourly.get_point(0) or {}
+        temp = point.get('temperature_2m')
+        code = point.get('weather_code')
+        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+        return SavedLocationWeatherSummary(
+            temperature=temp if isinstance(temp, (int, float)) else None,
+            temperature_unit=event.hourly.forecast_units.get('temperature_2m', '°C'),
+            condition=condition,
+        )
 
     # ---------------- Messages ----------------
     async def on_place_selected(self, message: PlaceSelected) -> None:
@@ -233,6 +316,30 @@ class Wevva(App, inherit_bindings=False):
         self.push_screen(self.weather_screen)
         await self.action_refresh()
 
+    async def on_saved_location_selected(self, message: SavedLocationSelected) -> None:
+        """Switch to a saved location."""
+        self.location = message.location
+        self.push_screen(self.weather_screen)
+        await self.action_refresh()
+
+    def on_save_current_location_requested(self, message: SaveCurrentLocationRequested) -> None:
+        """Persist the active location in the saved-location list."""
+        if self.location.latitude is None or self.location.longitude is None:
+            self.notify('Choose a location before saving it.', severity='warning')
+            return
+
+        saved_locations = add_saved_location(self.location)
+        self._set_saved_locations_from_config(saved_locations)
+        self._schedule_saved_weather_refresh()
+        self.notify(f'Saved {self._current_location_label()}.', severity='information')
+
+    def on_delete_saved_location_requested(self, message: DeleteSavedLocationRequested) -> None:
+        """Remove one location from the saved-location list."""
+        saved_locations = remove_saved_location(message.location)
+        self._set_saved_locations_from_config(saved_locations)
+        self._schedule_saved_weather_refresh()
+        self.notify(f'Removed {location_label(message.location)}.', severity='information')
+
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
         """Cache forecast metadata and merge API data into location."""
         self.forecast_metadata = event.metadata
@@ -242,6 +349,8 @@ class Wevva(App, inherit_bindings=False):
         if event.metadata.timezone_abbreviation:
             self.location.timezone_abbreviation = event.metadata.timezone_abbreviation
         self._has_successful_fetch = True
+        self.weather_screen.update_saved_location_weather(self.location, self._saved_weather_summary_from_event(event))
+        self.weather_screen.update_saved_locations_sidebar()
 
     async def on_weather_fetch_failed(self, event: WeatherFetchFailed) -> None:
         """Show error notification; return to search if CLI location failed on first fetch."""

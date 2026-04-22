@@ -19,7 +19,7 @@ from questionary import Choice, Style
 from textual.theme import BUILTIN_THEMES
 
 from wevva.app import Wevva
-from wevva.config import load_preferences, save_default_location, save_preferences
+from wevva.config import add_saved_location, load_preferences, location_metadata_from_config, save_default_location, save_preferences
 from wevva.constants import (
     DEFAULT_EMOJI_ENABLED,
     DEFAULT_PRECIPITATION_UNIT,
@@ -434,6 +434,13 @@ def _resolve_initial_location(preferences: dict[str, Any], cli_location: str | N
             typer.secho('No results found; starting with search screen.', fg=typer.colors.YELLOW)
         return location
 
+    saved_locations = [
+        location_metadata_from_config(item) for item in preferences.get('saved_locations', [])
+    ]
+    saved_locations = [location for location in saved_locations if location is not None]
+    if saved_locations:
+        return saved_locations[0]
+
     from_metadata = _location_from_saved_metadata(preferences.get('default_location_metadata'))
     if from_metadata is not None:
         return from_metadata
@@ -482,6 +489,7 @@ def _apply_default_location_mutations(
                 label,
                 default_location_metadata=_location_config_from_metadata(location_meta),
             )
+            add_saved_location(location_meta)
             typer.secho(f'Saved default location: {label}', fg=typer.colors.GREEN)
         else:
             save_default_location(set_default_location, default_location_metadata=None)
@@ -541,6 +549,10 @@ def _launch_wevva(
     emoji_enabled = emoji if emoji is not None else bool(preferences.get('emoji_enabled', DEFAULT_EMOJI_ENABLED))
     warning_language = str(preferences.get('warning_language', DEFAULT_WARNING_LANGUAGE))
     initial_location = _resolve_initial_location(preferences, location)
+    saved_locations = [
+        location_metadata_from_config(item) for item in preferences.get('saved_locations', [])
+    ]
+    saved_locations = [saved_location for saved_location in saved_locations if saved_location is not None]
 
     Wevva(
         initial_location=initial_location,
@@ -550,6 +562,7 @@ def _launch_wevva(
         temperature_unit=final_temp,
         wind_speed_unit=final_wind,
         precipitation_unit=final_precip,
+        saved_locations=saved_locations,
     ).run()
 
 
