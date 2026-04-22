@@ -294,18 +294,6 @@ class Wevva(App, inherit_bindings=False):
 
         self.weather_screen.update_saved_location_weather(location, summary)
 
-    def _saved_weather_summary_from_event(self, event: WeatherUpdated) -> SavedLocationWeatherSummary:
-        """Build sidebar weather summary from the full forecast event."""
-        point = event.hourly.get_point(0) or {}
-        temp = point.get('temperature_2m')
-        code = point.get('weather_code')
-        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
-        return SavedLocationWeatherSummary(
-            temperature=temp if isinstance(temp, (int, float)) else None,
-            temperature_unit=event.hourly.forecast_units.get('temperature_2m', '°C'),
-            condition=condition,
-        )
-
     # ---------------- Messages ----------------
     async def on_place_selected(self, message: PlaceSelected) -> None:
         """Handle place selection → fetch → show main content.
@@ -349,7 +337,18 @@ class Wevva(App, inherit_bindings=False):
         if event.metadata.timezone_abbreviation:
             self.location.timezone_abbreviation = event.metadata.timezone_abbreviation
         self._has_successful_fetch = True
-        self.weather_screen.update_saved_location_weather(self.location, self._saved_weather_summary_from_event(event))
+        point = event.hourly.get_point(0) or {}
+        temp = point.get('temperature_2m')
+        code = point.get('weather_code')
+        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+        self.weather_screen.update_saved_location_weather(
+            self.location,
+            SavedLocationWeatherSummary(
+                temperature=temp if isinstance(temp, (int, float)) else None,
+                temperature_unit=event.hourly.forecast_units.get('temperature_2m', '°C'),
+                condition=condition,
+            ),
+        )
         self.weather_screen.update_saved_locations_sidebar()
 
     async def on_weather_fetch_failed(self, event: WeatherFetchFailed) -> None:

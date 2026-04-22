@@ -66,6 +66,7 @@ class HourlyForecast(Container):
         yield table
         # Internal state for tab/column mapping
         self._active_tab_id = None
+        self._rebuilding_tabs = False
         self._tab_date_map = {}
         self._col_keys = []
         self._col_indices = []
@@ -102,16 +103,20 @@ class HourlyForecast(Container):
         # Extract distinct dates (up to MAX_TAB_DAYS)
         dates = self._extract_dates(times)
 
-        # Reconcile tabs to match dates
-        self._reconcile_tabs(dates)
+        self._rebuilding_tabs = True
+        try:
+            # Reconcile tabs to match dates
+            self._reconcile_tabs(dates)
 
-        # Ensure we have a valid active tab
-        desired_ids = [f'day-{d.isoformat()}' for d in dates]
-        self._ensure_valid_active_tab(desired_ids)
+            # Ensure we have a valid active tab
+            desired_ids = [f'day-{d.isoformat()}' for d in dates]
+            self._ensure_valid_active_tab(desired_ids)
 
-        # Rebuild table for active date
-        if self._active_tab_id and self._active_tab_id in self._tab_date_map:
-            self._update_for_date(self._tab_date_map[self._active_tab_id])
+            # Rebuild table for active date
+            if self._active_tab_id and self._active_tab_id in self._tab_date_map:
+                self._update_for_date(self._tab_date_map[self._active_tab_id])
+        finally:
+            self._rebuilding_tabs = False
 
     def _extract_dates(self, times: list[dict]) -> list[datetime.date]:
         """Extract up to MAX_TAB_DAYS distinct dates from timeseries."""
@@ -123,7 +128,7 @@ class HourlyForecast(Container):
         return dates
 
     def _reconcile_tabs(self, dates: list[datetime.date]) -> None:
-        """Add/remove/update tabs to match desired dates."""
+        """Add, remove, and order tabs to match forecast dates."""
         desired_ids = [f'day-{d.isoformat()}' for d in dates]
         id_to_tab = {tab.id: tab for tab in self.tabs.query(Tab)}
 
@@ -133,15 +138,19 @@ class HourlyForecast(Container):
                 self.tabs.remove_tab(tab_id)
                 id_to_tab.pop(tab_id, None)
 
-        # Add missing tabs and update labels on existing ones
         self._tab_date_map = {}
-        for d in dates:
+        for index, d in enumerate(dates):
             tab_id = f'day-{d.isoformat()}'
             label = self._build_tab_label_for_date(d)
             tab = id_to_tab.get(tab_id)
             if tab is None:
+                next_existing_tab = next(
+                    (id_to_tab[existing_id] for existing_id in desired_ids[index + 1 :] if existing_id in id_to_tab),
+                    None,
+                )
                 tab = Tab(label=label, id=tab_id)
-                self.tabs.add_tab(tab)
+                self.tabs.add_tab(tab, before=next_existing_tab)
+                id_to_tab[tab_id] = tab
             else:
                 tab.label = label
             self._tab_date_map[tab_id] = d
@@ -386,6 +395,7 @@ class HourlyForecast(Container):
     async def on_weather_updated(self, event: WeatherUpdated) -> None:  # type: ignore[override]
         """Rebuild the table when fresh hourly data arrives."""
         # Set reactive properties - this triggers watch_hourly_model
+        self._active_tab_id = None
         self.daily_model = event.daily
         self.hourly_model = event.hourly
 
@@ -415,6 +425,8 @@ class HourlyForecast(Container):
     # Tabs events --------------------------------------------------------
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         """Switch the table to the selected day's subset when a tab is activated."""
+        if self._rebuilding_tabs:
+            return
         tab_id = event.tab.id
         self._active_tab_id = tab_id
         date = self._tab_date_map.get(tab_id)
