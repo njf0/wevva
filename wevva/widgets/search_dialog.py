@@ -11,6 +11,7 @@ from textual.containers import Container, Horizontal
 from textual.widgets import Input, Select
 
 from wevva.constants import SEARCH_DEBOUNCE_S, SEARCH_MIN_CHARS
+from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected, SearchQueryReady
 from wevva.widgets.search_results import SearchResultsList
 
@@ -128,11 +129,11 @@ class SearchDialog(Container):
         selected_country = event.value
         if selected_country is None:
             # Show all results
-            self.results.update_results(self._all_places)
+            self.results.update_results(self._all_places, preferred_location=self._preferred_location())
         else:
             # Filter by selected country
             filtered = [p for p in self._all_places if p.get('country') == selected_country]
-            self.results.update_results(filtered)
+            self.results.update_results(filtered, preferred_location=self._preferred_location())
 
     # Public API -------------------------------------------------------
     def show_error(self, error: Exception) -> None:
@@ -146,7 +147,7 @@ class SearchDialog(Container):
     def show_results(self, places: list[dict]) -> None:
         """Update results list with places and populate country filter."""
         self._all_places = places
-        self.results.update_results(places)
+        self.results.update_results(places, preferred_location=self._preferred_location())
 
         # Extract unique countries and populate filter
         countries = sorted(set(p.get('country', '') for p in places if p.get('country')))
@@ -163,3 +164,18 @@ class SearchDialog(Container):
     def _emit_query(self, query: str) -> None:
         """Emit SearchQueryReady message after debounce."""
         self.post_message(SearchQueryReady(query))
+
+    def _preferred_location(self) -> LocationMetadata | None:
+        """Return the location that should be highlighted in search results."""
+        current_location = getattr(self.app, 'location', None)
+        if (
+            isinstance(current_location, LocationMetadata)
+            and current_location.latitude is not None
+            and current_location.longitude is not None
+        ):
+            return current_location
+
+        saved_locations = getattr(self.app, 'saved_locations', [])
+        if saved_locations:
+            return saved_locations[0]
+        return None

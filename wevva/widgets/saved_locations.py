@@ -86,7 +86,8 @@ class SavedLocationsSidebar(Container):
     #saved-location-list {
         height: 1fr;
         width: 100%;
-        border: none;
+        border: round $primary-muted;
+        background: $background;
     }
 
     #saved-location-list > .option-list--separator {

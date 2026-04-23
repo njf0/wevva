@@ -8,6 +8,7 @@ from __future__ import annotations
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
 
 # Status message option IDs
@@ -48,27 +49,34 @@ class SearchResultsList(OptionList):
         """Display 'No results found' message."""
         self._update_status(_STATUS_NO_RESULTS, 'No results found')
 
-    def update_results(self, places: list[dict]) -> None:
+    def update_results(self, places: list[dict], preferred_location: LocationMetadata | None = None) -> None:
         """Update list with search results.
 
         Args:
             places: List of place dicts from geocoding service
+            preferred_location: Optional location to highlight when present
 
         """
         self.clear_options()
         self._place_cache.clear()
+        preferred_key = location_key(preferred_location) if preferred_location is not None else None
+        highlighted_index = 0
+        option_index = 0
 
         for index, place in enumerate(places):
             option_id = self._build_place_id(place)
             label = self._format_place_label(place)
             self.add_option(Option(label, id=option_id))
             self._place_cache[option_id] = place
+            if preferred_key is not None and location_key(place) == preferred_key:
+                highlighted_index = option_index
+            option_index += 1
             if index < len(places) - 1:
                 self.add_option(None)
 
         # Highlight first result
         if self.option_count > 0:
-            self.highlighted = 0
+            self.highlighted = highlighted_index
 
     def get_selected_place(self, option_id: str) -> LocationMetadata | None:
         """Get LocationMetadata for selected option ID."""

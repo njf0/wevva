@@ -434,13 +434,6 @@ def _resolve_initial_location(preferences: dict[str, Any], cli_location: str | N
             typer.secho('No results found; starting with search screen.', fg=typer.colors.YELLOW)
         return location
 
-    saved_locations = [
-        location_metadata_from_config(item) for item in preferences.get('saved_locations', [])
-    ]
-    saved_locations = [location for location in saved_locations if location is not None]
-    if saved_locations:
-        return saved_locations[0]
-
     from_metadata = _location_from_saved_metadata(preferences.get('default_location_metadata'))
     if from_metadata is not None:
         return from_metadata
@@ -454,6 +447,13 @@ def _resolve_initial_location(preferences: dict[str, Any], cli_location: str | N
                 default_location_metadata=_location_config_from_metadata(location),
             )
         return location
+
+    saved_locations = [
+        location_metadata_from_config(item) for item in preferences.get('saved_locations', [])
+    ]
+    saved_locations = [location for location in saved_locations if location is not None]
+    if saved_locations:
+        return saved_locations[0]
     return None
 
 
