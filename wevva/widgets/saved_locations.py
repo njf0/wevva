@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import Button, OptionList, Static
+from textual.widgets import Button, OptionList
 from textual.widgets.option_list import Option
 
 from wevva.conditions import Condition
@@ -39,11 +39,13 @@ class SavedLocationsSidebar(Container):
         dock: left;
         width: 30;
         height: 100%;
-        margin-bottom: 1;
-        margin-top: 1;
+        # margin-bottom: 1;
+        # margin-top: 1;
+        margin: 2 2;
         # border-right: heavy $primary;
         background: $background;
-        hatch: right $primary-muted
+        hatch: right $primary-muted;
+        border: round $primary;
     }
 
     SavedLocationsSidebar.hidden {
@@ -86,7 +88,8 @@ class SavedLocationsSidebar(Container):
     #saved-location-list {
         height: 1fr;
         width: 100%;
-        border: round $primary-muted;
+        # border: round $primary-muted;
+        border: none;
         background: $background;
     }
 
@@ -97,14 +100,15 @@ class SavedLocationsSidebar(Container):
 
     def __init__(self, *, id: str = 'saved-locations-sidebar') -> None:
         super().__init__(id=id)
-        self.border_title = 'Locations'
+        self.border_title = 'Saved Locations'
+        self.styles.border_title_align = 'left'
         self._locations: list[LocationMetadata] = []
         self._location_cache: dict[str, LocationMetadata] = {}
         self._weather_summaries: dict[str, SavedLocationWeatherSummary] = {}
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id='saved-location-header'):
-            yield Static('Saved Locations', id='saved-location-title')
+        # with Horizontal(id='saved-location-header'):
+        # yield Static('Saved Locations', id='saved-location-title')
         yield OptionList(id='saved-location-list')
         with Horizontal(id='saved-location-actions'):
             yield Button('Save', id='save-current-location', variant='success', tooltip='Save current location')
