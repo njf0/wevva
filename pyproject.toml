@@ -19,7 +19,6 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.28.1",
-    "pycountry>=24.6.1",
     "questionary>=2.1.1",
     "textual>=3.1.0",
     "typer>=0.21.1",

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 
-import pycountry
 from wevva_warnings import (
     Alert,
     UnsupportedCountryError,
     get_alerts_for_point,
     get_alerts_for_source,
 )
+
+from wevva.utils.country_codes import get_alpha2_by_alpha3
 
 
 def normalize_country_code(country_code: str | None) -> str | None:
@@ -21,9 +22,7 @@ def normalize_country_code(country_code: str | None) -> str | None:
     if len(code) == 2:
         return code
     if len(code) == 3:
-        country = pycountry.countries.get(alpha_3=code)
-        if country is not None:
-            return country.alpha_2
+        return get_alpha2_by_alpha3(code)
     return None
 
 

@@ -13,9 +13,9 @@ from typing import Any
 from urllib.parse import quote_plus
 
 import httpx
-import pycountry
 
 from wevva.constants import REQUEST_TIMEOUT_S, SEARCH_MAX_RESULTS
+from wevva.utils.country_codes import get_country_name_by_alpha2
 
 
 @dataclass
@@ -128,11 +128,7 @@ def normalize_places(results: Any) -> list[dict[str, Any]]:
         country_name = place.get('country', '')
         country_code = place.get('country_code', '')
         if not country_name:
-            matched = pycountry.countries.get(alpha_2=country_code)
-            try:
-                country_name = matched.name if matched else '?'
-            except AttributeError:
-                country_name = '?'
+            country_name = get_country_name_by_alpha2(country_code) or '?'
         lat = place.get('latitude')
         lon = place.get('longitude')
         elevation = place.get('elevation')
