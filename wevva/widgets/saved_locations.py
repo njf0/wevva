@@ -41,7 +41,7 @@ class SavedLocationsSidebar(Container):
         height: 100%;
         # margin-bottom: 1;
         # margin-top: 1;
-        margin: 2 2;
+        margin: 2 0 2 2;
         # border-right: heavy $primary;
         background: $background;
         hatch: right $primary-muted;
@@ -163,7 +163,7 @@ class SavedLocationsSidebar(Container):
         summary = self._weather_summaries.get(key)
 
         text = Text()
-        text.append(f'{place}\n', style='bold')
+        text.append(f'{place}\n')
         text.append(self._format_summary(summary))
         return text
 
