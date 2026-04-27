@@ -153,6 +153,9 @@ for alert in alerts:
 
 - `s` search for place
 - `r` refresh weather
+- `a` save current location
+- `d` delete highlighted saved location
+- `l` toggle saved locations sidebar
 - `u` open unit settings
 - `h` or `?` open help
 - `c` credits

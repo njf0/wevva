@@ -21,9 +21,7 @@ from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
-    DeleteSavedLocationRequested,
     PlaceSelected,
-    SaveCurrentLocationRequested,
     SavedLocationSelected,
     WeatherAlertsUpdated,
     WeatherFetchFailed,
@@ -47,6 +45,8 @@ class Wevva(App, inherit_bindings=False):
         ('s', 'search', 'Search'),  # open place search screen
         ('r', 'refresh', 'Refresh'),  # fetch latest forecast
         ('l', 'toggle_locations', 'Locations'),  # show/hide saved locations
+        ('a', 'save_current_location', 'Save Location'),
+        ('d', 'delete_saved_location', 'Delete Location'),
         ('h', 'help', 'Help'),  # show quick help
         ('u', 'settings', 'Settings'),  # open settings
     ]
@@ -148,6 +148,29 @@ class Wevva(App, inherit_bindings=False):
     def action_toggle_locations(self) -> None:
         """Toggle the saved-location sidebar."""
         self.weather_screen.toggle_saved_locations_sidebar()
+
+    def action_save_current_location(self) -> None:
+        """Persist the active location in the saved-location list."""
+        if self.location.latitude is None or self.location.longitude is None:
+            self.notify('Choose a location before saving it.', severity='warning')
+            return
+
+        saved_locations = add_saved_location(self.location)
+        self._set_saved_locations_from_config(saved_locations)
+        self._schedule_saved_weather_refresh()
+        self.notify(f'Saved {self._current_location_label()}.', severity='information')
+
+    def action_delete_saved_location(self) -> None:
+        """Remove the highlighted saved location from the sidebar."""
+        location = self.weather_screen.selected_saved_location()
+        if location is None:
+            self.notify('Highlight a saved location before deleting it.', severity='warning')
+            return
+
+        saved_locations = remove_saved_location(location)
+        self._set_saved_locations_from_config(saved_locations)
+        self._schedule_saved_weather_refresh()
+        self.notify(f'Removed {location_label(location)}.', severity='information')
 
     def action_settings(self) -> None:
         """Open settings screen and handle result via callback."""
@@ -309,24 +332,6 @@ class Wevva(App, inherit_bindings=False):
         self.location = message.location
         self.push_screen(self.weather_screen)
         await self.action_refresh()
-
-    def on_save_current_location_requested(self, message: SaveCurrentLocationRequested) -> None:
-        """Persist the active location in the saved-location list."""
-        if self.location.latitude is None or self.location.longitude is None:
-            self.notify('Choose a location before saving it.', severity='warning')
-            return
-
-        saved_locations = add_saved_location(self.location)
-        self._set_saved_locations_from_config(saved_locations)
-        self._schedule_saved_weather_refresh()
-        self.notify(f'Saved {self._current_location_label()}.', severity='information')
-
-    def on_delete_saved_location_requested(self, message: DeleteSavedLocationRequested) -> None:
-        """Remove one location from the saved-location list."""
-        saved_locations = remove_saved_location(message.location)
-        self._set_saved_locations_from_config(saved_locations)
-        self._schedule_saved_weather_refresh()
-        self.notify(f'Removed {location_label(message.location)}.', severity='information')
 
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
         """Cache forecast metadata and merge API data into location."""

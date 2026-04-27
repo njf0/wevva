@@ -284,6 +284,12 @@ class WeatherScreen(Screen[None]):
             return
         self.saved_locations_sidebar.update_weather_summary(location, summary)
 
+    def selected_saved_location(self):
+        """Return the highlighted saved location from the sidebar."""
+        if not hasattr(self, 'saved_locations_sidebar'):
+            return None
+        return self.saved_locations_sidebar.selected_location()
+
     # --- Actions ---
     def action_open_author(self) -> None:
         """Open the Author/Credits screen."""

@@ -54,6 +54,9 @@ You can launch it directly with `uvx wevva`.
 
 - `s` Search for a place
 - `r` Refresh weather for current location
+- `a` Save the current location
+- `d` Delete the highlighted saved location
+- `l` Show or hide saved locations
 - `u` Open settings
 - `h` Open this help screen
 - `q` Quit

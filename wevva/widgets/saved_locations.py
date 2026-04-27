@@ -6,18 +6,14 @@ from dataclasses import dataclass
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
-from textual.widgets import Button, OptionList
+from textual.containers import Container
+from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from wevva.conditions import Condition
 from wevva.config import location_key, location_label
 from wevva.location_metadata import LocationMetadata
-from wevva.messages import (
-    DeleteSavedLocationRequested,
-    SaveCurrentLocationRequested,
-    SavedLocationSelected,
-)
+from wevva.messages import SavedLocationSelected
 from wevva.utils import temp_colour
 
 
@@ -65,26 +61,6 @@ class SavedLocationsSidebar(Container):
         text-style: bold;
     }
 
-    #saved-location-actions {
-        height: 3;
-        width: 100%;
-        layout: horizontal;
-    }
-
-    #save-current-location {
-        width: 1fr;
-        height: 3;
-        min-width: 8;
-        min-height: 3;
-    }
-
-    #delete-saved-location {
-        width: 1fr;
-        height: 3;
-        min-width: 8;
-        min-height: 3;
-    }
-
     #saved-location-list {
         height: 1fr;
         width: 100%;
@@ -107,12 +83,7 @@ class SavedLocationsSidebar(Container):
         self._weather_summaries: dict[str, SavedLocationWeatherSummary] = {}
 
     def compose(self) -> ComposeResult:
-        # with Horizontal(id='saved-location-header'):
-        # yield Static('Saved Locations', id='saved-location-title')
         yield OptionList(id='saved-location-list')
-        with Horizontal(id='saved-location-actions'):
-            yield Button('Save', id='save-current-location', variant='success', tooltip='Save current location')
-            yield Button('Delete', id='delete-saved-location', variant='error', tooltip='Delete selected location')
 
     @property
     def locations(self) -> OptionList:
@@ -213,19 +184,15 @@ class SavedLocationsSidebar(Container):
         option_id = option.id
         return option_id if isinstance(option_id, str) else None
 
+    def selected_location(self) -> LocationMetadata | None:
+        """Return the currently highlighted saved location, if any."""
+        option_id = self._current_option_id()
+        if option_id is None:
+            return None
+        return self._location_cache.get(option_id)
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Switch to a saved location."""
         option_id = event.option.id
         if isinstance(option_id, str) and option_id in self._location_cache:
             self.post_message(SavedLocationSelected(location=self._location_cache[option_id]))
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle save/delete buttons."""
-        if event.button.id == 'save-current-location':
-            self.post_message(SaveCurrentLocationRequested())
-            return
-
-        if event.button.id == 'delete-saved-location':
-            option_id = self._current_option_id()
-            if option_id and option_id in self._location_cache:
-                self.post_message(DeleteSavedLocationRequested(location=self._location_cache[option_id]))
