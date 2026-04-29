@@ -283,15 +283,25 @@ class Wevva(App, inherit_bindings=False):
                 task.cancel()
         self._saved_weather_tasks = {}
 
-        for location in self.saved_locations:
+        for index, location in enumerate(self.saved_locations):
             key = location_key(location)
-            self._saved_weather_tasks[key] = asyncio.create_task(self._fetch_saved_weather_summary(location))
+            self._saved_weather_tasks[key] = asyncio.create_task(
+                self._fetch_saved_weather_summary(location, delay=index * 0.1)
+            )
 
-    async def _fetch_saved_weather_summary(self, location: LocationMetadata) -> None:
+    async def _fetch_saved_weather_summary(
+        self,
+        location: LocationMetadata,
+        *,
+        delay: float = 0.0,
+    ) -> None:
         """Fetch compact current condition text for the sidebar."""
         if location.latitude is None or location.longitude is None:
             return
 
+        existing_summary = self.weather_screen.saved_location_weather_summary(location)
+        if delay > 0:
+            await asyncio.sleep(delay)
         try:
             data = await fetch_weather(
                 lat=location.latitude,
@@ -303,7 +313,10 @@ class Wevva(App, inherit_bindings=False):
         except asyncio.CancelledError:
             raise
         except Exception:
-            summary = SavedLocationWeatherSummary(error=True)
+            if existing_summary is None:
+                summary = SavedLocationWeatherSummary(error=True)
+            else:
+                return
         else:
             current = data.get('current', {})
             units = data.get('current_units', {})

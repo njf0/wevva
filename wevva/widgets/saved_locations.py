@@ -102,6 +102,10 @@ class SavedLocationsSidebar(Container):
         self._weather_summaries[location_key(location)] = summary
         self._render_locations()
 
+    def weather_summary(self, location: LocationMetadata) -> SavedLocationWeatherSummary | None:
+        """Return the cached summary for one saved location, if any."""
+        return self._weather_summaries.get(location_key(location))
+
     def _render_locations(self) -> None:
         if not self.is_mounted:
             return

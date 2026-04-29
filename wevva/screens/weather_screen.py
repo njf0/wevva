@@ -18,7 +18,6 @@ from wevva.messages import (
     DaySelected,
     HourHighlighted,
     WeatherAlertsUpdated,
-    WeatherFetchFailed,
     WeatherUpdated,
 )
 from wevva.screens.air_quality_help import AirQualityHelp
@@ -284,6 +283,12 @@ class WeatherScreen(Screen[None]):
             return
         self.saved_locations_sidebar.update_weather_summary(location, summary)
 
+    def saved_location_weather_summary(self, location):
+        """Return the cached sidebar summary for one saved location, if any."""
+        if not hasattr(self, 'saved_locations_sidebar'):
+            return None
+        return self.saved_locations_sidebar.weather_summary(location)
+
     def selected_saved_location(self):
         """Return the highlighted saved location from the sidebar."""
         if not hasattr(self, 'saved_locations_sidebar'):
@@ -344,9 +349,6 @@ class WeatherScreen(Screen[None]):
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
         self.context_bar.refresh_time_display()
-
-    async def on_weather_fetch_failed(self, event: WeatherFetchFailed) -> None:
-        self.app.notify(f'Weather fetch failed: {event.error}', severity='error')
 
     async def _render_alert_cards(self, alerts: list[Alert]) -> None:
         """Mount one alert card per alert, or none when there are no alerts."""
