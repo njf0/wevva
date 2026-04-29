@@ -122,6 +122,7 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_generation += 1
         refresh_generation = self._refresh_generation
         self._cancel_alerts_task()
+        self._schedule_saved_weather_refresh()
         try:
             event = await self.controller.fetch(
                 lat=self.location.latitude,
