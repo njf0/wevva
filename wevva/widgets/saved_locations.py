@@ -110,7 +110,7 @@ class SavedLocationsSidebar(Container):
         if not self.is_mounted:
             return
 
-        highlighted_id = self._current_option_id()
+        highlighted_key = self._highlighted_location_key()
         self.locations.clear_options()
         self._location_cache.clear()
 
@@ -124,7 +124,7 @@ class SavedLocationsSidebar(Container):
             self.locations.add_option(Option(label, id=option_id))
             self._location_cache[option_id] = location
 
-            if highlighted_id == option_id:
+            if highlighted_key == location_key(location):
                 self.locations.highlighted = index
 
             if index < len(self._locations) - 1:
@@ -187,6 +187,17 @@ class SavedLocationsSidebar(Container):
             return None
         option_id = option.id
         return option_id if isinstance(option_id, str) else None
+
+    def _highlighted_location_key(self) -> str | None:
+        """Return the preferred location key to highlight."""
+        selected = self.selected_location()
+        if selected is not None:
+            return location_key(selected)
+
+        current_location = getattr(self.app, 'location', None)
+        if current_location is not None:
+            return location_key(current_location)
+        return None
 
     def selected_location(self) -> LocationMetadata | None:
         """Return the currently highlighted saved location, if any."""
