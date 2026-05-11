@@ -85,6 +85,7 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_generation = 0
         self._alerts_task: asyncio.Task[None] | None = None
         self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
+        self._saved_weather_generation = 0
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
         self.emoji_enabled = bool(emoji_enabled)
         self.warning_language = warning_language
@@ -103,7 +104,6 @@ class Wevva(App, inherit_bindings=False):
         """Start with search screen, or if location provided via CLI, fetch weather directly."""
         if self.location.latitude is not None and self.location.longitude is not None:
             self.push_screen(self.weather_screen)
-            self._schedule_saved_weather_refresh()
             await self.action_refresh()
         else:
             self.push_screen(SearchScreen())
@@ -278,15 +278,24 @@ class Wevva(App, inherit_bindings=False):
 
     def _schedule_saved_weather_refresh(self) -> None:
         """Fetch compact weather summaries for all saved locations."""
+        self._saved_weather_generation += 1
+        generation = self._saved_weather_generation
         for task in self._saved_weather_tasks.values():
             if not task.done():
                 task.cancel()
         self._saved_weather_tasks = {}
 
+        current_key = location_key(self.location)
         for index, location in enumerate(self.saved_locations):
             key = location_key(location)
+            if key == current_key:
+                continue
             self._saved_weather_tasks[key] = asyncio.create_task(
-                self._fetch_saved_weather_summary(location, delay=index * 0.1)
+                self._fetch_saved_weather_summary(
+                    location,
+                    delay=index * 0.1,
+                    generation=generation,
+                )
             )
 
     async def _fetch_saved_weather_summary(
@@ -294,6 +303,7 @@ class Wevva(App, inherit_bindings=False):
         location: LocationMetadata,
         *,
         delay: float = 0.0,
+        generation: int,
     ) -> None:
         """Fetch compact current condition text for the sidebar."""
         if location.latitude is None or location.longitude is None:
@@ -302,6 +312,8 @@ class Wevva(App, inherit_bindings=False):
         existing_summary = self.weather_screen.saved_location_weather_summary(location)
         if delay > 0:
             await asyncio.sleep(delay)
+        if generation != self._saved_weather_generation:
+            return
         try:
             data = await fetch_weather(
                 lat=location.latitude,
@@ -329,6 +341,8 @@ class Wevva(App, inherit_bindings=False):
                 condition=condition,
             )
 
+        if generation != self._saved_weather_generation:
+            return
         self.weather_screen.update_saved_location_weather(location, summary)
 
     # ---------------- Messages ----------------
@@ -356,15 +370,15 @@ class Wevva(App, inherit_bindings=False):
         if event.metadata.timezone_abbreviation:
             self.location.timezone_abbreviation = event.metadata.timezone_abbreviation
         self._has_successful_fetch = True
-        point = event.hourly.get_point(0) or {}
-        temp = point.get('temperature_2m')
-        code = point.get('weather_code')
+        current_point = event.current.forecast_timeseries[0] if event.current.forecast_timeseries else {}
+        temp = current_point.get('temperature_2m')
+        code = current_point.get('weather_code')
         condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
         self.weather_screen.update_saved_location_weather(
             self.location,
             SavedLocationWeatherSummary(
                 temperature=temp if isinstance(temp, (int, float)) else None,
-                temperature_unit=event.hourly.forecast_units.get('temperature_2m', '°C'),
+                temperature_unit=event.current.forecast_units.get('temperature_2m', '°C'),
                 condition=condition,
             ),
         )
