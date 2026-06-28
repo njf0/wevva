@@ -167,6 +167,10 @@ class Wevva(App, inherit_bindings=False):
         if location is None:
             self.notify('Highlight a saved location before deleting it.', severity='warning')
             return
+        saved_keys = {location_key(saved_location) for saved_location in self.saved_locations}
+        if location_key(location) not in saved_keys:
+            self.notify('That location is not saved yet.', severity='warning')
+            return
 
         saved_locations = remove_saved_location(location)
         self._set_saved_locations_from_config(saved_locations)

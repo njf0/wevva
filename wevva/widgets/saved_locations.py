@@ -190,13 +190,12 @@ class SavedLocationsSidebar(Container):
 
     def _highlighted_location_key(self) -> str | None:
         """Return the preferred location key to highlight."""
-        selected = self.selected_location()
-        if selected is not None:
-            return location_key(selected)
-
         current_location = getattr(self.app, 'location', None)
         if current_location is not None:
             return location_key(current_location)
+        selected = self.selected_location()
+        if selected is not None:
+            return location_key(selected)
         return None
 
     def selected_location(self) -> LocationMetadata | None:

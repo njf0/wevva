@@ -14,6 +14,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
 from wevva.alerts import Alert
+from wevva.config import location_key
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
@@ -261,14 +262,29 @@ class WeatherScreen(Screen[None]):
         self.weather_warnings.display = False
         self.alert_details_sidebar.display = False
         self.update_saved_locations_sidebar()
-        if not getattr(self.app, 'saved_locations', []):
+        current_location = getattr(self.app, 'location', None)
+        has_current_location = (
+            current_location is not None
+            and current_location.latitude is not None
+            and current_location.longitude is not None
+        )
+        if not getattr(self.app, 'saved_locations', []) and not has_current_location:
             self.saved_locations_sidebar.display = False
 
     def update_saved_locations_sidebar(self) -> None:
         """Sync saved-location sidebar from app state."""
         if not hasattr(self, 'saved_locations_sidebar'):
             return
-        locations = getattr(self.app, 'saved_locations', [])
+        locations = list(getattr(self.app, 'saved_locations', []))
+        current_location = getattr(self.app, 'location', None)
+        if (
+            current_location is not None
+            and current_location.latitude is not None
+            and current_location.longitude is not None
+        ):
+            saved_keys = {location_key(location) for location in locations}
+            if location_key(current_location) not in saved_keys:
+                locations.append(current_location)
         self.saved_locations_sidebar.set_locations(locations)
         if locations:
             self.saved_locations_sidebar.display = True
