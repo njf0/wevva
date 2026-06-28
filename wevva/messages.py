@@ -58,6 +58,14 @@ class WeatherAlertsUpdated(Message):
         self.alerts = alerts or []
 
 
+class WeatherAlertSelected(Message):
+    """Sent when the selected alert tab changes."""
+
+    def __init__(self, *, alert: Alert):
+        super().__init__()
+        self.alert = alert
+
+
 class WeatherFetchFailed(Message):
     """Sent when the weather fetch fails.
 

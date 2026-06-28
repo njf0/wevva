@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from wevva_warnings import (
     Alert,
@@ -32,19 +33,33 @@ def get_alerts(
     country_code: str | None = None,
     warning_language: str = 'auto',
 ) -> list[Alert]:
-    """Fetch active alerts for one point, returning ``[]`` on unsupported input."""
+    """Fetch current or future alerts for one point, returning ``[]`` on unsupported input."""
     normalized_country = normalize_country_code(country_code)
     if normalized_country is None:
         return []
     lang = 'en' if warning_language == 'en' else None
     try:
-        return get_alerts_for_point(
+        alerts = get_alerts_for_point(
             lat=lat,
             lon=lon,
             country_code=normalized_country,
             lang=lang,
-            active_only=True,
+            active_only=False,
         )
+        now = datetime.now(UTC)
+        visible_alerts: list[Alert] = []
+        for alert in alerts:
+            expires = alert.expires
+            if expires is None:
+                visible_alerts.append(alert)
+                continue
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=UTC)
+            else:
+                expires = expires.astimezone(UTC)
+            if expires >= now:
+                visible_alerts.append(alert)
+        return visible_alerts
     except UnsupportedCountryError:
         return []
     except Exception:

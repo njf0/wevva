@@ -17,6 +17,7 @@ from wevva.alerts import Alert
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
+    WeatherAlertSelected,
     WeatherAlertsUpdated,
     WeatherUpdated,
 )
@@ -29,7 +30,7 @@ from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
 from wevva.widgets.saved_locations import SavedLocationsSidebar
-from wevva.widgets.weather_alerts import WeatherAlertCard
+from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar, WeatherAlertsPanel
 from wevva.widgets.weather_summary import WeatherSummary
 
 ALERT_SEVERITY_RANK = {
@@ -200,7 +201,9 @@ class WeatherScreen(Screen[None]):
         # Main panel content mirrors the prior App layout
         self.main_panel = Container(id='main-panel')
         self.saved_locations_sidebar = SavedLocationsSidebar()
+        self.alert_details_sidebar = WeatherAlertDetailsSidebar()
         yield self.saved_locations_sidebar
+        yield self.alert_details_sidebar
 
         with self.main_panel:
             # Error banner area (hidden by default)
@@ -256,6 +259,7 @@ class WeatherScreen(Screen[None]):
         self.query_one('#main-panel').display = False
         self.warnings_row.display = False
         self.weather_warnings.display = False
+        self.alert_details_sidebar.display = False
         self.update_saved_locations_sidebar()
         if not getattr(self.app, 'saved_locations', []):
             self.saved_locations_sidebar.display = False
@@ -314,10 +318,10 @@ class WeatherScreen(Screen[None]):
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
         """Update all widgets with fresh weather data."""
         # Update header icon
-        if self.app.emoji_enabled:
-            self.header.icon = event.hourly.get_weather_code(0, return_emoji=True)
-        else:
-            self.header.icon = event.hourly.get_condition_abbreviation(0)
+        # if self.app.emoji_enabled:
+        #     self.header.icon = event.hourly.get_weather_code(0, return_emoji=True)
+        # else:
+        #     self.header.icon = event.hourly.get_condition_abbreviation(0)
 
         # Explicitly post message to child widgets (messages don't auto-bubble to all descendants)
         self.context_bar.post_message(event)
@@ -327,7 +331,7 @@ class WeatherScreen(Screen[None]):
 
         daily = self.query_one(DailyForecast)
         daily.post_message(event)
-        await self._render_alert_cards(event.alerts)
+        await self.render_alert_panel(event.alerts)
 
         # Reveal main panel and clear errors on success
         main_panel = self.query_one('#main-panel')
@@ -344,23 +348,29 @@ class WeatherScreen(Screen[None]):
 
     async def on_weather_alerts_updated(self, event: WeatherAlertsUpdated) -> None:
         """Render alerts that arrive after the main forecast content."""
-        await self._render_alert_cards(event.alerts)
+        await self.render_alert_panel(event.alerts)
+
+    def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
+        """Show full text for the selected alert in the details sidebar."""
+        self.alert_details_sidebar.update_alert(event.alert)
 
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
         self.context_bar.refresh_time_display()
 
-    async def _render_alert_cards(self, alerts: list[Alert]) -> None:
-        """Mount one alert card per alert, or none when there are no alerts."""
+    async def render_alert_panel(self, alerts: list[Alert]) -> None:
+        """Mount a compact tabbed alert panel, or none when there are no alerts."""
         await self.weather_warnings.remove_children()
         if not alerts:
             self.warnings_row.display = False
             self.weather_warnings.display = False
+            self.alert_details_sidebar.display = False
             return
 
         ordered_alerts = sorted(alerts, key=alert_sort_key)
-        cards = [WeatherAlertCard(alert) for alert in ordered_alerts]
-        await self.weather_warnings.mount(*cards)
+        self.alert_details_sidebar.update_alert(ordered_alerts[0])
+        self.alert_details_sidebar.display = True
+        await self.weather_warnings.mount(WeatherAlertsPanel(ordered_alerts))
         self.warnings_row.display = True
         self.weather_warnings.display = True
 
