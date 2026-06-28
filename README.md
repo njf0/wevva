@@ -17,8 +17,7 @@
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - Layout not super flexible, requires a terminal size of at least 100x43 for all elements to show fully.
-> - Temperature colour scaling is using the Met Office scale, the colours of which may not play nicely with all themes as they get towards the more extreme ends of the scale.
+> - Layout not super flexible, requires a terminal size of at least 192x53 for all elements to show fully!
 
 ## Quick Start
 
