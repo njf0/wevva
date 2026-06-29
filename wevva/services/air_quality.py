@@ -20,18 +20,3 @@ async def fetch_air_quality(lat: float, lon: float, start: str, end: str, countr
         resp = await client.get(BASE_URL, params=params)
         resp.raise_for_status()
         return resp.json()
-
-
-if __name__ == '__main__':
-    import asyncio
-
-    async def main():
-        lat = 52.52
-        lon = 13.405
-        start = '2024-06-01T00:00'
-        end = '2024-06-02T00:00'
-        country_code = 'DE'
-        data = await fetch_air_quality(lat, lon, start, end, country_code)
-        print(data)
-
-    asyncio.run(main())

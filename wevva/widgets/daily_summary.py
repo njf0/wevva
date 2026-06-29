@@ -50,12 +50,12 @@ class DailySummaryTable(DataTable):
 
         # Columns
         self.add_column('Day', width=13)
-        self.add_column('Condition', width=30)
+        self.add_column('Condition', width=31)
         self.add_column('Min-Max', width=8)
         self.add_column('Rain%', width=5)
         self.add_column('Precip', width=7)
         self.add_column('Wind', width=13)
-        self.add_column('Wind Direction', width=6)
+        self.add_column('Wind Direction', width=5)
         self.add_column('Sunrise', width=7)
         self.add_column('Sunset', width=7)
 

@@ -639,35 +639,3 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         if not point:
             return None
         return point.get('daylight_duration')
-
-
-# def fetch_all_forecasts(lat: float, lon: float):
-#     """Fetches all forecast types in one call and returns forecast objects."""
-#     response = OpenMeteoForecast.fetch_all(lat, lon)
-#     metadata = OpenMeteoForecast.extract_metadata(response)
-#     current_units = OpenMeteoForecast.extract_units(response, 'current')
-#     hourly_units = OpenMeteoForecast.extract_units(response, 'hourly')
-#     daily_units = OpenMeteoForecast.extract_units(response, 'daily')
-#     current = CurrentOpenMeteoForecast(metadata, current_units, response.get('current', {}))
-#     hourly = HourlyOpenMeteoForecast(metadata, hourly_units, response.get('hourly', {}))
-#     daily = DailyOpenMeteoForecast(metadata, daily_units, response.get('daily', {}))
-#     return current, hourly, daily
-
-
-if __name__ == '__main__':
-    import asyncio
-
-    async def main():
-        # Few test calls
-        lat, lon = 51.5074, -0.1278  # London
-        response = await OpenMeteoForecast.fetch_all(lat, lon)
-        metadata = OpenMeteoForecast.extract_metadata(response)
-        daily_units = OpenMeteoForecast.extract_units(response, 'daily')
-        daily = DailyOpenMeteoForecast(metadata, daily_units, response.get('daily', {}))
-
-        print('Metadata:')
-        print(metadata)
-        print('Sunset tomorrow:')
-        print(f' {daily.get_sunset(1)}')
-
-    asyncio.run(main())

@@ -28,15 +28,3 @@ async def fetch_weather(
         wind_speed_unit=wind_speed_unit,
         precipitation_unit=precipitation_unit,
     )
-
-
-if __name__ == '__main__':
-    import asyncio
-
-    async def main():
-        lat = 52.52
-        lon = 13.405
-        data = await fetch_weather(lat=lat, lon=lon)
-        print(data)
-
-    asyncio.run(main())

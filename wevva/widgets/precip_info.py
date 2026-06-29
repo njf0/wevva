@@ -87,9 +87,6 @@ class PrecipWidget(WeatherWidget):
             colour = theme_vars.get(theme_key)
             precip_data.append((type_name, amount, colour))
 
-        # Return the type with maximum amount
-        # return max(precip_data, key=lambda t: t[1])
-        # If all amounts are zero, return 'precip.'
         max_type = max(precip_data, key=lambda t: t[1])
         if max_type[1] == 0:
             return 'precip.', 0, self.app.theme_variables.get('foreground')
