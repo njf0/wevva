@@ -79,12 +79,6 @@ class WeatherScreen(Screen[None]):
         self._time_refresh_timer = None  # Track the 1-second update timer
 
     DEFAULT_CSS = """
-    # Tooltip {
-    #     # padding: 2 4;
-    #     border: $primary;
-    #     # color: auto 90%;
-    # }
-
     #main-panel {
         layout: vertical;
         align-horizontal: center;
@@ -110,8 +104,6 @@ class WeatherScreen(Screen[None]):
         content-align: center middle;
         hatch: right $background-lighten-1;
         height: auto;
-        # width: auto;
-        # overflow-x: auto;
         margin: 0 0 1 0;
     }
 
@@ -122,8 +114,6 @@ class WeatherScreen(Screen[None]):
         content-align: center middle;
         hatch: right $background-lighten-1;
         height: auto;
-        # width: auto;
-        # overflow-x: auto;
         margin: 0 0 1 0;
     }
 
@@ -149,15 +139,11 @@ class WeatherScreen(Screen[None]):
     }
 
     #weather-summary {
-        # padding: 0 1;
         align-horizontal: center;
         align-vertical: middle;
         content-align: center middle;
         height: auto;
         width: 98;
-        # border: round $primary;
-        # border-title-color: $primary;
-        # border-title-align: left;
     }
 
 
@@ -179,7 +165,6 @@ class WeatherScreen(Screen[None]):
         height: auto;
         content-align: center middle;
         overflow-y: auto;
-        # margin: 0 0 1 0;
         hatch: right $background-lighten-1;
     }
 
@@ -218,7 +203,6 @@ class WeatherScreen(Screen[None]):
                 self.weather_summary = WeatherSummary()
                 yield self.weather_summary
 
-            # Weather alerts section (legacy container ID kept for CSS stability)
             self.warnings_row = Container(id='warnings-row')
             with self.warnings_row:
                 self.weather_warnings = Container(id='weather-warnings')
@@ -233,17 +217,15 @@ class WeatherScreen(Screen[None]):
             with self.next_24_hours:
                 yield HourlyForecast()
 
-            # Daily forecast (7-day view) - temporarily disabled
+            # Daily forecast (7-day view)
             self.daily_forecast = Container(id='daily-forecast')
             with self.daily_forecast:
                 yield DailyForecast()
 
-            # Bottom info bar (misnamed Top) moved to the bottom
             self.bottom_info_bar = Container(id='lower-row')
             with self.bottom_info_bar:
                 self.context_bar = ContextBar()
                 yield self.context_bar
-                # Air quality widget is mounted inside ContextBar
 
         # Footer (credits moved to a dedicated screen)
         yield Footer()
@@ -333,12 +315,6 @@ class WeatherScreen(Screen[None]):
     # --- Messages ---
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
         """Update all widgets with fresh weather data."""
-        # Update header icon
-        # if self.app.emoji_enabled:
-        #     self.header.icon = event.hourly.get_weather_code(0, return_emoji=True)
-        # else:
-        #     self.header.icon = event.hourly.get_condition_abbreviation(0)
-
         # Explicitly post message to child widgets (messages don't auto-bubble to all descendants)
         self.context_bar.post_message(event)
         self.current_weather.post_message(event)

@@ -10,7 +10,7 @@
 
 - Place search using Open-Meteo geocoding
 - Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
-- Active weather alerts (normalized provider data)
+- Current and upcoming weather alerts (normalized provider data)
 - Unit preferences (temperature, wind, precipitation)
 - Theme toggle and optional emoji rendering
 - Interactive setup wizard for defaults
@@ -83,16 +83,14 @@ uvx wevva --clear-default-location
 ## Weather Alerts
 
 <p align="center">
-  <img src="docs/assets/warning.PNG" alt="wevva weather alert card screenshot" width="900">
+  <img src="docs/assets/warning.PNG" alt="wevva weather alert panel screenshot" width="900">
 </p>
 
-- Weather alerts are using my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
-  - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many active alerts in the country.
-- Where a provider includes an official alert URL, `wevva` shows it directly on the alert card so you can jump out to the source document.
+- Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
+  - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
+- Alerts appear as compact tabs, with the full provider text shown in the details sidebar.
+- Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
-
-> [!TIP]
-> Hover over the alert to show a tooltip with the full warning description from the provider.
 
 ## Library Usage
 

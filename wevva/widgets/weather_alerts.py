@@ -89,7 +89,6 @@ class WeatherAlertsPanel(Container):
 
     #weather-alert-body {
         width: 100%;
-        # height: 2;
         padding: 0 1;
         text-align: left;
     }
@@ -147,7 +146,8 @@ class WeatherAlertsPanel(Container):
 
         severity_color = alert_severity_color(self.app.theme_variables, alert)
         if severity_color:
-            return Text.from_markup(f'[bold {severity_color}]{escape(severity.title() or "Alert")}[/] {escape(condition)}')
+            severity_text = escape(severity.title() or 'Alert')
+            return Text.from_markup(f'[bold {severity_color}]{severity_text}[/] {escape(condition)}')
         return Text.from_markup(f'[bold]{escape(severity.title() or "Alert")}[/] {escape(condition)}')
 
     def build_body(self, alert: Alert, severity_color: str | None) -> str:
@@ -165,7 +165,8 @@ class WeatherAlertsPanel(Container):
 
         if onset is not None and end is not None:
             line = (
-                f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i] [dim italic]until[/] [i]{self.fmt_clock(end)}[/i]'
+                f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i] '
+                f'[dim italic]until[/] [i]{self.fmt_clock(end)}[/i]'
             )
         elif onset is not None:
             line = f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i]'
@@ -220,15 +221,11 @@ class WeatherAlertDetailsSidebar(VerticalScroll):
         margin: 2 2 2 0;
         background: $background;
         border: round $primary;
-        # overflow-y: scroll;
-
     }
 
     #weather-alert-details {
         width: 100%;
-        # height: 100%;
         padding: 0 1;
-        # overflow-y: scroll;
     }
     """
 
