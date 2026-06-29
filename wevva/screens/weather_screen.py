@@ -315,6 +315,10 @@ class WeatherScreen(Screen[None]):
     # --- Messages ---
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
         """Update all widgets with fresh weather data."""
+        self.header.icon = ''
+        if self.app.emoji_enabled:
+            self.header.icon = event.hourly.get_condition_emoji(0)
+
         # Explicitly post message to child widgets (messages don't auto-bubble to all descendants)
         self.context_bar.post_message(event)
         self.current_weather.post_message(event)

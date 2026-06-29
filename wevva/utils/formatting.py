@@ -3,7 +3,7 @@
 Provides emoji normalization, character width handling, and date formatting.
 """
 
-from wcwidth import wcwidth
+from wcwidth import wcwidth, wcswidth
 
 
 def normalize_emoji(emoji: str, target_width: int = 2) -> str:
@@ -20,17 +20,21 @@ def normalize_emoji(emoji: str, target_width: int = 2) -> str:
     if not emoji:
         return emoji
 
-    # Measure display width across codepoints
-    width = 0
-    for ch in emoji:
-        ch_width = wcwidth(ch)
-        width += ch_width if ch_width is not None else 1
+    # Measure the whole sequence so emoji variation selectors do not get undercounted.
+    width = wcswidth(emoji)
+    if width < 0:
+        width = sum(max(wcwidth(ch), 0) for ch in emoji)
 
     # Pad if needed
     if width < target_width:
         return emoji + ' ' * (target_width - width)
 
     return emoji
+
+
+def emoji_prefix(emoji: str) -> str:
+    """Return an emoji padded as a stable icon prefix before text."""
+    return normalize_emoji(emoji, target_width=3) if emoji else ''
 
 
 def norm_character_width(cell: str, norm_width: bool = True) -> tuple[str, int]:

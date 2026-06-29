@@ -17,7 +17,7 @@ from textual.widgets import Static
 
 from wevva.conditions import get_condition
 from wevva.messages import HourHighlighted, WeatherUpdated
-from wevva.utils import normalize_emoji
+from wevva.utils import emoji_prefix
 
 
 class WeatherSummary(Container):
@@ -118,9 +118,13 @@ class WeatherSummary(Container):
 
         date_str, time_str = self._resolve_time(idx)
         emoji, cond_name, cond_color = self._condition_parts(idx, theme)
+        condition_text = Text()
+        if emoji:
+            condition_text.append(emoji_prefix(emoji))
+        condition_text.append(cond_name, style=f'bold italic {cond_color}')
 
         # Format: '{condition} in {location} on {date} at {time}'
-        self.condition.update(Text.from_markup(f'[bold italic {cond_color}]{cond_name}[/]'))
+        self.condition.update(condition_text)
         self.place.update(Text.from_markup(self._build_place_markup(place)))
         self.datetime.update(f'[dim][i] on [/dim][b]{date_str}[/b] [dim][i]at [/dim][b]{time_str}[/b]')
 
@@ -146,7 +150,7 @@ class WeatherSummary(Container):
 
     def _condition_parts(self, idx: int, theme: dict) -> tuple[str, str, str]:
         """Get emoji, name, and color for the weather condition at given hour."""
-        emoji = normalize_emoji(self.hourly.get_condition_emoji(idx)) if self.app.emoji_enabled else ''
+        emoji = self.hourly.get_condition_emoji(idx) if self.app.emoji_enabled else ''
         cond_name = self.hourly.get_weather_code(idx, return_emoji=False)
 
         # Get theme color from condition's color_var

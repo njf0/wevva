@@ -11,7 +11,7 @@ Submodules:
 from wevva.utils.colors import rain_colour, temp_colour, wind_colour
 
 # Formatting utilities
-from wevva.utils.formatting import date_suffix, norm_character_width, normalize_emoji
+from wevva.utils.formatting import date_suffix, emoji_prefix, norm_character_width, normalize_emoji
 
 # Geographic utilities
 from wevva.utils.geo import bearing_to_direction, country_code_to_flag
@@ -26,6 +26,7 @@ __all__ = [
     'wind_colour',
     # Formatting
     'date_suffix',
+    'emoji_prefix',
     'norm_character_width',
     'normalize_emoji',
     # Geographic

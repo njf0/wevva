@@ -14,7 +14,7 @@ from wevva.conditions import Condition
 from wevva.config import location_key, location_label
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import SavedLocationSelected
-from wevva.utils import temp_colour
+from wevva.utils import emoji_prefix, temp_colour
 
 
 @dataclass
@@ -24,6 +24,7 @@ class SavedLocationWeatherSummary:
     temperature: float | None = None
     temperature_unit: str = '°C'
     condition: Condition | None = None
+    condition_emoji: str = ''
     error: bool = False
 
 
@@ -173,6 +174,8 @@ class SavedLocationsSidebar(Container):
         if condition is not None:
             colour = theme_vars.get(condition.color_var) if condition.color_var else None
             style = f'italic {colour}' if colour else 'italic'
+            if self.app.emoji_enabled and summary.condition_emoji:
+                text.append(emoji_prefix(summary.condition_emoji))
             text.append(condition.name, style=style)
         else:
             text.append('--', style='italic dim')

@@ -12,7 +12,7 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from wevva.conditions import get_condition
-from wevva.utils import rain_colour, temp_colour, wind_colour
+from wevva.utils import emoji_prefix, rain_colour, temp_colour, wind_colour
 
 
 class DailySummaryTable(DataTable):
@@ -50,8 +50,6 @@ class DailySummaryTable(DataTable):
 
         # Columns
         self.add_column('Day', width=13)
-        # if show_emoji:
-        # self.add_column('Emoji', width=2)
         self.add_column('Condition', width=30)
         self.add_column('Min-Max', width=8)
         self.add_column('Rain%', width=5)
@@ -84,13 +82,13 @@ class DailySummaryTable(DataTable):
         # === Condition cell with optional emoji ===
         day_model = self.daily_model.forecast_timeseries[model_idx]
         cond = get_condition(day_model.get('weather_code'))
-        condition_text = self.daily_model.get_weather_code(model_idx, return_emoji=False)
-        prefix = ' ' if show_emoji else ''
-        condition_cell = Text(
-            f'{prefix}{condition_text}',
-            style=f'italic {theme_vars.get(cond.color_var)}',
-            justify='left',
-        )
+        condition_name = self.daily_model.get_weather_code(model_idx, return_emoji=False)
+        condition_colour = theme_vars.get(cond.color_var) if (cond and cond.color_var) else theme_vars.get('primary')
+        condition_style = f'italic {condition_colour}' if condition_colour else 'italic'
+        condition_cell = Text(justify='left')
+        if show_emoji:
+            condition_cell.append(emoji_prefix(self.daily_model.get_weather_code(model_idx, return_emoji=True)))
+        condition_cell.append(condition_name, style=condition_style)
 
         # === Min/max temperature cell with colour ===
         min_temp = self.daily_model.get_temperature_min(model_idx)
@@ -176,8 +174,6 @@ class DailySummaryTable(DataTable):
 
         # Assemble row
         cells = [day_cell]
-        # if show_emoji:
-        #     cells.append(emoji_cell)
         cells.extend(
             [
                 condition_cell,

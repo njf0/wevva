@@ -339,10 +339,14 @@ class Wevva(App, inherit_bindings=False):
             temp = current.get('temperature_2m')
             code = current.get('weather_code')
             condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+            condition_emoji = ''
+            if condition is not None:
+                condition_emoji = condition.night_emoji if current.get('is_day') == 0 else condition.day_emoji
             summary = SavedLocationWeatherSummary(
                 temperature=temp if isinstance(temp, (int, float)) else None,
                 temperature_unit=units.get('temperature_2m', '°C'),
                 condition=condition,
+                condition_emoji=condition_emoji,
             )
 
         if generation != self._saved_weather_generation:
@@ -378,12 +382,16 @@ class Wevva(App, inherit_bindings=False):
         temp = current_point.get('temperature_2m')
         code = current_point.get('weather_code')
         condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+        condition_emoji = ''
+        if condition is not None:
+            condition_emoji = condition.night_emoji if current_point.get('is_day') == 0 else condition.day_emoji
         self.weather_screen.update_saved_location_weather(
             self.location,
             SavedLocationWeatherSummary(
                 temperature=temp if isinstance(temp, (int, float)) else None,
                 temperature_unit=event.current.forecast_units.get('temperature_2m', '°C'),
                 condition=condition,
+                condition_emoji=condition_emoji,
             ),
         )
         self.weather_screen.update_saved_locations_sidebar()
