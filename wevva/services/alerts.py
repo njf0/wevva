@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from wevva_warnings import (
     Alert,
     UnsupportedCountryError,
+    WarningQueryProgress,
     get_alerts_for_point,
     get_alerts_for_source,
 )
@@ -32,8 +33,14 @@ def get_alerts(
     lon: float,
     country_code: str | None = None,
     warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
 ) -> list[Alert]:
-    """Fetch current or future alerts for one point, returning ``[]`` on unsupported input."""
+    """Fetch current or future alerts for one point.
+
+    ``progress`` receives optional public progress events from
+    ``wevva-warnings``. It runs on this function's calling thread and does not
+    affect the returned alert list.
+    """
     normalized_country = normalize_country_code(country_code)
     if normalized_country is None:
         return []
@@ -45,6 +52,7 @@ def get_alerts(
             country_code=normalized_country,
             lang=lang,
             active_only=False,
+            progress=progress,
         )
         now = datetime.now(UTC)
         visible_alerts: list[Alert] = []
@@ -71,14 +79,20 @@ async def get_alerts_async(
     lon: float,
     country_code: str | None = None,
     warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
 ) -> list[Alert]:
-    """Async wrapper for point-based alert lookups."""
+    """Async wrapper for point-based alert lookups.
+
+    The optional progress callback runs in the worker thread used for the
+    blocking warning-provider query.
+    """
     return await asyncio.to_thread(
         get_alerts,
         lat,
         lon,
         country_code,
         warning_language,
+        progress,
     )
 
 

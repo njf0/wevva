@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
-from textual.widgets import OptionList
+from textual.widgets import OptionList, ProgressBar
 from textual.widgets.option_list import Option
 
 from wevva.conditions import Condition
@@ -39,31 +39,25 @@ class SavedLocationsSidebar(Container):
         # margin-bottom: 1;
         # margin-top: 1;
         margin: 2 0 2 2;
-        # border-right: heavy $primary;
+        layout: vertical;
         background: $background;
-        hatch: right $primary-muted;
-        border: round $primary;
+        hatch: right $background-lighten-1;
     }
 
     SavedLocationsSidebar.hidden {
         display: none;
     }
 
-    #saved-location-header {
-        height: 3;
+    #saved-locations-panel {
+        height: 1fr;
         width: 100%;
-    }
-
-    #saved-location-title {
-        height: 3;
-        width: 100%;
-        content-align: center middle;
-        color: $primary;
-        text-style: bold;
+        margin: 0;
+        border: round $primary;
+        background: $background;
     }
 
     #saved-location-list {
-        height: 1fr;
+        height: 100%;
         width: 100%;
         # border: round $primary-muted;
         border: none;
@@ -73,18 +67,53 @@ class SavedLocationsSidebar(Container):
     #saved-location-list > .option-list--separator {
         color: $primary-muted;
     }
+
+    #saved-location-warning-progress {
+        layout: vertical;
+        width: 100%;
+        height: auto;
+        padding: 0 1;
+        margin: 1 0 0 0;
+        border: round $primary;
+        background: $background;
+        color: $text-muted;
+    }
+
+    #saved-location-warning-progress-bar {
+        width: 100%;
+        height: 1;
+    }
+
+    #saved-location-warning-progress-bar > Bar {
+        width: 1fr;
+    }
     """
 
     def __init__(self, *, id: str = 'saved-locations-sidebar') -> None:
         super().__init__(id=id)
-        self.border_title = 'Saved Locations'
-        self.styles.border_title_align = 'left'
         self._locations: list[LocationMetadata] = []
         self._location_cache: dict[str, LocationMetadata] = {}
         self._weather_summaries: dict[str, SavedLocationWeatherSummary] = {}
 
     def compose(self) -> ComposeResult:
-        yield OptionList(id='saved-location-list')
+        self.locations_panel = Container(id='saved-locations-panel')
+        self.locations_panel.border_title = 'Saved Locations'
+        self.locations_panel.styles.border_title_align = 'left'
+        with self.locations_panel:
+            yield OptionList(id='saved-location-list')
+
+        self.warning_progress = Container(id='saved-location-warning-progress')
+        self.warning_progress.border_title = 'Checking warnings'
+        self.warning_progress.styles.border_title_align = 'left'
+        self.warning_progress.display = False
+        with self.warning_progress:
+            self.warning_progress_bar = ProgressBar(
+                total=None,
+                show_percentage=True,
+                show_eta=False,
+                id='saved-location-warning-progress-bar',
+            )
+            yield self.warning_progress_bar
 
     @property
     def locations(self) -> OptionList:
@@ -106,6 +135,36 @@ class SavedLocationsSidebar(Container):
     def weather_summary(self, location: LocationMetadata) -> SavedLocationWeatherSummary | None:
         """Return the cached summary for one saved location, if any."""
         return self._weather_summaries.get(location_key(location))
+
+    def update_warning_progress(self, event: str, payload: dict[str, object]) -> None:
+        """Show progress only while individual warning work has a known total."""
+        details = self._warning_progress_details(event, payload)
+        if details is None:
+            return
+        completed, total = details
+        self.warning_progress_bar.update(total=total, progress=completed)
+        self.warning_progress.display = True
+
+    def clear_warning_progress(self) -> None:
+        """Hide the transient warning-query progress panel."""
+        self.warning_progress_bar.update(total=None, progress=0)
+        self.warning_progress.display = False
+
+    @staticmethod
+    def _warning_progress_details(event: str, payload: dict[str, object]) -> tuple[int, int] | None:
+        """Return sidebar progress-bar data for individual warning work."""
+        total = payload.get('total')
+        completed = payload.get('completed')
+        phase = payload.get('phase')
+        if event not in {'alerts_total', 'alerts_checked'} or not isinstance(total, int) or total <= 0:
+            return None
+        if phase not in {'documents', 'geometry', 'matching'}:
+            return None
+
+        progress = 0 if event == 'alerts_total' else completed
+        if not isinstance(progress, int):
+            return None
+        return progress, total
 
     def _render_locations(self) -> None:
         if not self.is_mounted:

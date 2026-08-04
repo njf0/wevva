@@ -58,6 +58,16 @@ class WeatherAlertsUpdated(Message):
         self.alerts = alerts or []
 
 
+class WeatherAlertsProgress(Message):
+    """Sent while a background warning query is still running."""
+
+    def __init__(self, *, event: str, payload: dict[str, object]):
+        """Create a progress update from the public warning-library callback."""
+        super().__init__()
+        self.event = event
+        self.payload = dict(payload)
+
+
 class WeatherAlertSelected(Message):
     """Sent when the selected alert tab changes."""
 

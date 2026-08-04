@@ -9,6 +9,11 @@ committed `uv.lock`.
 uv sync --locked
 ```
 
+For warning-progress development, `pyproject.toml` intentionally resolves
+`wevva-warnings` from the editable sibling checkout `../wevva-warnings` via
+`[tool.uv.sources]`. The released dependency requirement is `>=0.3.3`; do not
+release this project until that warning-library version is published.
+
 The following local commands have been checked in this repository:
 
 ```bash

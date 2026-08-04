@@ -19,6 +19,7 @@ from wevva.messages import (
     DaySelected,
     HourHighlighted,
     WeatherAlertSelected,
+    WeatherAlertsProgress,
     WeatherAlertsUpdated,
     WeatherUpdated,
 )
@@ -346,6 +347,10 @@ class WeatherScreen(Screen[None]):
         """Render alerts that arrive after the main forecast content."""
         await self.render_alert_panel(event.alerts)
 
+    def on_weather_alerts_progress(self, event: WeatherAlertsProgress) -> None:
+        """Forward individual warning work to the saved-locations sidebar."""
+        self.saved_locations_sidebar.update_warning_progress(event.event, event.payload)
+
     def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
         """Show full text for the selected alert in the details sidebar."""
         self.alert_details_sidebar.update_alert(event.alert)
@@ -357,6 +362,7 @@ class WeatherScreen(Screen[None]):
     async def render_alert_panel(self, alerts: list[Alert]) -> None:
         """Mount a compact tabbed alert panel, or none when there are no alerts."""
         await self.weather_warnings.remove_children()
+        self.saved_locations_sidebar.clear_warning_progress()
         if not alerts:
             self.warnings_row.display = False
             self.weather_warnings.display = False

@@ -15,6 +15,9 @@ the `wevva-warnings` package. It also exposes small async and sync Python APIs.
   interactions, and styling.
 - `wevva/openmeteo.py` and `wevva/services/` — API requests and forecast,
   geocoding, air-quality, and warning boundaries.
+- Warning progress flows from `wevva/services/alerts.py` through `Wevva` and
+  `WeatherAlertsProgress` to `SavedLocationsSidebar`; keep its worker-thread
+  and stale-refresh safeguards intact.
 - `wevva/api.py`, `wevva/models.py`, and `wevva/__init__.py` — public Python
   API and exported models.
 - `wevva/config.py` and `wevva/location_metadata.py` — persisted preferences
@@ -32,7 +35,7 @@ Read `docs/architecture.md` before changing a cross-cutting path, and
   changes them.
 - Treat sync and async public paths as separate compatibility surfaces.
 - Be cautious with Open-Meteo response assumptions, persisted configuration,
-  background refresh tasks, and terminal layout.
+  background refresh tasks, warning-progress callbacks, and terminal layout.
 - Update these documents when commands or architectural boundaries change.
 
 ## Commands

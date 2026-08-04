@@ -23,6 +23,7 @@ from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
     PlaceSelected,
     SavedLocationSelected,
+    WeatherAlertsProgress,
     WeatherAlertsUpdated,
     WeatherFetchFailed,
     WeatherUpdated,
@@ -439,12 +440,34 @@ class Wevva(App, inherit_bindings=False):
         refresh_generation: int,
     ) -> None:
         """Fetch alerts in the background and post them if still current."""
+        loop = asyncio.get_running_loop()
+        provider_names: dict[str, str] = {}
+
+        def report_progress(event: str, payload: dict[str, object]) -> None:
+            """Transfer the warning worker's callback safely to the TUI loop."""
+            payload = dict(payload)
+            source = payload.get('source')
+            provider_name = payload.get('provider_name')
+            if isinstance(source, str) and isinstance(provider_name, str) and provider_name:
+                provider_names[source] = provider_name
+            elif isinstance(source, str) and source in provider_names:
+                payload['provider_name'] = provider_names[source]
+            loop.call_soon_threadsafe(
+                self._post_alert_progress_if_current,
+                event,
+                payload,
+                lat,
+                lon,
+                refresh_generation,
+            )
+
         try:
             alerts = await get_alerts_async(
                 lat,
                 lon,
                 country_code or None,
                 self.warning_language,
+                progress=report_progress,
             )
         except asyncio.CancelledError:
             raise
@@ -456,3 +479,18 @@ class Wevva(App, inherit_bindings=False):
         if self.location.latitude != lat or self.location.longitude != lon:
             return
         self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
+
+    def _post_alert_progress_if_current(
+        self,
+        event: str,
+        payload: dict[str, object],
+        lat: float,
+        lon: float,
+        refresh_generation: int,
+    ) -> None:
+        """Post progress only when it still belongs to the active location."""
+        if refresh_generation != self._refresh_generation:
+            return
+        if self.location.latitude != lat or self.location.longitude != lon:
+            return
+        self.weather_screen.post_message(WeatherAlertsProgress(event=event, payload=payload))
