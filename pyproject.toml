@@ -1,6 +1,6 @@
 [project]
 name = "wevva"
-version = "0.4.2"
+version = "0.4.3"
 description = "Textual TUI for viewing weather via Open-Meteo"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,11 +23,8 @@ dependencies = [
     "textual>=3.1.0",
     "typer>=0.21.1",
     "wcwidth>=0.2.13",
-    "wevva-warnings>=0.3.3",
+    "wevva-warnings>=0.3.5",
 ]
-
-[tool.uv.sources]
-wevva-warnings = { path = "../wevva-warnings", editable = true }
 
 [project.scripts]
 wevva = "wevva.cli:app"

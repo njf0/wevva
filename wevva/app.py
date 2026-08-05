@@ -1,11 +1,12 @@
 """Textual TUI for displaying weather forecasts."""
 
 import asyncio
+import time
 from typing import ClassVar
 
 from textual.app import App
 
-from wevva.alerts import get_alerts_async
+from wevva.alerts import Alert
 from wevva.config import (
     add_saved_location,
     load_preferences,
@@ -32,8 +33,16 @@ from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.services.alerts import (
+    _get_alert_candidates_async_with_status,
+    _match_alert_candidates,
+    normalize_country_code,
+)
 from wevva.services.weather import fetch_weather
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
+
+
+AlertCacheKey = tuple[str | None, str]
 
 
 class Wevva(App, inherit_bindings=False):
@@ -44,13 +53,15 @@ class Wevva(App, inherit_bindings=False):
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ('q', 'quit', 'Quit'),  # exit the app
         ('s', 'search', 'Search'),  # open place search screen
-        ('r', 'refresh', 'Refresh'),  # fetch latest forecast
+        ('r', 'force_refresh', 'Refresh'),  # fetch latest forecast and warnings
         ('l', 'toggle_locations', 'Locations'),  # show/hide saved locations
         ('a', 'save_current_location', 'Save Location'),
         ('d', 'delete_saved_location', 'Delete Location'),
         ('h', 'help', 'Help'),  # show quick help
         ('u', 'settings', 'Settings'),  # open settings
     ]
+
+    ALERT_CACHE_TTL_SECONDS = 15 * 60
 
     def __init__(
         self,
@@ -85,6 +96,8 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_in_flight = False  # debounce concurrent refreshes
         self._refresh_generation = 0
         self._alerts_task: asyncio.Task[None] | None = None
+        self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
+        self._alert_cache_clock = time.monotonic
         self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
         self._saved_weather_generation = 0
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
@@ -113,6 +126,14 @@ class Wevva(App, inherit_bindings=False):
     # Actions / key bindings
     # ------------------------------------------------------------
     async def action_refresh(self) -> None:
+        """Programmatically refresh weather, reusing a valid warning result."""
+        await self._refresh_weather(force_alert_refresh=False)
+
+    async def action_force_refresh(self) -> None:
+        """Refresh weather and explicitly bypass the warning-result cache."""
+        await self._refresh_weather(force_alert_refresh=True)
+
+    async def _refresh_weather(self, *, force_alert_refresh: bool) -> None:
         """Fetch via controller and broadcast `WeatherUpdated`."""
         if self._refresh_in_flight:
             return
@@ -132,7 +153,7 @@ class Wevva(App, inherit_bindings=False):
             )
             # Forward fresh data to the weather screen
             self.weather_screen.post_message(event)
-            self._schedule_alert_refresh(refresh_generation)
+            self._schedule_alert_refresh(refresh_generation, force_refresh=force_alert_refresh)
         except Exception as e:
             # Forward error to the weather screen to surface it
             self.weather_screen.post_message(WeatherFetchFailed(e))
@@ -416,17 +437,36 @@ class Wevva(App, inherit_bindings=False):
             self._alerts_task.cancel()
         self._alerts_task = None
 
-    def _schedule_alert_refresh(self, refresh_generation: int) -> None:
-        """Start a background alert fetch for the current location."""
+    def _schedule_alert_refresh(self, refresh_generation: int, *, force_refresh: bool = False) -> None:
+        """Use a cached alert result or start a background alert fetch."""
         lat = self.location.latitude
         lon = self.location.longitude
         if lat is None or lon is None:
             return
+        country_code = normalize_country_code(self.location.country_code)
+        warning_language = 'en' if self.warning_language == 'en' else 'auto'
+        cache_key = (country_code, warning_language)
+        if not force_refresh:
+            entry = self._alert_cache.get(cache_key)
+            if entry is not None and self._alert_cache_clock() - entry[0] >= self.ALERT_CACHE_TTL_SECONDS:
+                del self._alert_cache[cache_key]
+                entry = None
+            if entry is not None:
+                if (
+                    refresh_generation == self._refresh_generation
+                    and self.location.latitude == lat
+                    and self.location.longitude == lon
+                ):
+                    alerts = _match_alert_candidates(list(entry[1]), lat, lon)
+                    self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
+                return
         self._alerts_task = asyncio.create_task(
             self._fetch_alerts_for_location(
                 lat=lat,
                 lon=lon,
-                country_code=self.location.country_code,
+                country_code=country_code,
+                warning_language=warning_language,
+                cache_key=cache_key,
                 refresh_generation=refresh_generation,
             )
         )
@@ -436,7 +476,9 @@ class Wevva(App, inherit_bindings=False):
         *,
         lat: float,
         lon: float,
-        country_code: str,
+        country_code: str | None,
+        warning_language: str,
+        cache_key: AlertCacheKey,
         refresh_generation: int,
     ) -> None:
         """Fetch alerts in the background and post them if still current."""
@@ -462,22 +504,27 @@ class Wevva(App, inherit_bindings=False):
             )
 
         try:
-            alerts = await get_alerts_async(
-                lat,
-                lon,
-                country_code or None,
-                self.warning_language,
+            candidates, completed = await _get_alert_candidates_async_with_status(
+                country_code,
+                warning_language,
                 progress=report_progress,
             )
         except asyncio.CancelledError:
             raise
         except Exception:
-            alerts = []
+            candidates = []
+            completed = False
 
-        if refresh_generation != self._refresh_generation:
+        if completed:
+            self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
+
+        if (
+            refresh_generation != self._refresh_generation
+            or self.location.latitude != lat
+            or self.location.longitude != lon
+        ):
             return
-        if self.location.latitude != lat or self.location.longitude != lon:
-            return
+        alerts = _match_alert_candidates(candidates, lat, lon)
         self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
 
     def _post_alert_progress_if_current(
@@ -489,8 +536,10 @@ class Wevva(App, inherit_bindings=False):
         refresh_generation: int,
     ) -> None:
         """Post progress only when it still belongs to the active location."""
-        if refresh_generation != self._refresh_generation:
-            return
-        if self.location.latitude != lat or self.location.longitude != lon:
+        if (
+            refresh_generation != self._refresh_generation
+            or self.location.latitude != lat
+            or self.location.longitude != lon
+        ):
             return
         self.weather_screen.post_message(WeatherAlertsProgress(event=event, payload=payload))

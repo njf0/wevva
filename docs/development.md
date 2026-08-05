@@ -9,10 +9,10 @@ committed `uv.lock`.
 uv sync --locked
 ```
 
-For warning-progress development, `pyproject.toml` intentionally resolves
-`wevva-warnings` from the editable sibling checkout `../wevva-warnings` via
-`[tool.uv.sources]`. The released dependency requirement is `>=0.3.3`; do not
-release this project until that warning-library version is published.
+Warning progress and country-level warning caching use the published
+`wevva-warnings>=0.3.5` dependency. A local sibling checkout can still be used
+for warning-library development by temporarily adding a `tool.uv.sources`
+override, but that override must not be committed for a release.
 
 The following local commands have been checked in this repository:
 

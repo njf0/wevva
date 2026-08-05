@@ -9,8 +9,10 @@ from wevva_warnings import (
     Alert,
     UnsupportedCountryError,
     WarningQueryProgress,
+    get_alerts_for_country,
     get_alerts_for_point,
     get_alerts_for_source,
+    match_alerts_to_point,
 )
 
 from wevva.utils.country_codes import get_alpha2_by_alpha3
@@ -28,6 +30,80 @@ def normalize_country_code(country_code: str | None) -> str | None:
     return None
 
 
+def _filter_visible_alerts(alerts: list[Alert], *, now: datetime | None = None) -> list[Alert]:
+    """Return alerts whose expiry has not passed."""
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    else:
+        now = now.astimezone(UTC)
+
+    visible_alerts: list[Alert] = []
+    for alert in alerts:
+        expires = alert.expires
+        if expires is None:
+            visible_alerts.append(alert)
+            continue
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        else:
+            expires = expires.astimezone(UTC)
+        if expires >= now:
+            visible_alerts.append(alert)
+    return visible_alerts
+
+
+def _get_alerts_with_status(
+    lat: float,
+    lon: float,
+    country_code: str | None = None,
+    warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
+) -> tuple[list[Alert], bool]:
+    """Fetch alerts, retaining whether an empty result is a success."""
+    normalized_country = normalize_country_code(country_code)
+    if normalized_country is None:
+        return [], True
+    lang = 'en' if warning_language == 'en' else None
+    try:
+        alerts = get_alerts_for_point(
+            lat=lat,
+            lon=lon,
+            country_code=normalized_country,
+            lang=lang,
+            active_only=False,
+            progress=progress,
+        )
+        return _filter_visible_alerts(alerts), True
+    except UnsupportedCountryError:
+        return [], True
+    except Exception:
+        return [], False
+
+
+def _get_alert_candidates_with_status(
+    country_code: str | None,
+    warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
+) -> tuple[list[Alert], bool]:
+    """Fetch country candidates and retain whether the query completed."""
+    normalized_country = normalize_country_code(country_code)
+    if normalized_country is None:
+        return [], True
+    lang = 'en' if warning_language == 'en' else None
+    try:
+        return get_alerts_for_country(normalized_country, lang=lang, progress=progress), True
+    except UnsupportedCountryError:
+        return [], True
+    except Exception:
+        return [], False
+
+
+def _match_alert_candidates(candidates: list[Alert], lat: float, lon: float) -> list[Alert]:
+    """Match cached country candidates locally and hide expired alerts."""
+    return _filter_visible_alerts(match_alerts_to_point(candidates, lat=lat, lon=lon))
+
+
 def get_alerts(
     lat: float,
     lon: float,
@@ -41,37 +117,45 @@ def get_alerts(
     ``wevva-warnings``. It runs on this function's calling thread and does not
     affect the returned alert list.
     """
-    normalized_country = normalize_country_code(country_code)
-    if normalized_country is None:
-        return []
-    lang = 'en' if warning_language == 'en' else None
-    try:
-        alerts = get_alerts_for_point(
-            lat=lat,
-            lon=lon,
-            country_code=normalized_country,
-            lang=lang,
-            active_only=False,
-            progress=progress,
-        )
-        now = datetime.now(UTC)
-        visible_alerts: list[Alert] = []
-        for alert in alerts:
-            expires = alert.expires
-            if expires is None:
-                visible_alerts.append(alert)
-                continue
-            if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=UTC)
-            else:
-                expires = expires.astimezone(UTC)
-            if expires >= now:
-                visible_alerts.append(alert)
-        return visible_alerts
-    except UnsupportedCountryError:
-        return []
-    except Exception:
-        return []
+    return _get_alerts_with_status(
+        lat,
+        lon,
+        country_code,
+        warning_language,
+        progress,
+    )[0]
+
+
+async def _get_alerts_async_with_status(
+    lat: float,
+    lon: float,
+    country_code: str | None = None,
+    warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
+) -> tuple[list[Alert], bool]:
+    """Worker-thread version of :func:`_get_alerts_with_status`."""
+    return await asyncio.to_thread(
+        _get_alerts_with_status,
+        lat,
+        lon,
+        country_code,
+        warning_language,
+        progress,
+    )
+
+
+async def _get_alert_candidates_async_with_status(
+    country_code: str | None,
+    warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
+) -> tuple[list[Alert], bool]:
+    """Worker-thread version of :func:`_get_alert_candidates_with_status`."""
+    return await asyncio.to_thread(
+        _get_alert_candidates_with_status,
+        country_code,
+        warning_language,
+        progress,
+    )
 
 
 async def get_alerts_async(
