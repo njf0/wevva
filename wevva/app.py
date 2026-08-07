@@ -34,8 +34,9 @@ from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.services.alerts import (
-    _get_alert_candidates_async_with_status,
-    _match_alert_candidates,
+    _combine_alerts,
+    _get_native_alerts_async_with_status,
+    _get_reusable_alerts_async_with_status,
     normalize_country_code,
 )
 from wevva.services.weather import fetch_weather
@@ -438,7 +439,7 @@ class Wevva(App, inherit_bindings=False):
         self._alerts_task = None
 
     def _schedule_alert_refresh(self, refresh_generation: int, *, force_refresh: bool = False) -> None:
-        """Use a cached alert result or start a background alert fetch."""
+        """Use cached reusable alerts and refresh native point-query alerts."""
         lat = self.location.latitude
         lon = self.location.longitude
         if lat is None or lon is None:
@@ -446,20 +447,12 @@ class Wevva(App, inherit_bindings=False):
         country_code = normalize_country_code(self.location.country_code)
         warning_language = 'en' if self.warning_language == 'en' else 'auto'
         cache_key = (country_code, warning_language)
+        entry = None
         if not force_refresh:
             entry = self._alert_cache.get(cache_key)
             if entry is not None and self._alert_cache_clock() - entry[0] >= self.ALERT_CACHE_TTL_SECONDS:
                 del self._alert_cache[cache_key]
                 entry = None
-            if entry is not None:
-                if (
-                    refresh_generation == self._refresh_generation
-                    and self.location.latitude == lat
-                    and self.location.longitude == lon
-                ):
-                    alerts = _match_alert_candidates(list(entry[1]), lat, lon)
-                    self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
-                return
         self._alerts_task = asyncio.create_task(
             self._fetch_alerts_for_location(
                 lat=lat,
@@ -468,6 +461,7 @@ class Wevva(App, inherit_bindings=False):
                 warning_language=warning_language,
                 cache_key=cache_key,
                 refresh_generation=refresh_generation,
+                cached_candidates=entry[1] if entry is not None else None,
             )
         )
 
@@ -480,8 +474,9 @@ class Wevva(App, inherit_bindings=False):
         warning_language: str,
         cache_key: AlertCacheKey,
         refresh_generation: int,
+        cached_candidates: tuple[Alert, ...] | None,
     ) -> None:
-        """Fetch alerts in the background and post them if still current."""
+        """Fetch reusable/native alerts in the background and post if current."""
         loop = asyncio.get_running_loop()
         provider_names: dict[str, str] = {}
 
@@ -503,20 +498,35 @@ class Wevva(App, inherit_bindings=False):
                 refresh_generation,
             )
 
+        if cached_candidates is None:
+            try:
+                candidates, completed = await _get_reusable_alerts_async_with_status(
+                    country_code,
+                    warning_language,
+                    progress=report_progress,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                candidates = []
+                completed = False
+
+            if completed:
+                self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
+        else:
+            candidates = list(cached_candidates)
+
         try:
-            candidates, completed = await _get_alert_candidates_async_with_status(
+            native_alerts, _ = await _get_native_alerts_async_with_status(
+                lat,
+                lon,
                 country_code,
                 warning_language,
-                progress=report_progress,
             )
         except asyncio.CancelledError:
             raise
         except Exception:
-            candidates = []
-            completed = False
-
-        if completed:
-            self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
+            native_alerts = []
 
         if (
             refresh_generation != self._refresh_generation
@@ -524,7 +534,7 @@ class Wevva(App, inherit_bindings=False):
             or self.location.longitude != lon
         ):
             return
-        alerts = _match_alert_candidates(candidates, lat, lon)
+        alerts = _combine_alerts(candidates, native_alerts, lat, lon)
         self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
 
     def _post_alert_progress_if_current(

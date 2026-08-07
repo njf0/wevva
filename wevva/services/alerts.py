@@ -9,9 +9,11 @@ from wevva_warnings import (
     Alert,
     UnsupportedCountryError,
     WarningQueryProgress,
-    get_alerts_for_country,
+    deduplicate_alerts,
     get_alerts_for_point,
     get_alerts_for_source,
+    get_native_alerts_for_point,
+    get_reusable_alerts_for_country,
     match_alerts_to_point,
 )
 
@@ -81,27 +83,53 @@ def _get_alerts_with_status(
         return [], False
 
 
-def _get_alert_candidates_with_status(
+def _get_reusable_alerts_with_status(
     country_code: str | None,
     warning_language: str = 'auto',
     progress: WarningQueryProgress | None = None,
 ) -> tuple[list[Alert], bool]:
-    """Fetch country candidates and retain whether the query completed."""
+    """Fetch reusable country candidates and retain completion status."""
     normalized_country = normalize_country_code(country_code)
     if normalized_country is None:
         return [], True
     lang = 'en' if warning_language == 'en' else None
     try:
-        return get_alerts_for_country(normalized_country, lang=lang, progress=progress), True
+        return get_reusable_alerts_for_country(normalized_country, lang=lang, progress=progress), True
     except UnsupportedCountryError:
         return [], True
     except Exception:
         return [], False
 
 
-def _match_alert_candidates(candidates: list[Alert], lat: float, lon: float) -> list[Alert]:
-    """Match cached country candidates locally and hide expired alerts."""
-    return _filter_visible_alerts(match_alerts_to_point(candidates, lat=lat, lon=lon))
+def _get_native_alerts_with_status(
+    lat: float,
+    lon: float,
+    country_code: str | None,
+    warning_language: str = 'auto',
+) -> tuple[list[Alert], bool]:
+    """Fetch native point-query alerts and retain completion status."""
+    normalized_country = normalize_country_code(country_code)
+    if normalized_country is None:
+        return [], True
+    lang = 'en' if warning_language == 'en' else None
+    try:
+        return get_native_alerts_for_point(
+            lat=lat,
+            lon=lon,
+            country_code=normalized_country,
+            lang=lang,
+            active_only=False,
+        ), True
+    except UnsupportedCountryError:
+        return [], True
+    except Exception:
+        return [], False
+
+
+def _combine_alerts(candidates: list[Alert], native_alerts: list[Alert], lat: float, lon: float) -> list[Alert]:
+    """Match reusable candidates, combine native results, and hide expired alerts."""
+    local_alerts = match_alerts_to_point(candidates, lat=lat, lon=lon)
+    return _filter_visible_alerts(deduplicate_alerts([*local_alerts, *native_alerts]))
 
 
 def get_alerts(
@@ -144,17 +172,33 @@ async def _get_alerts_async_with_status(
     )
 
 
-async def _get_alert_candidates_async_with_status(
+async def _get_reusable_alerts_async_with_status(
     country_code: str | None,
     warning_language: str = 'auto',
     progress: WarningQueryProgress | None = None,
 ) -> tuple[list[Alert], bool]:
-    """Worker-thread version of :func:`_get_alert_candidates_with_status`."""
+    """Worker-thread version of :func:`_get_reusable_alerts_with_status`."""
     return await asyncio.to_thread(
-        _get_alert_candidates_with_status,
+        _get_reusable_alerts_with_status,
         country_code,
         warning_language,
         progress,
+    )
+
+
+async def _get_native_alerts_async_with_status(
+    lat: float,
+    lon: float,
+    country_code: str | None,
+    warning_language: str = 'auto',
+) -> tuple[list[Alert], bool]:
+    """Worker-thread version of :func:`_get_native_alerts_with_status`."""
+    return await asyncio.to_thread(
+        _get_native_alerts_with_status,
+        lat,
+        lon,
+        country_code,
+        warning_language,
     )
 
 

@@ -16,8 +16,9 @@ the `wevva-warnings` package. It also exposes small async and sync Python APIs.
 - `wevva/openmeteo.py` and `wevva/services/` — API requests and forecast,
   geocoding, air-quality, and warning boundaries.
 - Warning progress flows from `wevva/services/alerts.py` through `Wevva` and
-  `WeatherAlertsProgress` to `SavedLocationsSidebar`; keep its worker-thread
-  and stale-refresh safeguards intact.
+  `WeatherAlertsProgress` to `SavedLocationsSidebar`. Reusable country
+  candidates are cached, while native point-query sources are refreshed for
+  each location; keep worker-thread and stale-refresh safeguards intact.
 - `wevva/api.py`, `wevva/models.py`, and `wevva/__init__.py` — public Python
   API and exported models.
 - `wevva/config.py` and `wevva/location_metadata.py` — persisted preferences
@@ -55,15 +56,19 @@ uv run python -m wevva
 # Basic source syntax check
 uv run python -m compileall -q wevva
 
+# Focused standard-library regression tests
+uv run python -m unittest discover -s tests
+
 # Release workflow — only with explicit approval to publish externally
 uv build
 uv publish
 ```
 
-The repository has no configured test suite, linter, formatter, or type
-checker. Hatchling is the configured build backend. The maintainer's release
-workflow uses `uv build` followed by `uv publish`; credentials and index
-configuration are intentionally not stored in this repository.
+The repository has a small standard-library `unittest` suite but no configured
+linter, formatter, or type checker. Hatchling is the configured build backend.
+The maintainer's release workflow uses `uv build` followed by `uv publish`;
+credentials and index configuration are intentionally not stored in this
+repository.
 
 ## Completion expectations
 

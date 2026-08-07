@@ -47,10 +47,12 @@ request air quality and warnings.
 - `wevva/services/air_quality.py` calls Open-Meteo's Air Quality API. The
   controller and public API merge selected hourly series into weather data.
 - `wevva/services/alerts.py` wraps `wevva-warnings`, normalizes country codes,
-  filters expired alerts, and uses a thread for its async wrapper. Its public
-  progress callback is forwarded to `WeatherAlertsProgress` messages on the
-  Textual event loop, then rendered by `SavedLocationsSidebar` without
-  reflowing the main forecast layout.
+  filters expired alerts, and uses a thread for its async wrapper. Reusable
+  country candidates are cached by the TUI and locally matched; native
+  point-query sources are fetched for every selected location, then combined
+  and de-duplicated. Progress for reusable candidate retrieval is forwarded to
+  `WeatherAlertsProgress` messages on the Textual event loop, then rendered by
+  `SavedLocationsSidebar` without reflowing the main forecast layout.
 - `wevva/config.py` reads/writes `~/.config/wevva/config.json`, validates
   preferences, and normalizes saved/default location metadata.
 

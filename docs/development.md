@@ -9,10 +9,11 @@ committed `uv.lock`.
 uv sync --locked
 ```
 
-Warning progress and country-level warning caching use the published
-`wevva-warnings>=0.3.5` dependency. A local sibling checkout can still be used
-for warning-library development by temporarily adding a `tool.uv.sources`
-override, but that override must not be committed for a release.
+Warning progress and country-level warning caching use `wevva-warnings`. The
+native point-query split introduced by Task 0013 must use the corresponding
+published warning-library release. Before that release, a local sibling checkout
+can be used by temporarily adding a `tool.uv.sources` override; do not commit
+that override or its lockfile result for a release.
 
 The following local commands have been checked in this repository:
 
@@ -28,9 +29,15 @@ TUI. The README also documents `uvx --from . wevva` for running a checkout.
 
 ## Validation and packaging
 
-There are currently no repository-configured tests, linter, formatter, or type
-checker. `compileall` is the available basic source-compilation check;
-choose focused manual TUI checks for UI behavior.
+The focused regression suite uses the standard library:
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+There is no configured linter, formatter, or type checker. `compileall` is the
+available basic source-compilation check; choose focused manual TUI checks for
+UI behavior.
 
 The package uses Hatchling (`pyproject.toml`) and declares the `wevva` console
 script. The maintainer-confirmed release workflow is:

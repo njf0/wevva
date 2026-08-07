@@ -78,6 +78,7 @@ class WeatherAlertsPanel(Container):
         width: 98;
         border: round $primary;
         border-title-color: $primary;
+        border-title-style: bold;
         border-title-align: center;
         margin-bottom: 1;
         hatch: right $background-lighten-1;
@@ -131,7 +132,7 @@ class WeatherAlertsPanel(Container):
         severity_color = alert_severity_color(self.app.theme_variables, alert)
 
         alert_count = len(self.alerts)
-        self.border_title = f'{alert_count} Weather Alert{"s" if alert_count != 1 else ""}'
+        self.border_title = f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
         self.border_subtitle = None
         self.apply_frame_color(severity_color)
 
@@ -165,8 +166,7 @@ class WeatherAlertsPanel(Container):
 
         if onset is not None and end is not None:
             line = (
-                f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i] '
-                f'[dim italic]until[/] [i]{self.fmt_clock(end)}[/i]'
+                f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i] [dim italic]until[/] [i]{self.fmt_clock(end)}[/i]'
             )
         elif onset is not None:
             line = f'[dim italic]Active from[/] [i]{self.fmt_clock(onset)}[/i]'
