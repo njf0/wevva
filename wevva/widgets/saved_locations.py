@@ -137,22 +137,27 @@ class SavedLocationsSidebar(Container):
         return self._weather_summaries.get(location_key(location))
 
     def update_warning_progress(self, event: str, payload: dict[str, object]) -> None:
-        """Show progress only while individual warning work has a known total."""
+        """Show pending or measured progress for the active warning provider."""
         details = self._warning_progress_details(event, payload)
         if details is None:
             return
         completed, total = details
+        self.warning_progress.border_title = self._warning_progress_title(total)
         self.warning_progress_bar.update(total=total, progress=completed)
         self.warning_progress.display = True
 
     def clear_warning_progress(self) -> None:
         """Hide the transient warning-query progress panel."""
+        self.warning_progress.border_title = 'Checking warnings'
         self.warning_progress_bar.update(total=None, progress=0)
         self.warning_progress.display = False
 
     @staticmethod
-    def _warning_progress_details(event: str, payload: dict[str, object]) -> tuple[int, int] | None:
-        """Return sidebar progress-bar data for individual warning work."""
+    def _warning_progress_details(event: str, payload: dict[str, object]) -> tuple[int, int | None] | None:
+        """Return sidebar data for pending or measured individual warning work."""
+        if event == 'source_started':
+            return 0, None
+
         total = payload.get('total')
         completed = payload.get('completed')
         phase = payload.get('phase')
@@ -165,6 +170,11 @@ class SavedLocationsSidebar(Container):
         if not isinstance(progress, int):
             return None
         return progress, total
+
+    @staticmethod
+    def _warning_progress_title(total: int | None) -> str:
+        """Return the title that matches an indeterminate or measured bar."""
+        return 'Fetching warnings' if total is None else 'Checking warnings'
 
     def _render_locations(self) -> None:
         if not self.is_mounted:

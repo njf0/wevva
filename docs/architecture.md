@@ -52,7 +52,9 @@ request air quality and warnings.
   point-query sources are fetched for every selected location, then combined
   and de-duplicated. Progress for reusable candidate retrieval is forwarded to
   `WeatherAlertsProgress` messages on the Textual event loop, then rendered by
-  `SavedLocationsSidebar` without reflowing the main forecast layout.
+  `SavedLocationsSidebar` without reflowing the main forecast layout. The
+  sidebar shows an indeterminate bar while a provider request is pending and
+  switches to measured progress once the provider returns its alert count.
 - `wevva/config.py` reads/writes `~/.config/wevva/config.json`, validates
   preferences, and normalizes saved/default location metadata.
 

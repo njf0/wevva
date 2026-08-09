@@ -11,6 +11,7 @@ from wevva.alerts import Alert
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.services.alerts import _combine_alerts, _get_alerts_with_status, _get_native_alerts_with_status
+from wevva.widgets.saved_locations import SavedLocationsSidebar
 
 
 class _WeatherScreen:
@@ -240,6 +241,25 @@ class AlertServiceStatusTests(unittest.TestCase):
         alerts = _combine_alerts([reusable_alert], [native_alert], 40.7128, -74.0060)
 
         self.assertEqual([alert.id for alert in alerts], ['geometry', 'nws-point'])
+
+
+class WarningProgressTests(unittest.TestCase):
+    def test_provider_start_uses_an_indeterminate_progress_bar(self) -> None:
+        self.assertEqual(
+            SavedLocationsSidebar._warning_progress_details('source_started', {'source': 'dwd'}),
+            (0, None),
+        )
+        self.assertEqual(SavedLocationsSidebar._warning_progress_title(None), 'Fetching warnings')
+
+    def test_alert_total_switches_to_measured_progress(self) -> None:
+        self.assertEqual(
+            SavedLocationsSidebar._warning_progress_details(
+                'alerts_total',
+                {'source': 'dwd', 'total': 3, 'phase': 'matching'},
+            ),
+            (0, 3),
+        )
+        self.assertEqual(SavedLocationsSidebar._warning_progress_title(3), 'Checking warnings')
 
 
 if __name__ == '__main__':
