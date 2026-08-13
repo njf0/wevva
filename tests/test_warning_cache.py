@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from wevva.alerts import Alert
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
+from wevva.messages import WeatherAlertsProgress, WeatherAlertsUpdated
 from wevva.services.alerts import _combine_alerts, _get_alerts_with_status, _get_native_alerts_with_status
 from wevva.widgets.saved_locations import SavedLocationsSidebar
 
@@ -55,6 +56,16 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         if self.app._alerts_task is not None:
             await self.app._alerts_task
 
+    def test_country_candidate_cache_lasts_thirty_minutes(self) -> None:
+        self.assertEqual(self.app.ALERT_CACHE_TTL_SECONDS, 30 * 60)
+
+    def _alert_updates(self) -> list[WeatherAlertsUpdated]:
+        return [
+            message
+            for message in self.app.weather_screen.messages
+            if isinstance(message, WeatherAlertsUpdated)
+        ]
+
     async def test_cache_hit_and_forced_refresh(self) -> None:
         reusable_lookup = AsyncMock(return_value=([
             _alert_in_box('berlin', min_lat=52.3, max_lat=52.8, min_lon=13.0, max_lon=13.8),
@@ -75,9 +86,10 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reusable_lookup.await_count, 2)
         self.assertEqual(native_lookup.await_count, 4)
         self.assertEqual(len(self.app._alert_cache), 1)
-        self.assertEqual([alert.id for alert in self.app.weather_screen.messages[0].alerts], ['berlin'])
-        self.assertEqual([alert.id for alert in self.app.weather_screen.messages[2].alerts], ['munich'])
-        self.assertEqual(len(self.app.weather_screen.messages), 4)
+        updates = self._alert_updates()
+        self.assertEqual([alert.id for alert in updates[0].alerts], ['berlin'])
+        self.assertEqual([alert.id for alert in updates[2].alerts], ['munich'])
+        self.assertEqual(len(updates), 4)
 
     async def test_ttl_expiry_discards_entry_and_queries_again(self) -> None:
         reusable_lookup = AsyncMock(return_value=([], True))
@@ -169,7 +181,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.app._alert_cache[key] = self.clock, (expired_alert,)
         with patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))):
             await self._schedule_and_wait()
-        self.assertEqual(self.app.weather_screen.messages[-1].alerts, [])
+        self.assertEqual(self._alert_updates()[-1].alerts, [])
 
     async def test_stale_location_cannot_receive_old_result(self) -> None:
         started = asyncio.Event()
@@ -208,8 +220,35 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reusable_lookup.await_count, 1)
         self.assertEqual(native_lookup.await_count, 2)
-        self.assertEqual([alert.id for alert in self.app.weather_screen.messages[0].alerts], ['new-york'])
-        self.assertEqual([alert.id for alert in self.app.weather_screen.messages[1].alerts], ['denver'])
+        updates = self._alert_updates()
+        self.assertEqual([alert.id for alert in updates[0].alerts], ['new-york'])
+        self.assertEqual([alert.id for alert in updates[1].alerts], ['denver'])
+
+    async def test_cached_candidates_report_measured_matching_progress(self) -> None:
+        self.app._alert_cache[('DE', 'auto')] = self.clock, (
+            _alert_in_box('berlin', min_lat=52.3, max_lat=52.8, min_lon=13.0, max_lon=13.8),
+            _alert_in_box('munich', min_lat=47.9, max_lat=48.4, min_lon=11.2, max_lon=11.9),
+        )
+
+        with patch(
+            'wevva.app._get_native_alerts_async_with_status',
+            new=AsyncMock(return_value=([], True)),
+        ):
+            await self._schedule_and_wait()
+
+        progress = [
+            message
+            for message in self.app.weather_screen.messages
+            if isinstance(message, WeatherAlertsProgress)
+        ]
+        self.assertEqual(
+            [(message.event, message.payload) for message in progress],
+            [
+                ('alerts_total', {'total': 2, 'phase': 'matching'}),
+                ('alerts_checked', {'completed': 1, 'total': 2, 'phase': 'matching'}),
+                ('alerts_checked', {'completed': 2, 'total': 2, 'phase': 'matching'}),
+            ],
+        )
 
 
 class AlertServiceStatusTests(unittest.TestCase):
@@ -242,6 +281,29 @@ class AlertServiceStatusTests(unittest.TestCase):
 
         self.assertEqual([alert.id for alert in alerts], ['geometry', 'nws-point'])
 
+    def test_combining_reports_measured_matching_progress(self) -> None:
+        progress = Mock()
+        reusable_alert = _alert_in_box('geometry', min_lat=40.0, max_lat=41.0, min_lon=-75.0, max_lon=-73.0)
+        unmatched_alert = _alert_in_box('elsewhere', min_lat=50.0, max_lat=51.0, min_lon=-2.0, max_lon=-1.0)
+
+        alerts = _combine_alerts(
+            [reusable_alert, unmatched_alert],
+            [],
+            40.7128,
+            -74.0060,
+            progress=progress,
+        )
+
+        self.assertEqual([alert.id for alert in alerts], ['geometry'])
+        self.assertEqual(
+            progress.call_args_list,
+            [
+                call('alerts_total', {'total': 2, 'phase': 'matching'}),
+                call('alerts_checked', {'completed': 1, 'total': 2, 'phase': 'matching'}),
+                call('alerts_checked', {'completed': 2, 'total': 2, 'phase': 'matching'}),
+            ],
+        )
+
 
 class WarningProgressTests(unittest.TestCase):
     def test_provider_start_uses_an_indeterminate_progress_bar(self) -> None:
@@ -249,7 +311,7 @@ class WarningProgressTests(unittest.TestCase):
             SavedLocationsSidebar._warning_progress_details('source_started', {'source': 'dwd'}),
             (0, None),
         )
-        self.assertEqual(SavedLocationsSidebar._warning_progress_title(None), 'Fetching warnings')
+        self.assertEqual(SavedLocationsSidebar._warning_progress_title(None), 'Fetching alerts')
 
     def test_alert_total_switches_to_measured_progress(self) -> None:
         self.assertEqual(
@@ -259,8 +321,43 @@ class WarningProgressTests(unittest.TestCase):
             ),
             (0, 3),
         )
-        self.assertEqual(SavedLocationsSidebar._warning_progress_title(3), 'Checking warnings')
+        self.assertEqual(SavedLocationsSidebar._warning_progress_title(3), 'Checking alerts')
 
+    def test_later_sources_do_not_restart_indeterminate_progress(self) -> None:
+        self.assertIsNone(
+            SavedLocationsSidebar._warning_progress_details(
+                'source_started',
+                {'source': 'nearby_tropical_systems'},
+                has_measured_progress=True,
+            )
+        )
+
+    def test_tropical_fetch_uses_an_indeterminate_progress_bar(self) -> None:
+        self.assertEqual(
+            SavedLocationsSidebar._tropical_progress_details('tropical_fetch_started', {}),
+            (0, None),
+        )
+        self.assertEqual(
+            SavedLocationsSidebar._tropical_progress_title(None),
+            'Fetching tropical systems',
+        )
+
+    def test_tropical_total_switches_to_measured_progress(self) -> None:
+        self.assertEqual(
+            SavedLocationsSidebar._tropical_progress_details('tropical_check_total', {'total': 3}),
+            (0, 3),
+        )
+        self.assertEqual(
+            SavedLocationsSidebar._tropical_progress_details(
+                'tropical_checked',
+                {'completed': 2, 'total': 3},
+            ),
+            (2, 3),
+        )
+        self.assertEqual(
+            SavedLocationsSidebar._tropical_progress_title(3),
+            'Checking tropical systems',
+        )
 
 if __name__ == '__main__':
     unittest.main()

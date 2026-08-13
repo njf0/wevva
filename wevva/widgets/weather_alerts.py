@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -12,7 +13,13 @@ from textual.containers import Container, VerticalScroll
 from textual.widgets import Static, Tab, Tabs
 
 from wevva.alerts import Alert
-from wevva.messages import WeatherAlertSelected
+from wevva.messages import NearbyTropicalSystemSelected, WeatherAlertSelected
+from wevva.services.tropical import NearbyTropicalSystem
+from wevva.widgets.tropical_systems import (
+    TropicalSystemDetailsTable,
+    build_tropical_system_text,
+    build_tropical_tab_label,
+)
 
 SEVERITY_THEME_KEYS: dict[str, str] = {
     'extreme': 'error',
@@ -24,6 +31,12 @@ SEVERITY_THEME_KEYS: dict[str, str] = {
 }
 
 ORANGE_SEVERITIES = {'severe', 'orange', 'amber'}
+
+_MARKDOWN_LIST_ITEM = re.compile(
+    r'^(?P<indent>[ \t]*)(?P<marker>[-+*]|\d+[.)]|•)\s+(?P<body>.*?)\s*$',
+)
+_NWS_SECTION_LABEL = re.compile(r'^[A-Z][A-Z /&-]*\.\.\.')
+_NWS_ADDITIONAL_DETAILS = re.compile(r'^ADDITIONAL DETAILS\.\.\.')
 
 ALERT_PREFIX_WORDS = {
     'extreme',
@@ -95,9 +108,17 @@ class WeatherAlertsPanel(Container):
     }
     """
 
-    def __init__(self, alerts: list[Alert], *, id: str | None = None):
+    def __init__(
+        self,
+        alerts: list[Alert],
+        *,
+        tropical_systems: list[NearbyTropicalSystem] | None = None,
+        id: str | None = None,
+    ):
         super().__init__(id=id)
         self.alerts = alerts
+        self.tropical_systems = tropical_systems or []
+        self.items: list[NearbyTropicalSystem | Alert] = [*self.tropical_systems, *self.alerts]
         self.selected_index = 0
 
     def compose(self) -> ComposeResult:
@@ -117,29 +138,52 @@ class WeatherAlertsPanel(Container):
         self.update_selected_alert()
 
     def populate_tabs(self) -> None:
-        for index, alert in enumerate(self.alerts):
-            self.tabs.add_tab(Tab(label=self.build_tab_label(alert), id=f'alert-{index}'))
-        self.tabs.active = 'alert-0'
+        for index, item in enumerate(self.items):
+            self.tabs.add_tab(Tab(label=self.build_tab_label(item), id=f'alert-item-{index}'))
+        self.tabs.active = 'alert-item-0'
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         if event.tab.id is None:
             return
-        self.selected_index = int(event.tab.id.removeprefix('alert-'))
+        self.selected_index = int(event.tab.id.removeprefix('alert-item-'))
         self.update_selected_alert()
 
     def update_selected_alert(self) -> None:
-        alert = self.alerts[self.selected_index]
-        severity_color = alert_severity_color(self.app.theme_variables, alert)
+        item = self.items[self.selected_index]
+        if isinstance(item, NearbyTropicalSystem):
+            accent = self.app.theme_variables.get('text-accent')
+            self.border_title = self.panel_title()
+            self.border_subtitle = None
+            self.apply_frame_color(accent)
+            self.body.update(build_tropical_system_text(item, accent=accent))
+            self.post_message(NearbyTropicalSystemSelected(system=item))
+            return
 
-        alert_count = len(self.alerts)
-        self.border_title = f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
+        alert = item
+        severity_color = alert_severity_color(self.app.theme_variables, alert)
+        self.border_title = self.panel_title()
         self.border_subtitle = None
         self.apply_frame_color(severity_color)
 
         self.body.update(Text.from_markup(self.build_body(alert, severity_color)))
         self.post_message(WeatherAlertSelected(alert=alert))
 
-    def build_tab_label(self, alert: Alert) -> Text:
+    def panel_title(self) -> str:
+        """Describe the combined panel without treating storms as warnings."""
+        titles = []
+        tropical_count = len(self.tropical_systems)
+        alert_count = len(self.alerts)
+        if tropical_count:
+            titles.append(f'{tropical_count} Tropical System Alert{"s" if tropical_count != 1 else ""}')
+        if alert_count:
+            titles.append(f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}')
+        return ' · '.join(titles)
+
+    def build_tab_label(self, item: NearbyTropicalSystem | Alert) -> Text:
+        if isinstance(item, NearbyTropicalSystem):
+            return build_tropical_tab_label(item, accent=self.app.theme_variables.get('text-accent'))
+
+        alert = item
         severity = (alert.severity or '').strip()
         condition = self.condition_name(alert)
         if severity.lower() == 'unknown':
@@ -211,12 +255,12 @@ class WeatherAlertsPanel(Container):
 
 
 class WeatherAlertDetailsSidebar(VerticalScroll):
-    """Docked reader for the selected alert's full published text."""
+    """Docked reader for selected warning or tropical-system details."""
 
     DEFAULT_CSS = """
     WeatherAlertDetailsSidebar {
         dock: right;
-        width: 56;
+        width: 40;
         height: 100%;
         margin: 2 2 2 0;
         background: $background;
@@ -236,27 +280,103 @@ class WeatherAlertDetailsSidebar(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         yield Static('', id='weather-alert-details')
+        tropical_details = TropicalSystemDetailsTable()
+        tropical_details.display = False
+        yield tropical_details
 
     @property
     def content(self) -> Static:
         return self.query_one('#weather-alert-details', Static)
 
+    @property
+    def tropical_details(self) -> TropicalSystemDetailsTable:
+        return self.query_one(TropicalSystemDetailsTable)
+
     def update_alert(self, alert: Alert) -> None:
+        self.border_title = 'Alert Details'
+        self.content.display = True
+        self.tropical_details.display = False
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.set_styles(f'border: round {color}; border-title-color: {color};')
         self.content.update(Markdown(alert_markdown(alert)))
 
+    def update_tropical_system(self, nearby: NearbyTropicalSystem) -> None:
+        """Show supplementary facts for the selected nearby tropical report."""
+        self.border_title = 'Tropical System Details'
+        accent = self.app.theme_variables.get('text-accent')
+        if accent:
+            self.set_styles(f'border: round {accent}; border-title-color: {accent};')
+        self.content.display = False
+        self.tropical_details.update_system(nearby)
+        self.tropical_details.display = True
+
 
 def alert_markdown(alert: Alert) -> str:
-    description = (alert.description or '').strip()
-    instruction = (alert.instruction or '').strip()
+    description = _normalise_alert_markdown(alert.description or '')
+    instruction = _normalise_alert_markdown(alert.instruction or '')
     headline = (alert.headline or alert.event or 'Weather alert').strip()
 
     if description and instruction:
-        return f'### {headline}\n\n{description}\n\n*{instruction.replace("\n", " ")}*'
+        return f'### {headline}\n\n{description}\n\n{instruction}'
     if description:
         return f'### {headline}\n\n{description}'
     if instruction:
-        return f'### {headline}\n\n*{instruction.replace("\n", " ")}*'
+        return f'### {headline}\n\n{instruction}'
     return f'### {headline}'
+
+
+def _normalise_alert_markdown(value: str) -> str:
+    """Preserve provider Markdown while making indented CAP lists render as lists."""
+    lines = value.replace('\r\n', '\n').replace('\r', '\n').strip().split('\n')
+    normalised: list[str] = []
+    previous_kind: str | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            normalised.append('')
+            continue
+
+        list_item = _MARKDOWN_LIST_ITEM.match(line)
+        if list_item is not None:
+            if previous_kind not in {'list', 'nws-list', 'nws-additional-details', 'nws-sublist'} and normalised and normalised[-1]:
+                normalised.append('')
+            marker = list_item.group('marker')
+            bullet = marker if marker[0].isdigit() else '-'
+            body = list_item.group('body')
+            is_nws_sublist = (
+                previous_kind in {'nws-additional-details', 'nws-sublist'}
+                and marker in {'-', '+', '•'}
+            )
+            if is_nws_sublist:
+                normalised.append(f'  {bullet} {body}')
+                previous_kind = 'nws-sublist'
+                continue
+            normalised.append(f'{bullet} {body}')
+            if _NWS_ADDITIONAL_DETAILS.match(body):
+                previous_kind = 'nws-additional-details'
+            elif _NWS_SECTION_LABEL.match(body):
+                previous_kind = 'nws-list'
+            else:
+                previous_kind = 'list'
+            continue
+
+        if previous_kind == 'nws-list':
+            normalised.append(f'  {stripped}')
+            continue
+
+        if previous_kind == 'nws-additional-details':
+            normalised.append(f'  {stripped}')
+            continue
+
+        if previous_kind == 'nws-sublist':
+            normalised.append(f'    {stripped}')
+            continue
+
+        if previous_kind == 'list' and normalised and normalised[-1]:
+            normalised.append('')
+        normalised.append(line.rstrip())
+        previous_kind = 'text'
+
+    return '\n'.join(normalised).strip()

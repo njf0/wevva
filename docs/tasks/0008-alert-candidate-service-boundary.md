@@ -26,7 +26,7 @@ retrieval and matching, with failure/empty-result semantics documented once.
 - Define a compact internal result/interface for country candidate retrieval.
 - Remove redundant exception handling that cannot affect behavior.
 - Keep expiry filtering, stale-refresh protection, progress callbacks, and the
-  15-minute session cache intact.
+  30-minute session cache intact.
 - Add tests for successful empty results, unsupported countries, failure, and
   cancellation boundaries.
 

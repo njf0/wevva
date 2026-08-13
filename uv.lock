@@ -312,19 +312,19 @@ requires-dist = [
     { name = "textual", specifier = ">=3.1.0" },
     { name = "typer", specifier = ">=0.21.1" },
     { name = "wcwidth", specifier = ">=0.2.13" },
-    { name = "wevva-warnings", specifier = "==0.4.0" },
+    { name = "wevva-warnings", specifier = "==0.5.3" },
 ]
 
 [[package]]
 name = "wevva-warnings"
-version = "0.4.0"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyshp" },
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/f3/d8646b0fe3d3687db11a3dbf004c3db5326acbb7213d99402e2bc18533cd/wevva_warnings-0.4.0.tar.gz", hash = "sha256:fd9fd3f436c778d022bb43faf4768e369045573dd2f8fb086d7b80bb9acfc26e", size = 11052656, upload-time = "2026-08-07T11:25:16.869Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/33/e75803b359ca6d5fe2ef7dfd49325a4a68da27e505fd05a7a7a478a51050/wevva_warnings-0.5.3.tar.gz", hash = "sha256:b028e60757e48719f059befd95f9c667146dc82bf5a0e3ec6868da6a541fe369", size = 14362280, upload-time = "2026-08-11T19:16:23.372Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/e2/b6dc6019457238c47af8f9211feb54978c7a516720f4c1841130587143c9/wevva_warnings-0.4.0-py3-none-any.whl", hash = "sha256:abd5ac5264dbafed0fb4e5904c8432daf6c371164fc151f00ce45ccf0ff50664", size = 12124936, upload-time = "2026-08-07T11:25:55.949Z" },
+    { url = "https://files.pythonhosted.org/packages/62/d7/0e9de594fe144244a70696c026784633102630aab09cc04ac81f4efdd372/wevva_warnings-0.5.3-py3-none-any.whl", hash = "sha256:a1dfd5c433ae11f885dde0d7b21be8325233cf499d9d3fdea523af7b41a3b209", size = 15612925, upload-time = "2026-08-11T19:16:14.642Z" },
 ]

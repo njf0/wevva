@@ -15,7 +15,7 @@ place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places
              -> PlaceSelected -> Wevva.action_refresh()
              -> WeatherController.fetch() -> weather + air quality -> WeatherUpdated
              -> WeatherScreen -> child widgets
-             -> background alerts -> WeatherAlertsUpdated
+             -> background alerts + nearby tropical context -> WeatherAlertsUpdated
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -55,6 +55,21 @@ request air quality and warnings.
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
   sidebar shows an indeterminate bar while a provider request is pending and
   switches to measured progress once the provider returns its alert count.
+  Reusable country alerts and native point alerts start together. Once their
+  result is rendered, an uncached raw tropical refresh continues in the
+  background and updates the same tab panel only if the location is still
+  current. Its sidebar progress is indeterminate while global reports are
+  fetched, then shows measured local matching progress; tropical reports
+  remain ordered before ordinary alerts.
+- `wevva/services/tropical.py` fetches raw global reports with
+  `get_tropical_systems()` and keeps them in a separate thirty-minute,
+  session-only cache. It calls `match_tropical_systems_to_point()` afresh for
+  every selected location using the final Open-Meteo forecast coordinates and
+  a 250 km (roughly 155 miles) radius. It calculates local centre distances
+  and normalises matching reports by source/ID and storm name, preferring a
+  same-country issuer or otherwise the newest report. Tropical reports never
+  enter the ordinary country-warning candidate cache; an empty or failed raw
+  lookup simply contributes no tabs.
 - `wevva/config.py` reads/writes `~/.config/wevva/config.json`, validates
   preferences, and normalizes saved/default location metadata.
 

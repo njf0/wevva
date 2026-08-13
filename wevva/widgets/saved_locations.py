@@ -34,7 +34,7 @@ class SavedLocationsSidebar(Container):
     DEFAULT_CSS = """
     SavedLocationsSidebar {
         dock: left;
-        width: 30;
+        width: 40;
         height: 100%;
         # margin-bottom: 1;
         # margin-top: 1;
@@ -87,6 +87,26 @@ class SavedLocationsSidebar(Container):
     #saved-location-warning-progress-bar > Bar {
         width: 1fr;
     }
+
+    #saved-location-tropical-progress {
+        layout: vertical;
+        width: 100%;
+        height: auto;
+        padding: 0 1;
+        margin: 1 0 0 0;
+        border: round $primary;
+        background: $background;
+        color: $text-muted;
+    }
+
+    #saved-location-tropical-progress-bar {
+        width: 100%;
+        height: 1;
+    }
+
+    #saved-location-tropical-progress-bar > Bar {
+        width: 1fr;
+    }
     """
 
     def __init__(self, *, id: str = 'saved-locations-sidebar') -> None:
@@ -94,6 +114,7 @@ class SavedLocationsSidebar(Container):
         self._locations: list[LocationMetadata] = []
         self._location_cache: dict[str, LocationMetadata] = {}
         self._weather_summaries: dict[str, SavedLocationWeatherSummary] = {}
+        self._warning_progress_has_measured_work = False
 
     def compose(self) -> ComposeResult:
         self.locations_panel = Container(id='saved-locations-panel')
@@ -103,7 +124,7 @@ class SavedLocationsSidebar(Container):
             yield OptionList(id='saved-location-list')
 
         self.warning_progress = Container(id='saved-location-warning-progress')
-        self.warning_progress.border_title = 'Checking warnings'
+        self.warning_progress.border_title = 'Checking alerts'
         self.warning_progress.styles.border_title_align = 'left'
         self.warning_progress.display = False
         with self.warning_progress:
@@ -114,6 +135,19 @@ class SavedLocationsSidebar(Container):
                 id='saved-location-warning-progress-bar',
             )
             yield self.warning_progress_bar
+
+        self.tropical_progress = Container(id='saved-location-tropical-progress')
+        self.tropical_progress.border_title = 'Checking tropical systems'
+        self.tropical_progress.styles.border_title_align = 'left'
+        self.tropical_progress.display = False
+        with self.tropical_progress:
+            self.tropical_progress_bar = ProgressBar(
+                total=None,
+                show_percentage=True,
+                show_eta=False,
+                id='saved-location-tropical-progress-bar',
+            )
+            yield self.tropical_progress_bar
 
     @property
     def locations(self) -> OptionList:
@@ -137,25 +171,58 @@ class SavedLocationsSidebar(Container):
         return self._weather_summaries.get(location_key(location))
 
     def update_warning_progress(self, event: str, payload: dict[str, object]) -> None:
-        """Show pending or measured progress for the active warning provider."""
-        details = self._warning_progress_details(event, payload)
+        """Show progress for the active ordinary-warning query."""
+        details = self._warning_progress_details(
+            event,
+            payload,
+            has_measured_progress=self._warning_progress_has_measured_work,
+        )
         if details is None:
             return
         completed, total = details
+        if total is not None:
+            self._warning_progress_has_measured_work = True
         self.warning_progress.border_title = self._warning_progress_title(total)
         self.warning_progress_bar.update(total=total, progress=completed)
         self.warning_progress.display = True
 
     def clear_warning_progress(self) -> None:
         """Hide the transient warning-query progress panel."""
-        self.warning_progress.border_title = 'Checking warnings'
+        self.warning_progress.border_title = 'Checking alerts'
         self.warning_progress_bar.update(total=None, progress=0)
         self.warning_progress.display = False
+        self._warning_progress_has_measured_work = False
+
+    def update_tropical_progress(self, event: str, payload: dict[str, object]) -> None:
+        """Show progress for the active nearby tropical-system refresh."""
+        details = self._tropical_progress_details(event, payload)
+        if details is None:
+            return
+        completed, total = details
+        self.tropical_progress.border_title = self._tropical_progress_title(total)
+        self.tropical_progress_bar.update(total=total, progress=completed)
+        self.tropical_progress.display = True
+
+    def clear_tropical_progress(self) -> None:
+        """Hide the transient tropical-system progress panel."""
+        self.tropical_progress.border_title = 'Checking tropical systems'
+        self.tropical_progress_bar.update(total=None, progress=0)
+        self.tropical_progress.display = False
 
     @staticmethod
-    def _warning_progress_details(event: str, payload: dict[str, object]) -> tuple[int, int | None] | None:
+    def _warning_progress_details(
+        event: str,
+        payload: dict[str, object],
+        *,
+        has_measured_progress: bool = False,
+    ) -> tuple[int, int | None] | None:
         """Return sidebar data for pending or measured individual warning work."""
         if event == 'source_started':
+            # Providers and the nearby tropical lookup run as one refresh.  Once
+            # matching has begun, do not send the sidebar back through a second
+            # indeterminate "Fetching alerts" phase for the next source.
+            if has_measured_progress:
+                return None
             return 0, None
 
         total = payload.get('total')
@@ -174,7 +241,28 @@ class SavedLocationsSidebar(Container):
     @staticmethod
     def _warning_progress_title(total: int | None) -> str:
         """Return the title that matches an indeterminate or measured bar."""
-        return 'Fetching warnings' if total is None else 'Checking warnings'
+        return 'Fetching alerts' if total is None else 'Checking alerts'
+
+    @staticmethod
+    def _tropical_progress_details(event: str, payload: dict[str, object]) -> tuple[int, int | None] | None:
+        """Return sidebar data for tropical fetching or local matching work."""
+        if event == 'tropical_fetch_started':
+            return 0, None
+
+        total = payload.get('total')
+        completed = payload.get('completed')
+        if event not in {'tropical_check_total', 'tropical_checked'} or not isinstance(total, int) or total <= 0:
+            return None
+
+        progress = 0 if event == 'tropical_check_total' else completed
+        if not isinstance(progress, int):
+            return None
+        return progress, total
+
+    @staticmethod
+    def _tropical_progress_title(total: int | None) -> str:
+        """Return the title that matches tropical fetching or matching work."""
+        return 'Fetching tropical systems' if total is None else 'Checking tropical systems'
 
     def _render_locations(self) -> None:
         if not self.is_mounted:

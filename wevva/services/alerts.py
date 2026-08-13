@@ -126,10 +126,46 @@ def _get_native_alerts_with_status(
         return [], False
 
 
-def _combine_alerts(candidates: list[Alert], native_alerts: list[Alert], lat: float, lon: float) -> list[Alert]:
-    """Match reusable candidates, combine native results, and hide expired alerts."""
-    local_alerts = match_alerts_to_point(candidates, lat=lat, lon=lon)
+def _combine_alerts(
+    candidates: list[Alert],
+    native_alerts: list[Alert],
+    lat: float,
+    lon: float,
+    *,
+    progress: WarningQueryProgress | None = None,
+) -> list[Alert]:
+    """Match reusable candidates, combine native results, and hide expired alerts.
+
+    Candidate alerts are matched one at a time so the TUI can turn its
+    indeterminate fetch indicator into measured local matching progress.
+    """
+    total = len(candidates)
+    _report_progress(progress, 'alerts_total', total=total, phase='matching')
+    local_alerts: list[Alert] = []
+    for completed, candidate in enumerate(candidates, start=1):
+        local_alerts.extend(match_alerts_to_point([candidate], lat=lat, lon=lon))
+        _report_progress(
+            progress,
+            'alerts_checked',
+            completed=completed,
+            total=total,
+            phase='matching',
+        )
     return _filter_visible_alerts(deduplicate_alerts([*local_alerts, *native_alerts]))
+
+
+def _report_progress(
+    progress: WarningQueryProgress | None,
+    event: str,
+    **payload: object,
+) -> None:
+    """Send advisory UI progress without allowing it to affect alert matching."""
+    if progress is None:
+        return
+    try:
+        progress(event, payload)
+    except Exception:
+        pass
 
 
 def get_alerts(

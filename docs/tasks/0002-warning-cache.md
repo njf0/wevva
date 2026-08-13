@@ -18,7 +18,7 @@ work.
 
 ## Desired outcome
 
-Within one TUI session, country-level warning candidates are reused for 15
+Within one TUI session, country-level warning candidates are reused for 30
 minutes when the same country and effective warning language are requested.
 Each requested point is matched against those cached candidates before display.
 An explicit `r` refresh bypasses that cached country result and starts a new
@@ -31,7 +31,7 @@ warning query.
 - Key entries by normalized country code and effective warning language. Do
   not include latitude/longitude in this key.
 - Cache both non-empty and successfully completed empty candidate results for
-  15 minutes.
+  30 minutes.
 - Use a monotonic clock for expiry and remove expired entries when they are
   consulted.
 - Match cached candidates to the newly requested coordinates, then apply
@@ -75,7 +75,7 @@ provider queries, geometry resolution, or native point-query handling.
 
 ## Acceptance criteria
 
-- Searching Berlin and then Munich within 15 minutes reuses Germany's fetched
+- Searching Berlin and then Munich within 30 minutes reuses Germany's fetched
   candidates without calling the warning provider again, while displaying only
   warnings that match each city's coordinates.
 - Cache identity changes when country code or warning language changes, but
@@ -103,7 +103,7 @@ provider queries, geometry resolution, or native point-query handling.
 
 ## Decisions and notes
 
-- Cache lifetime is 15 minutes for this task.
+- Cache lifetime is 30 minutes for this task.
 - This is intentionally TUI-session-only, not persistent data.
 - The published `wevva-warnings>=0.3.5` dependency supplies the candidate-fetch
   and local-match boundary; this repository only consumes it.

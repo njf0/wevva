@@ -18,6 +18,8 @@ from wevva.config import location_key
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
+    NearbyTropicalSystemSelected,
+    TropicalSystemsProgress,
     WeatherAlertSelected,
     WeatherAlertsProgress,
     WeatherAlertsUpdated,
@@ -344,35 +346,65 @@ class WeatherScreen(Screen[None]):
             self._time_refresh_timer = self.set_interval(1, self._refresh_time_display)
 
     async def on_weather_alerts_updated(self, event: WeatherAlertsUpdated) -> None:
-        """Render alerts that arrive after the main forecast content."""
-        await self.render_alert_panel(event.alerts)
+        """Render the combined alert and tropical-system tab panel."""
+        await self.render_alert_panel(
+            event.alerts,
+            event.tropical_systems,
+            tropical_systems_pending=event.tropical_systems_pending,
+        )
 
     def on_weather_alerts_progress(self, event: WeatherAlertsProgress) -> None:
         """Forward individual warning work to the saved-locations sidebar."""
         self.saved_locations_sidebar.update_warning_progress(event.event, event.payload)
 
+    def on_tropical_systems_progress(self, event: TropicalSystemsProgress) -> None:
+        """Forward tropical fetch and local matching work to the sidebar."""
+        if event.event == 'tropical_finished':
+            self.saved_locations_sidebar.clear_tropical_progress()
+            return
+        self.saved_locations_sidebar.update_tropical_progress(event.event, event.payload)
+
     def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
         """Show full text for the selected alert in the details sidebar."""
         self.alert_details_sidebar.update_alert(event.alert)
+
+    def on_nearby_tropical_system_selected(self, event: NearbyTropicalSystemSelected) -> None:
+        """Show supplementary facts for the selected tropical-system tab."""
+        self.alert_details_sidebar.update_tropical_system(event.system)
+        self.alert_details_sidebar.display = True
 
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
         self.context_bar.refresh_time_display()
 
-    async def render_alert_panel(self, alerts: list[Alert]) -> None:
-        """Mount a compact tabbed alert panel, or none when there are no alerts."""
+    async def render_alert_panel(
+        self,
+        alerts: list[Alert],
+        tropical_systems=None,
+        *,
+        tropical_systems_pending: bool = False,
+    ) -> None:
+        """Mount nearby systems before ordinary alert tabs, or none when empty."""
         await self.weather_warnings.remove_children()
         self.saved_locations_sidebar.clear_warning_progress()
-        if not alerts:
+        if not tropical_systems_pending:
+            self.saved_locations_sidebar.clear_tropical_progress()
+        tropical_systems = tropical_systems or []
+        if not alerts and not tropical_systems:
             self.warnings_row.display = False
             self.weather_warnings.display = False
             self.alert_details_sidebar.display = False
             return
 
         ordered_alerts = sorted(alerts, key=alert_sort_key)
-        self.alert_details_sidebar.update_alert(ordered_alerts[0])
+        if tropical_systems:
+            self.alert_details_sidebar.update_tropical_system(tropical_systems[0])
+        else:
+            self.alert_details_sidebar.update_alert(ordered_alerts[0])
         self.alert_details_sidebar.display = True
-        await self.weather_warnings.mount(WeatherAlertsPanel(ordered_alerts))
+        await self.weather_warnings.mount(
+            WeatherAlertsPanel(ordered_alerts, tropical_systems=tropical_systems)
+        )
         self.warnings_row.display = True
         self.weather_warnings.display = True
 

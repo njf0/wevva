@@ -6,7 +6,7 @@ Completed
 
 ## Context
 
-Task 0002 caches country-level warning candidates for 15 minutes, then matches
+Task 0002 caches country-level warning candidates for 30 minutes, then matches
 them locally to each selected location. This is correct for sources whose
 alerts can be reused and geometrically matched outside the provider.
 
