@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import Container
+from textual.events import Resize
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
@@ -73,13 +74,29 @@ class WeatherScreen(Screen[None]):
     """
 
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
-        ('c', 'open_author', 'Credits'),  # Only screen-specific binding
+        ('c', 'open_author', 'Credits'),
         ('?', 'help', 'Help'),  # Context-aware help (AQ or general)
+        ('l', 'show_saved_locations', 'Show locations'),
+        ('l', 'hide_saved_locations', 'Hide locations'),
+        ('i', 'show_alert_details', 'Show details'),
+        ('i', 'hide_alert_details', 'Hide details'),
     ]
+
+    # The main forecast content is 98 columns wide. At 144 columns the left
+    # sidebar fits comfortably; the documented 192-column full layout also
+    # has room for the 40-column details reader on the right.
+    LOCATIONS_SIDEBAR_MIN_WIDTH = 144
+    ALERT_DETAILS_SIDEBAR_MIN_WIDTH = 192
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._time_refresh_timer = None  # Track the 1-second update timer
+        self._locations_sidebar_requested = False
+        self._alert_details_sidebar_requested = False
+        self._locations_sidebar_has_content = False
+        self._alert_details_sidebar_has_content = False
+        self._locations_sidebar_width_collapsed = False
+        self._alert_details_sidebar_width_collapsed = False
 
     DEFAULT_CSS = """
     #main-panel {
@@ -245,16 +262,60 @@ class WeatherScreen(Screen[None]):
         self.query_one('#main-panel').display = False
         self.warnings_row.display = False
         self.weather_warnings.display = False
-        self.alert_details_sidebar.display = False
+        (
+            self._locations_sidebar_requested,
+            self._alert_details_sidebar_requested,
+        ) = self._sidebar_defaults_for_width(self.size.width)
         self.update_saved_locations_sidebar()
-        current_location = getattr(self.app, 'location', None)
-        has_current_location = (
-            current_location is not None
-            and current_location.latitude is not None
-            and current_location.longitude is not None
+
+    @classmethod
+    def _sidebar_defaults_for_width(cls, width: int) -> tuple[bool, bool]:
+        """Return initial visibility preferences for the available terminal width."""
+        return (
+            width >= cls.LOCATIONS_SIDEBAR_MIN_WIDTH,
+            width >= cls.ALERT_DETAILS_SIDEBAR_MIN_WIDTH,
         )
-        if not getattr(self.app, 'saved_locations', []) and not has_current_location:
-            self.saved_locations_sidebar.display = False
+
+    @property
+    def saved_locations_sidebar_visible(self) -> bool:
+        """Whether the saved-locations sidebar is currently on screen."""
+        return bool(
+            getattr(getattr(self, 'saved_locations_sidebar', None), 'display', False)
+        )
+
+    @property
+    def alert_details_sidebar_visible(self) -> bool:
+        """Whether the alert-details sidebar is currently on screen."""
+        return bool(
+            getattr(getattr(self, 'alert_details_sidebar', None), 'display', False)
+        )
+
+    def _sync_sidebar_visibility(self) -> None:
+        """Apply the user's visibility choices when each sidebar has content."""
+        if hasattr(self, 'saved_locations_sidebar'):
+            self.saved_locations_sidebar.display = (
+                self._locations_sidebar_requested
+                and self._locations_sidebar_has_content
+                and not self._locations_sidebar_width_collapsed
+            )
+        if hasattr(self, 'alert_details_sidebar'):
+            self.alert_details_sidebar.display = (
+                self._alert_details_sidebar_requested
+                and self._alert_details_sidebar_has_content
+                and not self._alert_details_sidebar_width_collapsed
+            )
+        if self.is_mounted:
+            self.refresh_bindings()
+
+    def on_resize(self, event: Resize) -> None:
+        """Collapse sidebars that no longer fit, restoring them if space returns."""
+        self._locations_sidebar_width_collapsed = (
+            event.size.width < self.LOCATIONS_SIDEBAR_MIN_WIDTH
+        )
+        self._alert_details_sidebar_width_collapsed = (
+            event.size.width < self.ALERT_DETAILS_SIDEBAR_MIN_WIDTH
+        )
+        self._sync_sidebar_visibility()
 
     def update_saved_locations_sidebar(self) -> None:
         """Sync saved-location sidebar from app state."""
@@ -271,16 +332,28 @@ class WeatherScreen(Screen[None]):
             if location_key(current_location) not in saved_keys:
                 locations.append(current_location)
         self.saved_locations_sidebar.set_locations(locations)
-        if locations:
-            self.saved_locations_sidebar.display = True
+        self._locations_sidebar_has_content = bool(locations)
+        self._sync_sidebar_visibility()
 
     def toggle_saved_locations_sidebar(self) -> None:
         """Show or hide the saved-location sidebar."""
-        if not hasattr(self, 'saved_locations_sidebar'):
-            return
-        if not self.saved_locations_sidebar.is_mounted:
-            return
-        self.saved_locations_sidebar.display = not self.saved_locations_sidebar.display
+        self.set_saved_locations_sidebar_visible(
+            not self.saved_locations_sidebar_visible
+        )
+
+    def set_saved_locations_sidebar_visible(self, visible: bool) -> None:
+        """Remember and apply the saved-location sidebar visibility choice."""
+        self._locations_sidebar_requested = visible
+        if visible:
+            self._locations_sidebar_width_collapsed = False
+        self._sync_sidebar_visibility()
+
+    def set_alert_details_sidebar_visible(self, visible: bool) -> None:
+        """Remember and apply the alert-details sidebar visibility choice."""
+        self._alert_details_sidebar_requested = visible
+        if visible:
+            self._alert_details_sidebar_width_collapsed = False
+        self._sync_sidebar_visibility()
 
     def update_saved_location_weather(self, location, summary: str) -> None:
         """Update compact weather text for one saved location."""
@@ -314,6 +387,40 @@ class WeatherScreen(Screen[None]):
         else:
             # Default help
             self.app.push_screen(HelpScreen())
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Expose only the visibility action that matches each sidebar's state."""
+        if action == 'show_saved_locations':
+            return (
+                self._locations_sidebar_has_content
+                and not self.saved_locations_sidebar_visible
+            )
+        if action == 'hide_saved_locations':
+            return self.saved_locations_sidebar_visible
+        if action == 'show_alert_details':
+            return (
+                self._alert_details_sidebar_has_content
+                and not self.alert_details_sidebar_visible
+            )
+        if action == 'hide_alert_details':
+            return self.alert_details_sidebar_visible
+        return super().check_action(action, parameters)
+
+    def action_show_saved_locations(self) -> None:
+        """Show the saved-location sidebar."""
+        self.set_saved_locations_sidebar_visible(True)
+
+    def action_hide_saved_locations(self) -> None:
+        """Hide the saved-location sidebar."""
+        self.set_saved_locations_sidebar_visible(False)
+
+    def action_show_alert_details(self) -> None:
+        """Show the selected warning or tropical-system details."""
+        self.set_alert_details_sidebar_visible(True)
+
+    def action_hide_alert_details(self) -> None:
+        """Hide the warning and tropical-system details sidebar."""
+        self.set_alert_details_sidebar_visible(False)
 
     # --- Messages ---
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
@@ -367,11 +474,14 @@ class WeatherScreen(Screen[None]):
     def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
         """Show full text for the selected alert in the details sidebar."""
         self.alert_details_sidebar.update_alert(event.alert)
+        self._alert_details_sidebar_has_content = True
+        self._sync_sidebar_visibility()
 
     def on_nearby_tropical_system_selected(self, event: NearbyTropicalSystemSelected) -> None:
         """Show supplementary facts for the selected tropical-system tab."""
         self.alert_details_sidebar.update_tropical_system(event.system)
-        self.alert_details_sidebar.display = True
+        self._alert_details_sidebar_has_content = True
+        self._sync_sidebar_visibility()
 
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
@@ -393,7 +503,8 @@ class WeatherScreen(Screen[None]):
         if not alerts and not tropical_systems:
             self.warnings_row.display = False
             self.weather_warnings.display = False
-            self.alert_details_sidebar.display = False
+            self._alert_details_sidebar_has_content = False
+            self._sync_sidebar_visibility()
             return
 
         ordered_alerts = sorted(alerts, key=alert_sort_key)
@@ -401,7 +512,8 @@ class WeatherScreen(Screen[None]):
             self.alert_details_sidebar.update_tropical_system(tropical_systems[0])
         else:
             self.alert_details_sidebar.update_alert(ordered_alerts[0])
-        self.alert_details_sidebar.display = True
+        self._alert_details_sidebar_has_content = True
+        self._sync_sidebar_visibility()
         await self.weather_warnings.mount(
             WeatherAlertsPanel(ordered_alerts, tropical_systems=tropical_systems)
         )

@@ -57,6 +57,7 @@ You can launch it directly with `uvx wevva`.
 - `a` Save the current location
 - `d` Delete the highlighted saved location
 - `l` Show or hide saved locations
+- `i` Show or hide alert details
 - `u` Open settings
 - `h` Open this help screen
 - `q` Quit

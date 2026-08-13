@@ -89,7 +89,6 @@ class Wevva(App, inherit_bindings=False):
         ('q', 'quit', 'Quit'),  # exit the app
         ('s', 'search', 'Search'),  # open place search screen
         ('r', 'force_refresh', 'Refresh'),  # fetch latest forecast and warnings
-        ('l', 'toggle_locations', 'Locations'),  # show/hide saved locations
         ('a', 'save_current_location', 'Save Location'),
         ('d', 'delete_saved_location', 'Delete Location'),
         ('h', 'help', 'Help'),  # show quick help
@@ -250,10 +249,6 @@ class Wevva(App, inherit_bindings=False):
     def action_help(self):  # textual binding: 'h'
         """Open help screen."""
         self.push_screen(HelpScreen())
-
-    def action_toggle_locations(self) -> None:
-        """Toggle the saved-location sidebar."""
-        self.weather_screen.toggle_saved_locations_sidebar()
 
     def action_save_current_location(self) -> None:
         """Persist the active location in the saved-location list."""

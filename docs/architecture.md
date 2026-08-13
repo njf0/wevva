@@ -96,7 +96,10 @@ geometry.
 The intentionally direct coupling between widgets, Textual messages, and the
 forecast model objects keeps the project small. Stable widget IDs are part of
 the CSS contract. The README's minimum terminal target is 192x53 for the full
-layout, and emoji width/rendering depends on the terminal and font.
+layout. At launch, the saved-locations sidebar is shown from 144 columns and
+the alert-details sidebar joins it at 192 columns. They collapse below those
+widths on resize and restore if space returns; both can also be toggled from the
+weather screen. Emoji width/rendering depends on the terminal and font.
 
 ## Constraints worth preserving
 
