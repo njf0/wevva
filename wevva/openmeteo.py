@@ -179,6 +179,29 @@ class OpenMeteoForecast:
             response.raise_for_status()
             return response.json()
 
+    @classmethod
+    async def fetch_current_summary(
+        cls,
+        lat: float,
+        lon: float,
+        temperature_unit: str = 'celsius',
+    ) -> dict:
+        """Fetch only the fields needed for a saved-location summary."""
+        temperature_unit = (
+            temperature_unit if temperature_unit in VALID_TEMPERATURE_UNITS else DEFAULT_TEMPERATURE_UNIT
+        )
+        params: dict[str, Any] = {
+            'latitude': lat,
+            'longitude': lon,
+            'current': ['temperature_2m', 'weather_code', 'is_day'],
+        }
+        if temperature_unit != DEFAULT_TEMPERATURE_UNIT:
+            params['temperature_unit'] = temperature_unit
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(cls.BASE_URL, params=params)
+            response.raise_for_status()
+            return response.json()
+
     @staticmethod
     def extract_metadata(response: dict) -> LocationMetadata:
         # Return LocationMetadata with API-provided fields

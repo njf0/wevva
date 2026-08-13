@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import re
 
+from rich.console import Group
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
@@ -16,8 +17,8 @@ from wevva.alerts import Alert
 from wevva.messages import NearbyTropicalSystemSelected, WeatherAlertSelected
 from wevva.services.tropical import NearbyTropicalSystem
 from wevva.widgets.tropical_systems import (
-    TropicalSystemDetailsTable,
     build_tropical_system_text,
+    build_tropical_system_details,
     build_tropical_tab_label,
 )
 
@@ -219,9 +220,6 @@ class WeatherAlertsPanel(Container):
         else:
             line = f'[dim italic]{escape(condition)} timing not published[/]'
 
-        url = (alert.url or '').strip()
-        if url:
-            line = f'{line}  [link={url}][dim underline]View official warning[/][/]'
         return line
 
     def condition_name(self, alert: Alert) -> str:
@@ -280,26 +278,18 @@ class WeatherAlertDetailsSidebar(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         yield Static('', id='weather-alert-details')
-        tropical_details = TropicalSystemDetailsTable()
-        tropical_details.display = False
-        yield tropical_details
 
     @property
     def content(self) -> Static:
         return self.query_one('#weather-alert-details', Static)
 
-    @property
-    def tropical_details(self) -> TropicalSystemDetailsTable:
-        return self.query_one(TropicalSystemDetailsTable)
-
     def update_alert(self, alert: Alert) -> None:
         self.border_title = 'Alert Details'
         self.content.display = True
-        self.tropical_details.display = False
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.set_styles(f'border: round {color}; border-title-color: {color};')
-        self.content.update(Markdown(alert_markdown(alert)))
+        self.content.update(alert_renderable(alert))
 
     def update_tropical_system(self, nearby: NearbyTropicalSystem) -> None:
         """Show supplementary facts for the selected nearby tropical report."""
@@ -307,9 +297,8 @@ class WeatherAlertDetailsSidebar(VerticalScroll):
         accent = self.app.theme_variables.get('text-accent')
         if accent:
             self.set_styles(f'border: round {accent}; border-title-color: {accent};')
-        self.content.display = False
-        self.tropical_details.update_system(nearby)
-        self.tropical_details.display = True
+        self.content.display = True
+        self.content.update(build_tropical_system_details(nearby, self.app.theme_variables))
 
 
 def alert_markdown(alert: Alert) -> str:
@@ -318,12 +307,50 @@ def alert_markdown(alert: Alert) -> str:
     headline = (alert.headline or alert.event or 'Weather alert').strip()
 
     if description and instruction:
-        return f'### {headline}\n\n{description}\n\n{instruction}'
+        content = f'### {headline}\n\n{description}\n\n{instruction}'
+    elif description:
+        content = f'### {headline}\n\n{description}'
+    elif instruction:
+        content = f'### {headline}\n\n{instruction}'
+    else:
+        content = f'### {headline}'
+
+    if url := (alert.url or '').strip():
+        return f'{content}\n\n[View official warning]({url})'
+    return content
+
+
+def alert_renderable(alert: Alert):
+    """Render an alert while keeping provider instructions italic and structured."""
+    description = _normalise_alert_markdown(alert.description or '')
+    instruction = _normalise_alert_markdown(alert.instruction or '')
+    headline = (alert.headline or alert.event or 'Weather alert').strip()
+    official_link = _official_warning_link(alert)
+
+    if not instruction:
+        return Markdown(alert_markdown(alert))
+
     if description:
-        return f'### {headline}\n\n{description}'
-    if instruction:
-        return f'### {headline}\n\n{instruction}'
-    return f'### {headline}'
+        renderables = [
+            Markdown(f'### {headline}\n\n{description}'),
+            Text(''),
+            Markdown(instruction, style='italic'),
+        ]
+    else:
+        renderables = [
+            Markdown(f'### {headline}'),
+            Text(''),
+            Markdown(instruction, style='italic'),
+        ]
+    if official_link is not None:
+        renderables.extend((Text(''), official_link))
+    return Group(*renderables)
+
+
+def _official_warning_link(alert: Alert) -> Markdown | None:
+    """Build the detail-reader footer link, when an official warning URL exists."""
+    url = (alert.url or '').strip()
+    return Markdown(f'[View official warning]({url})') if url else None
 
 
 def _normalise_alert_markdown(value: str) -> str:

@@ -47,11 +47,13 @@ from wevva.services.tropical import (
     get_tropical_system_candidates_async,
     nearby_tropical_systems_from_candidates,
 )
-from wevva.services.weather import fetch_weather
+from wevva.services.weather import fetch_weather_summary
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
 AlertCacheKey = tuple[str | None, str]
+ForecastCacheKey = tuple[float, float, str, str, str]
+ForecastCacheEntry = tuple[float, WeatherUpdated]
 TropicalCacheEntry = tuple[float, tuple[TropicalSystem, ...]]
 
 
@@ -95,6 +97,7 @@ class Wevva(App, inherit_bindings=False):
     ]
 
     ALERT_CACHE_TTL_SECONDS = 30 * 60
+    FORECAST_CACHE_TTL_SECONDS = 15 * 60
     TROPICAL_SYSTEM_CACHE_TTL_SECONDS = 30 * 60
 
     def __init__(
@@ -129,6 +132,8 @@ class Wevva(App, inherit_bindings=False):
         # guard to prevent overlapping refreshes
         self._refresh_in_flight = False  # debounce concurrent refreshes
         self._refresh_generation = 0
+        self._forecast_cache: dict[ForecastCacheKey, ForecastCacheEntry] = {}
+        self._forecast_cache_clock = time.monotonic
         self._alerts_task: asyncio.Task[None] | None = None
         self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
         self._alert_cache_clock = time.monotonic
@@ -164,15 +169,15 @@ class Wevva(App, inherit_bindings=False):
     # Actions / key bindings
     # ------------------------------------------------------------
     async def action_refresh(self) -> None:
-        """Programmatically refresh weather, reusing a valid warning result."""
+        """Programmatically refresh weather, reusing valid session results."""
         await self._refresh_weather(force_alert_refresh=False)
 
     async def action_force_refresh(self) -> None:
-        """Refresh weather and explicitly bypass the warning-result cache."""
+        """Refresh weather and explicitly bypass session result caches."""
         await self._refresh_weather(force_alert_refresh=True)
 
     async def _refresh_weather(self, *, force_alert_refresh: bool) -> None:
-        """Fetch via controller and broadcast `WeatherUpdated`."""
+        """Fetch or reuse a recent full forecast, then broadcast `WeatherUpdated`."""
         if self._refresh_in_flight:
             return
         if self.location.latitude is None or self.location.longitude is None:
@@ -185,11 +190,15 @@ class Wevva(App, inherit_bindings=False):
         self._cancel_tropical_context_task()
         self._schedule_saved_weather_refresh()
         try:
-            event = await self.controller.fetch(
-                lat=self.location.latitude,
-                lon=self.location.longitude,
-                country_code=self.location.country_code,
-            )
+            forecast_cache_key = self._forecast_cache_key()
+            event = None if force_alert_refresh else self._cached_forecast(forecast_cache_key)
+            if event is None:
+                event = await self.controller.fetch(
+                    lat=self.location.latitude,
+                    lon=self.location.longitude,
+                    country_code=self.location.country_code,
+                )
+                self._forecast_cache[forecast_cache_key] = self._forecast_cache_clock(), event
             # Forward fresh data to the weather screen
             self.weather_screen.post_message(event)
             forecast_lat = event.metadata.latitude
@@ -205,6 +214,34 @@ class Wevva(App, inherit_bindings=False):
             self.weather_screen.post_message(WeatherFetchFailed(e))
         finally:
             self._refresh_in_flight = False
+
+    def _forecast_cache_key(self) -> ForecastCacheKey:
+        """Key a complete forecast by requested coordinates and display units."""
+        assert self.location.latitude is not None
+        assert self.location.longitude is not None
+        return (
+            self.location.latitude,
+            self.location.longitude,
+            self.temperature_unit,
+            self.wind_speed_unit,
+            self.precipitation_unit,
+        )
+
+    def _cached_forecast(self, cache_key: ForecastCacheKey) -> WeatherUpdated | None:
+        """Return a new message around a valid cached complete forecast result."""
+        entry = self._forecast_cache.get(cache_key)
+        if entry is None:
+            return None
+        cached_at, cached_event = entry
+        if self._forecast_cache_clock() - cached_at >= self.FORECAST_CACHE_TTL_SECONDS:
+            del self._forecast_cache[cache_key]
+            return None
+        return WeatherUpdated(
+            metadata=cached_event.metadata,
+            current=cached_event.current,
+            hourly=cached_event.hourly,
+            daily=cached_event.daily,
+        )
 
     def action_search(self):  # textual binding: 's'
         """Open place search screen (fresh instance)."""
@@ -279,6 +316,7 @@ class Wevva(App, inherit_bindings=False):
         units_changed = (
             new_temp != self.temperature_unit or new_wind != self.wind_speed_unit or new_precip != self.precipitation_unit
         )
+        temperature_unit_changed = new_temp != self.temperature_unit
         warning_language_changed = new_warning_language != self.warning_language
 
         self.temperature_unit = new_temp
@@ -302,7 +340,7 @@ class Wevva(App, inherit_bindings=False):
             self._cancel_tropical_context_task()
             self._schedule_alert_refresh(self._refresh_generation)
 
-        if units_changed:
+        if temperature_unit_changed and (self.location.latitude is None or self.location.longitude is None):
             self._schedule_saved_weather_refresh()
 
         if save_defaults:
@@ -388,12 +426,10 @@ class Wevva(App, inherit_bindings=False):
         if generation != self._saved_weather_generation:
             return
         try:
-            data = await fetch_weather(
+            data = await fetch_weather_summary(
                 lat=location.latitude,
                 lon=location.longitude,
                 temperature_unit=self.temperature_unit,
-                wind_speed_unit=self.wind_speed_unit,
-                precipitation_unit=self.precipitation_unit,
             )
         except asyncio.CancelledError:
             raise

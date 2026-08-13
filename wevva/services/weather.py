@@ -28,3 +28,17 @@ async def fetch_weather(
         wind_speed_unit=wind_speed_unit,
         precipitation_unit=precipitation_unit,
     )
+
+
+async def fetch_weather_summary(
+    *,
+    lat: float,
+    lon: float,
+    temperature_unit: str = 'celsius',
+) -> dict:
+    """Fetch only the current fields shown beside a saved location."""
+    return await OpenMeteoForecast.fetch_current_summary(
+        lat=lat,
+        lon=lon,
+        temperature_unit=temperature_unit,
+    )

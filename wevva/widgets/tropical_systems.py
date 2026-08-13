@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from rich.console import Group
+from rich.markdown import Markdown
 from rich.text import Text
-from textual.widgets import DataTable
 
 from wevva.services.tropical import NearbyTropicalSystem
 
@@ -16,24 +17,23 @@ def build_tropical_system_text(nearby: NearbyTropicalSystem, *, accent: str | No
     system = nearby.system
     title = Text(_panel_headline(system), style=f'bold italic {accent}' if accent else 'bold italic')
 
-    primary_facts = []
+    primary_facts: list[Text] = []
     if nearby.distance_km is not None:
-        primary_facts.append(f'Centre {_format_miles(nearby.distance_km)} away')
-    if max_wind := _clean(system.max_wind):
-        primary_facts.append(f'{max_wind} winds')
-    if pressure := _clean(system.min_pressure):
-        primary_facts.append(pressure)
+        primary_facts.append(Text(f'{_format_miles(nearby.distance_km)} away'))
     if movement := _clean(system.movement):
-        primary_facts.append(f'Moving {movement}')
-    elif basin := _clean(system.basin):
-        primary_facts.append(basin)
+        primary_facts.append(Text(f'Moving {movement}'))
+    if basin := _clean(system.basin):
+        primary_facts.append(Text(basin))
     if not primary_facts:
         return title
 
     result = Text()
     result.append_text(title)
     result.append('\n')
-    result.append(' · '.join(primary_facts), style='dim')
+    for index, fact in enumerate(primary_facts):
+        if index:
+            result.append(' · ', style='dim')
+        result.append_text(fact)
     return result
 
 
@@ -51,63 +51,50 @@ def build_tropical_tab_label(nearby: NearbyTropicalSystem, *, accent: str | None
     return label
 
 
-class TropicalSystemDetailsTable(DataTable):
-    """Compact linked field/value table for one selected tropical report."""
-
-    DEFAULT_CSS = """
-    TropicalSystemDetailsTable {
-        width: 100%;
-        height: auto;
-        padding: 0 1;
-        background: $background;
-    }
-    """
-
-    def __init__(self, *, id: str = 'tropical-system-details') -> None:
-        super().__init__(show_header=False, cursor_type='none', id=id, cell_padding=0)
-        self.add_column('Field', key='field', width=16)
-        self.add_column('Value', key='value', width=34)
-
-    def update_system(self, nearby: NearbyTropicalSystem) -> None:
-        """Replace rows with the available details for one tropical report."""
-        self.clear()
-        for index, (label, value) in enumerate(tropical_system_detail_rows(nearby, self.app.theme_variables)):
-            self.add_row(Text(label, style='bold dim'), value, key=f'tropical-detail-{index}')
-        self.refresh()
-
-
-def tropical_system_detail_rows(
+def build_tropical_system_details(
     nearby: NearbyTropicalSystem,
     theme: dict[str, str],
-) -> list[tuple[str, Text]]:
-    """Build ordered, styled table rows without displaying missing fields."""
+) -> Group:
+    """Build a compact Markdown detail reader without displaying missing fields."""
     system = nearby.system
     accent = theme.get('text-accent')
-    primary_style = f'bold {accent}' if accent else 'bold'
-    rows: list[tuple[str, Text]] = [('Name', Text(_system_name(system), style=primary_style))]
+    headline = _clean(system.headline) or _system_name(system)
+    details = [Markdown(f'### {headline}')]
+
+    leading_facts = []
+    if name := _clean(system.name):
+        leading_facts.append(f'- **Name:** {name}')
     if classification := _clean(system.classification):
-        rows.append(('Classification', Text(classification, style=primary_style)))
+        leading_facts.append(f'- **Classification:** {classification}')
     if nearby.distance_km is not None:
-        rows.append(('Centre distance', Text(f'{_format_kilometres(nearby.distance_km)} ({_format_miles(nearby.distance_km)})')))
+        leading_facts.append(f'- **Centre distance:** {_format_kilometres(nearby.distance_km)} ({_format_miles(nearby.distance_km)})')
+    if leading_facts:
+        details.append(Markdown('\n'.join(leading_facts)))
     if system.center_lat is not None and system.center_lon is not None:
-        rows.append(('Centre', build_tropical_coordinates_text(system.center_lat, system.center_lon, accent=accent)))
+        centre = Text(' • ')
+        centre.append('Centre: ', style='bold')
+        centre.append_text(build_tropical_coordinates_text(system.center_lat, system.center_lon, accent=accent))
+        details.append(centre)
+    trailing_facts = []
     if max_wind := _clean(system.max_wind):
-        rows.append(('Maximum wind', Text(max_wind, style=primary_style)))
+        trailing_facts.append(f'- **Maximum wind:** {max_wind}')
     if movement := _clean(system.movement):
-        rows.append(('Movement', Text(movement)))
+        trailing_facts.append(f'- **Movement:** {movement}')
     if pressure := _clean(system.min_pressure):
-        rows.append(('Minimum pressure', Text(pressure)))
+        trailing_facts.append(f'- **Minimum pressure:** {pressure}')
     if basin := _clean(system.basin):
-        rows.append(('Basin', Text(basin)))
+        trailing_facts.append(f'- **Basin:** {basin}')
     if advisory_number := _clean(system.advisory_number):
-        rows.append(('Advisory', Text(advisory_number)))
+        trailing_facts.append(f'- **Advisory:** {advisory_number}')
     if system.issued_at is not None:
-        rows.append(('Issued', Text(_format_issued_at(system.issued_at))))
+        trailing_facts.append(f'- **Issued:** {_format_issued_at(system.issued_at)}')
     if source_name := _clean(getattr(system.source_info, 'name', None)):
-        rows.append(('Source', Text(source_name)))
+        trailing_facts.append(f'- **Source:** {source_name}')
+    if trailing_facts:
+        details.append(Markdown('\n'.join(trailing_facts)))
     if url := _clean(system.url):
-        rows.append(('Official source', _linked_text('View official source', url, accent=accent)))
-    return rows
+        details.extend((Text(''), Markdown(f'[View official source]({url})')))
+    return Group(*details)
 
 
 def build_tropical_coordinates_text(latitude: float, longitude: float, *, accent: str | None = None) -> Text:
@@ -156,20 +143,13 @@ def _format_issued_at(issued_at) -> str:
     return f'{timestamp} {timezone}'.rstrip()
 
 
-def _linked_text(label: str, url: str, *, accent: str | None = None) -> Text:
-    text = Text(label, style=f'italic {accent}' if accent else 'italic')
-    text.stylize(f'underline link {url}')
-    return text
-
-
 def _clean(value: object) -> str:
     return value.strip() if isinstance(value, str) else ''
 
 
 __all__ = [
-    'TropicalSystemDetailsTable',
     'build_tropical_coordinates_text',
+    'build_tropical_system_details',
     'build_tropical_system_text',
     'build_tropical_tab_label',
-    'tropical_system_detail_rows',
 ]

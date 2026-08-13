@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from types import SimpleNamespace
 import unittest
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
+
+from rich.console import Console
 
 from wevva.alerts import Alert
 from wevva.app import Wevva
@@ -22,9 +25,9 @@ from wevva.services.tropical import (
 )
 from wevva.widgets.tropical_systems import (
     build_tropical_coordinates_text,
+    build_tropical_system_details,
     build_tropical_system_text,
     build_tropical_tab_label,
-    tropical_system_detail_rows,
 )
 from wevva.widgets.weather_alerts import WeatherAlertsPanel
 from wevva_warnings import TropicalSystem
@@ -242,12 +245,20 @@ class TropicalDisplayTests(unittest.TestCase):
         self.assertEqual(
             text.plain,
             'DOLPHIN\n'
-            'Centre 74 mi away · 40 km/h winds · 980 hPa · Moving Northwest',
+            '74 mi away · Moving Northwest · Northwest Pacific',
         )
         self.assertEqual(text.plain.count('\n'), 1)
-        self.assertNotIn('Northwest Pacific', text.plain)
+        self.assertNotIn('Centre', text.plain)
+        self.assertNotIn('40 km/h', text.plain)
+        self.assertNotIn('980 hPa', text.plain)
+        distance_start = text.plain.index('74 mi away')
+        separator_start = text.plain.index(' · ')
+        basin_start = text.plain.index('Northwest Pacific')
+        self.assertFalse(any(span.start <= distance_start < span.end and span.style == 'dim' for span in text.spans))
+        self.assertTrue(any(span.start == separator_start and span.end == separator_start + 3 and span.style == 'dim' for span in text.spans))
+        self.assertFalse(any(span.start <= basin_start < span.end and span.style == 'dim' for span in text.spans))
 
-    def test_details_table_starts_with_name_and_uses_linked_coordinates(self) -> None:
+    def test_markdown_details_include_available_facts_and_linked_coordinates(self) -> None:
         system = _system(
             headline='Low Pressure Area: DOLPHIN',
             center_lat=-31.2,
@@ -267,21 +278,34 @@ class TropicalDisplayTests(unittest.TestCase):
             source_info=SimpleNamespace(name='Hong Kong Observatory', issuer_country_code='HK'),
         )
 
-        rows = tropical_system_detail_rows(
+        details = build_tropical_system_details(
             NearbyTropicalSystem(system=system, distance_km=119.091),
             {'text-accent': '#abcdef'},
         )
-        details = {label: value.plain for label, value in rows}
+        console = Console(width=80, file=StringIO(), record=True)
+        console.print(details)
+        rendered = console.export_text()
 
-        self.assertEqual(rows[0][0], 'Name')
-        self.assertEqual(details['Name'], 'DOLPHIN')
-        self.assertEqual(details['Centre'], '31.20° S, 113.80° E')
-        self.assertEqual(details['Movement'], 'Northwest')
-        self.assertEqual(details['Minimum pressure'], '980 hPa')
-        self.assertEqual(details['Advisory'], '6')
-        self.assertEqual(details['Issued'], '11 Aug 2026, 20:26 UTC+08:00')
-        self.assertEqual(details['Official source'], 'View official source')
-        self.assertNotIn('Provider details', details)
+        self.assertLess(rendered.index('Low Pressure Area: DOLPHIN'), rendered.index('Name: DOLPHIN'))
+        self.assertIn('• Name: DOLPHIN', rendered)
+        self.assertIn('• Classification: Tropical Storm', rendered)
+        self.assertIn('• Centre distance: 119.1 km (74 mi)', rendered)
+        self.assertIn('Centre: 31.20° S, 113.80° E', rendered)
+        self.assertIn('• Movement: Northwest', rendered)
+        self.assertIn('• Minimum pressure: 980 hPa', rendered)
+        self.assertIn('• Advisory: 6', rendered)
+        self.assertIn('• Issued: 11 Aug 2026, 20:26 UTC+08:00', rendered)
+        self.assertTrue(rendered.rstrip().endswith('View official source'))
+        self.assertNotIn('Provider details', rendered)
+
+        coordinate_segments = [
+            segment
+            for line in Console(width=80).render_lines(details)
+            for segment in line
+            if '31.20° S' in segment.text or '113.80° E' in segment.text
+        ]
+        self.assertTrue(coordinate_segments)
+        self.assertTrue(all(not segment.style.bold and not segment.style.dim for segment in coordinate_segments))
 
         coordinates = build_tropical_coordinates_text(-31.2, 113.8, accent='#abcdef')
         self.assertEqual(coordinates.plain, '31.20° S, 113.80° E')
@@ -305,7 +329,7 @@ class TropicalDisplayTests(unittest.TestCase):
 
         self.assertEqual(
             text.plain,
-            'DOLPHIN\nCentre 74 mi away · 40 km/h winds · 980 hPa · Northwest Pacific',
+            'DOLPHIN\n74 mi away · Northwest Pacific',
         )
 
     def test_tab_label_shows_coloured_classification_before_name(self) -> None:
@@ -322,7 +346,7 @@ class TropicalDisplayTests(unittest.TestCase):
         panel = WeatherAlertsPanel([alert], tropical_systems=[nearby])
 
         self.assertEqual(panel.items, [nearby, alert])
-        self.assertEqual(panel.panel_title(), '1 Nearby tropical system · 1 Severe Weather Alert')
+        self.assertEqual(panel.panel_title(), '1 Tropical System Alert · 1 Severe Weather Alert')
 
 
 class TropicalAppTests(unittest.IsolatedAsyncioTestCase):

@@ -24,7 +24,10 @@ location when needed, and constructs `wevva.app.Wevva`. The console script is
 equivalent.
 
 `Wevva` owns session state: the selected `LocationMetadata`, unit/theme
-settings, saved locations, refresh generations, and background task handles.
+settings, saved locations, refresh generations, short-lived forecast/warning
+caches, and background task handles. Complete forecast results, including air
+quality, are cached for fifteen minutes by requested coordinates and display
+units; the explicit `r` refresh bypasses that cache.
 It uses `WeatherController` for the main forecast refresh. `WeatherScreen`
 receives `WeatherUpdated` messages and explicitly forwards models to its
 widgets; `HourHighlighted` and `DaySelected` coordinate the selected hour/day
@@ -41,9 +44,10 @@ request air quality and warnings.
   response to small dictionaries. The TUI and CLI turn these into
   `LocationMetadata`.
 - `wevva/services/weather.py` delegates to `OpenMeteoForecast.fetch_all()` in
-  `wevva/openmeteo.py`. That module defines the requested fields, API unit
-  parameters, response metadata extraction, and current/hourly/daily model
-  classes.
+  `wevva/openmeteo.py` for complete forecasts, and makes a current-only query
+  for saved-location summaries. That module defines the requested fields, API
+  unit parameters, response metadata extraction, and current/hourly/daily
+  model classes.
 - `wevva/services/air_quality.py` calls Open-Meteo's Air Quality API. The
   controller and public API merge selected hourly series into weather data.
 - `wevva/services/alerts.py` wraps `wevva-warnings`, normalizes country codes,

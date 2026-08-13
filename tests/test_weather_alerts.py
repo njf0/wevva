@@ -5,7 +5,9 @@ from __future__ import annotations
 import unittest
 
 from wevva.alerts import Alert
-from wevva.widgets.weather_alerts import alert_markdown
+from rich.console import Console
+
+from wevva.widgets.weather_alerts import WeatherAlertsPanel, alert_markdown, alert_renderable
 
 
 class AlertMarkdownTests(unittest.TestCase):
@@ -84,6 +86,44 @@ class AlertMarkdownTests(unittest.TestCase):
             '    and evening hours Wednesday and Thursday.\n'
             '  - http://www.weather.gov/safety/flood',
         )
+
+    def test_instruction_content_is_rendered_in_italics(self) -> None:
+        alert = Alert(
+            id='instruction-style',
+            source='test',
+            event='Storm',
+            headline='Storm warning',
+            description='A description remains regular.',
+            instruction='- Take shelter indoors.',
+        )
+
+        lines = Console(width=80).render_lines(alert_renderable(alert))
+        instruction_segments = [
+            segment
+            for line in lines
+            for segment in line
+            if 'Take shelter indoors.' in segment.text
+        ]
+
+        self.assertEqual(len(instruction_segments), 1)
+        self.assertTrue(instruction_segments[0].style.italic)
+
+    def test_official_link_is_last_in_details_and_not_in_the_tab_preview(self) -> None:
+        alert = Alert(
+            id='official-link',
+            source='test',
+            event='Rain',
+            headline='Rain warning',
+            description='Heavy rain is expected.',
+            url='https://example.com/warnings/rain',
+        )
+
+        self.assertEqual(
+            alert_markdown(alert),
+            '### Rain warning\n\nHeavy rain is expected.\n\n'
+            '[View official warning](https://example.com/warnings/rain)',
+        )
+        self.assertNotIn('View official warning', WeatherAlertsPanel([]).build_timing_line(alert))
 
 
 if __name__ == '__main__':
