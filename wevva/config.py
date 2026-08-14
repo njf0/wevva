@@ -359,6 +359,8 @@ def save_preferences(
         Optional theme update. When omitted, existing value is preserved.
     emoji_enabled: bool | object
         Optional emoji toggle update. When omitted, existing value is preserved.
+    warning_language: str | object
+        Optional warning-language update. When omitted, existing value is preserved.
     default_location_metadata: dict[str, Any] | None | object
         Optional default location metadata update. When omitted, existing value is preserved.
 

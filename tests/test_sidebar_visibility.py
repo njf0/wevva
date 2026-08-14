@@ -8,6 +8,7 @@ import unittest
 from textual.app import App
 
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.widgets.saved_locations import SavedLocationsSidebar
 
 
 class _SidebarTestApp(App):
@@ -38,11 +39,11 @@ class SidebarVisibilityTests(unittest.TestCase):
             (True, False),
         )
         self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(191),
+            WeatherScreen._sidebar_defaults_for_width(185),
             (True, False),
         )
         self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(192),
+            WeatherScreen._sidebar_defaults_for_width(186),
             (True, True),
         )
 
@@ -86,6 +87,15 @@ class SidebarVisibilityTests(unittest.TestCase):
 
 
 class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_location_list_uses_a_narrow_scrollbar(self) -> None:
+        app = _SidebarTestApp()
+
+        async with app.run_test(size=(160, 40)) as pilot:
+            await pilot.pause()
+            sidebar = app.screen.query_one(SavedLocationsSidebar)
+
+            self.assertEqual(sidebar.locations.styles.scrollbar_size_vertical, 1)
+
     async def test_footer_binding_text_changes_after_each_toggle(self) -> None:
         app = _SidebarTestApp()
 
@@ -93,6 +103,7 @@ class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             screen = app.screen
             self.assertIsInstance(screen, WeatherScreen)
+            screen.main_panel.display = True
             screen._locations_sidebar_has_content = True
             screen._alert_details_sidebar_has_content = True
             screen._sync_sidebar_visibility()
@@ -117,14 +128,21 @@ class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             screen = app.screen
             self.assertIsInstance(screen, WeatherScreen)
+            screen.main_panel.display = True
             screen._locations_sidebar_has_content = True
             screen._alert_details_sidebar_has_content = True
             screen._sync_sidebar_visibility()
 
-            await pilot.resize_terminal(191, 60)
+            await pilot.resize_terminal(185, 60)
             await pilot.pause()
             self.assertTrue(screen.saved_locations_sidebar_visible)
             self.assertFalse(screen.alert_details_sidebar_visible)
+
+            await pilot.resize_terminal(186, 60)
+            await pilot.pause()
+            self.assertTrue(screen.saved_locations_sidebar_visible)
+            self.assertTrue(screen.alert_details_sidebar_visible)
+            self.assertEqual(screen.main_panel.region.width, 102)
 
             await pilot.resize_terminal(143, 60)
             await pilot.pause()

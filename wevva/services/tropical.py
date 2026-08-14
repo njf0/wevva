@@ -18,6 +18,8 @@ from wevva_warnings import (
     match_tropical_systems_to_point,
 )
 
+from wevva.geography import geojson_polylines
+
 
 TROPICAL_SYSTEMS_RADIUS_KM = 250.0
 """Distance within which a tropical-system report is considered nearby."""
@@ -56,6 +58,32 @@ def center_distance_km(system: TropicalSystem, lat: float, lon: float) -> float 
     if not finite_coordinates:
         return None
     return haversine_distance_km(lat, lon, center_lat, center_lon)
+
+
+def forecast_track_distance_km(system: TropicalSystem, lat: float, lon: float) -> float | None:
+    """Return the shortest local distance from a point to a forecast track."""
+    geometries = system.geometries if isinstance(system.geometries, dict) else {}
+    geometry = next(
+        (
+            value
+            for key in ('forecast_track', 'track')
+            if isinstance((value := geometries.get(key)), dict)
+        ),
+        None,
+    )
+    if geometry is None:
+        return None
+
+    shortest: float | None = None
+    for line in geojson_polylines(geometry):
+        local = [_local_xy_km(point_lat, point_lon, lat, lon) for point_lon, point_lat in line]
+        if len(local) == 1:
+            distances = [sqrt(local[0][0] ** 2 + local[0][1] ** 2)]
+        else:
+            distances = [_distance_to_segment_km(first, second) for first, second in zip(local, local[1:])]
+        for distance in distances:
+            shortest = distance if shortest is None else min(shortest, distance)
+    return shortest
 
 
 def get_nearby_tropical_systems(
@@ -132,9 +160,36 @@ def _match_candidates_with_progress(
             lon=lon,
             radius_km=TROPICAL_SYSTEMS_RADIUS_KM,
         )
+        track_distance = forecast_track_distance_km(candidate, lat, lon)
+        if not candidate_matches and track_distance is not None and track_distance <= TROPICAL_SYSTEMS_RADIUS_KM:
+            candidate_matches = [candidate]
         matched.extend(candidate_matches)
         _report_progress(progress, 'tropical_checked', completed=completed, total=total)
     return matched
+
+
+def _local_xy_km(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
+    """Project one nearby coordinate to a dateline-safe local kilometre plane."""
+    delta_lon = ((lon - origin_lon + 180.0) % 360.0) - 180.0
+    mean_latitude = radians((lat + origin_lat) / 2.0)
+    return (
+        _EARTH_RADIUS_KM * radians(delta_lon) * cos(mean_latitude),
+        _EARTH_RADIUS_KM * radians(lat - origin_lat),
+    )
+
+
+def _distance_to_segment_km(first: tuple[float, float], second: tuple[float, float]) -> float:
+    """Return the distance from the local origin to one Cartesian segment."""
+    first_x, first_y = first
+    segment_x = second[0] - first_x
+    segment_y = second[1] - first_y
+    length_squared = segment_x * segment_x + segment_y * segment_y
+    if length_squared == 0.0:
+        return sqrt(first_x * first_x + first_y * first_y)
+    fraction = max(0.0, min(1.0, -(first_x * segment_x + first_y * segment_y) / length_squared))
+    closest_x = first_x + fraction * segment_x
+    closest_y = first_y + fraction * segment_y
+    return sqrt(closest_x * closest_x + closest_y * closest_y)
 
 
 def _report_progress(
@@ -272,6 +327,7 @@ __all__ = [
     'NearbyTropicalSystem',
     'TROPICAL_SYSTEMS_RADIUS_KM',
     'center_distance_km',
+    'forecast_track_distance_km',
     'get_tropical_system_candidates',
     'get_tropical_system_candidates_async',
     'get_nearby_tropical_systems',

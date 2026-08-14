@@ -59,6 +59,7 @@ class SavedLocationsSidebar(Container):
     #saved-location-list {
         height: 100%;
         width: 100%;
+        scrollbar-size-vertical: 1;
         # border: round $primary-muted;
         border: none;
         background: $background;

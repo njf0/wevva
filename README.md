@@ -17,7 +17,7 @@
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - Layout not super flexible, requires a terminal size of at least 192x53 for all elements to show fully!
+> - Layout not super flexible, requires a terminal size of at least 186x53 for all elements to show fully!
 
 ## Quick Start
 
@@ -91,6 +91,7 @@ uvx wevva --clear-default-location
 - Alerts appear as compact tabs, with the full provider text shown in the details sidebar.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
+- Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
 
 ## Library Usage
 

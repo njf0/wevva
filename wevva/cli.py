@@ -349,7 +349,6 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
         [('Auto (provider default)', 'auto'), ('English', 'en')],
         str(preferences.get('warning_language') or DEFAULT_WARNING_LANGUAGE),
     )
-
     use_default_location = bool(
         _require_answer(
             questionary.confirm(

@@ -69,7 +69,9 @@ request air quality and warnings.
   `get_tropical_systems()` and keeps them in a separate thirty-minute,
   session-only cache. It calls `match_tropical_systems_to_point()` afresh for
   every selected location using the final Open-Meteo forecast coordinates and
-  a 250 km (roughly 155 miles) radius. It calculates local centre distances
+  a 250 km (roughly 155 miles) radius around either the current centre or the
+  supplied forecast track; supplied polygons continue to match by containment.
+  It calculates local centre distances
   and normalises matching reports by source/ID and storm name, preferring a
   same-country issuer or otherwise the newest report. Tropical reports never
   enter the ordinary country-warning candidate cache; an empty or failed raw
@@ -93,11 +95,58 @@ country-code lookup, and small display helpers. `wevva/wevva.tcss` supplies
 global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
+The right details sidebar is a borderless scroll host for adjacent sibling
+panels: the selected alert/system prose and, when usable geometry exists,
+exactly one matching geographic scope. Tropical tabs show a Storm Track Scope;
+ordinary warning tabs show a Warning Area Scope. Changing the selected tab
+updates the prose and scope through the same existing selection message, while
+missing warning geometry simply collapses the map panel.
+
+Ordinary alert descriptions and instructions are rendered as literal provider
+text rather than generic Markdown. A small provider-neutral pass joins
+operational hard-wrapped prose while retaining blank lines, dashed section
+headings, subsection markers, and list starts. Rich/Textual then performs the
+visible wrapping; list rows use hanging indentation, and source punctuation is
+never treated as markup.
+
+The storm scope combines the current position, the first 72 hours of useful
+forecast track, the forecast location, and a subdued Natural Earth land
+silhouette in one padded storm-specific viewport. Only regular 24-hour forecast
+fixes receive visible dots; intermediate source coordinates still smooth the
+connecting line. The warning scope instead keeps a stable whole selected
+country/map-unit viewport so the warning polygon's relative coverage remains
+meaningful.
+
+The details sidebar follows the same allocation pattern as saved locations:
+the prose panel takes the remaining `1fr` and owns its scrollbar, while the
+selected geographic scope remains a bounded, geometry-sized sibling at the
+bottom. Its content height comes from the padded projected viewport and the
+shared 2×4 raster cell aspect, then is clamped by widget-specific minimum and
+maximum heights. Width changes recompute that height. Warning Area also uses
+the same one-row top-margin convention as saved-location progress panels; the
+sidebar hatch remains visible in that gap while each child panel keeps a solid
+background. Raster composition balances the final visible sub-cell margins
+with a translation only, preserving the projected scale and relative geometry.
+
+`wevva/geography.py` owns the deliberately small shared geographic path:
+Natural Earth map-unit loading and local-component selection, GeoJSON
+Polygon/MultiPolygon and line extraction, local projection, and viewport
+bounds. `wevva/widgets/geographic_scope.py` supplies the logical filled-polygon,
+polyline, and point raster plus 2×4 Braille composition. Warning areas assign
+every fully covered land/warning cell to one full `⣿` glyph, snapping internal
+colour boundaries to cells while retaining partial Braille at the exterior
+geographic edge; storm tracks remain delicate Braille paths and do not use
+that fill policy. The
+storm widget adds only track selection, its inclusive viewport policy, markers,
+and semantic styles; the warning widget adds the selected CAP
+Polygon/MultiPolygon, stable context viewport policy, severity fill, and
+location marker. This is not a general GIS or plotting framework.
+
 The intentionally direct coupling between widgets, Textual messages, and the
 forecast model objects keeps the project small. Stable widget IDs are part of
-the CSS contract. The README's minimum terminal target is 192x53 for the full
+the CSS contract. The README's minimum terminal target is 186x53 for the full
 layout. At launch, the saved-locations sidebar is shown from 144 columns and
-the alert-details sidebar joins it at 192 columns. They collapse below those
+the alert-details sidebar joins it at 186 columns. They collapse below those
 widths on resize and restore if space returns; both can also be toggled from the
 weather screen. Emoji width/rendering depends on the terminal and font.
 

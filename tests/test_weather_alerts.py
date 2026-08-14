@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from io import StringIO
 import unittest
 
 from wevva.alerts import Alert
 from rich.console import Console
 
-from wevva.widgets.weather_alerts import WeatherAlertsPanel, alert_markdown, alert_renderable
+from wevva.widgets.weather_alerts import (
+    WeatherAlertsPanel,
+    _normalise_alert_text,
+    alert_markdown,
+    alert_renderable,
+)
 
 
 class AlertMarkdownTests(unittest.TestCase):
@@ -29,10 +35,10 @@ class AlertMarkdownTests(unittest.TestCase):
         self.assertEqual(
             alert_markdown(alert),
             '### Severe thunderstorm warning\n\n'
-            'The National Emergency Management Agency advises that as storms approach you should:\n\n'
+            'The National Emergency Management Agency advises that as storms approach you should:\n'
             '- Take shelter, preferably indoors away from windows;\n'
-            '- Avoid sheltering under trees, if outside;\n\n'
-            'During and after the storm, you should also:\n\n'
+            '- Avoid sheltering under trees, if outside;\n'
+            'During and after the storm, you should also:\n'
             '- Beware of fallen trees and power lines;',
         )
 
@@ -76,16 +82,64 @@ class AlertMarkdownTests(unittest.TestCase):
         self.assertEqual(
             alert_markdown(alert),
             '### Flood watch\n\n'
-            '- WHAT...Flash flooding caused by excessive rainfall continues to\n'
-            '  be possible.\n'
-            '- WHERE...A portion of western Nevada, including the following\n'
-            '  areas, Greater Reno-Carson City-Minden Area.\n'
+            '- WHAT...Flash flooding caused by excessive rainfall continues to be possible.\n'
+            '- WHERE...A portion of western Nevada, including the following areas, '
+            'Greater Reno-Carson City-Minden Area.\n'
             '- WHEN...From Wednesday afternoon through Thursday evening.\n'
             '- ADDITIONAL DETAILS...\n'
-            '  - Heavy rain from thunderstorms primarily during the afternoon\n'
-            '    and evening hours Wednesday and Thursday.\n'
-            '  - http://www.weather.gov/safety/flood',
+            '- Heavy rain from thunderstorms primarily during the afternoon and evening '
+            'hours Wednesday and Thursday.\n'
+            '- http://www.weather.gov/safety/flood',
         )
+
+    def test_nws_bullet_hard_wraps_become_one_literal_list_item(self) -> None:
+        source = (
+            'POTENTIAL IMPACTS\n'
+            '-----------------\n\n'
+            '* WIND:\n'
+            'Protect against life-threatening wind having possible extensive\n'
+            'impacts across the Big Island. Potential impacts include:\n'
+            '- Considerable roof damage to sturdy buildings, with some having\n'
+            'window, door, and garage door failures leading to structural\n'
+            'damage. Keep [doors] shut and retain *literal* _characters_.\n'
+            '- Many large trees snapped or uprooted along with fences and\n'
+            'roadway signs blown over.\n\n'
+            'NEXT UPDATE\n'
+            '-----------'
+        )
+
+        self.assertEqual(
+            _normalise_alert_text(source),
+            'POTENTIAL IMPACTS\n'
+            '-----------------\n\n'
+            '* WIND:\n'
+            'Protect against life-threatening wind having possible extensive impacts '
+            'across the Big Island. Potential impacts include:\n'
+            '- Considerable roof damage to sturdy buildings, with some having window, '
+            'door, and garage door failures leading to structural damage. Keep [doors] '
+            'shut and retain *literal* _characters_.\n'
+            '- Many large trees snapped or uprooted along with fences and roadway signs '
+            'blown over.\n\n'
+            'NEXT UPDATE\n'
+            '-----------',
+        )
+
+        alert = Alert(
+            id='nws-tropical',
+            source='nws',
+            event='Tropical Cyclone Local Statement',
+            headline='Tropical Cyclone Local Statement',
+            description=source,
+        )
+        console = Console(width=52, record=True, color_system=None, file=StringIO())
+        console.print(alert_renderable(alert))
+        rendered = console.export_text()
+
+        self.assertIn('[doors]', rendered)
+        self.assertIn('*literal* _characters_.', rendered)
+        self.assertNotIn('having\n\nwindow', rendered)
+        self.assertTrue(any(line.startswith('  some having') for line in rendered.splitlines()))
+        self.assertTrue(any(line.startswith('  fences') for line in rendered.splitlines()))
 
     def test_instruction_content_is_rendered_in_italics(self) -> None:
         alert = Alert(

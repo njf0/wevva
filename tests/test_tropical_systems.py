@@ -18,6 +18,7 @@ from wevva.messages import TropicalSystemsProgress, WeatherAlertsUpdated, Weathe
 from wevva.services.tropical import (
     NearbyTropicalSystem,
     center_distance_km,
+    forecast_track_distance_km,
     get_tropical_system_candidates,
     get_nearby_tropical_systems,
     haversine_distance_km,
@@ -59,6 +60,45 @@ class TropicalServiceTests(unittest.TestCase):
 
         self.assertAlmostEqual(haversine_distance_km(0.0, 0.0, 0.0, 1.0), 111.195080, places=5)
         self.assertAlmostEqual(center_distance_km(system, 0.0, 0.0), 111.195080, places=5)
+
+    def test_forecast_track_distance_uses_the_nearest_segment_not_only_fixes(self) -> None:
+        system = _system(
+            center_lat=10.0,
+            center_lon=-10.0,
+            geometries={
+                'forecast_track': {
+                    'type': 'LineString',
+                    'coordinates': [[-2.0, 1.0], [2.0, 1.0]],
+                },
+            },
+        )
+
+        distance = forecast_track_distance_km(system, 0.0, 0.0)
+
+        assert distance is not None
+        self.assertAlmostEqual(distance, 111.195080, places=4)
+
+    def test_system_matches_when_its_forecast_track_approaches_the_location(self) -> None:
+        system = _system(
+            center_lat=10.0,
+            center_lon=-10.0,
+            geometries={
+                'forecast_track': {
+                    'type': 'LineString',
+                    'coordinates': [[-2.0, 1.0], [2.0, 1.0]],
+                },
+            },
+        )
+
+        with patch('wevva.services.tropical.match_tropical_systems_to_point', return_value=[]):
+            systems = nearby_tropical_systems_from_candidates(
+                [system],
+                0.0,
+                0.0,
+                selected_country_code='US',
+            )
+
+        self.assertEqual([nearby.system.id for nearby in systems], ['test-system'])
 
     def test_empty_raw_result_is_cacheable(self) -> None:
         with patch('wevva.services.tropical.get_tropical_systems', return_value=[]) as lookup:

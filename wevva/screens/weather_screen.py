@@ -83,10 +83,10 @@ class WeatherScreen(Screen[None]):
     ]
 
     # The main forecast content is 98 columns wide. At 144 columns the left
-    # sidebar fits comfortably; the documented 192-column full layout also
-    # has room for the 40-column details reader on the right.
+    # sidebar fits comfortably. With both 40-column sidebars, 186 columns
+    # preserves the same two-column gutter around the 98-column main content.
     LOCATIONS_SIDEBAR_MIN_WIDTH = 144
-    ALERT_DETAILS_SIDEBAR_MIN_WIDTH = 192
+    ALERT_DETAILS_SIDEBAR_MIN_WIDTH = 186
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

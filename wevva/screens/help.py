@@ -75,6 +75,7 @@ You can launch it directly with `uvx wevva`.
 - Alerts load separately from the main forecast, so slower warning providers do not hold up the rest of the UI.
 - Selecting an alert tab shows the full provider text in the details sidebar.
 - Where a provider includes an official warning URL, `wevva` shows a direct link on the alert panel.
+- Warning maps use full Braille cells for filled interiors and partial Braille cells along geographic edges.
 
 ## CLI Highlights
 
@@ -89,7 +90,7 @@ You can launch it directly with `uvx wevva`.
 Saved preferences are stored in:
 `~/.config/wevva/config.json`
 
-This includes units, theme, emoji toggle, and default location.
+This includes units, theme, emoji toggle, warning-map renderer, and default location.
 
 ## Emoji Notice
 

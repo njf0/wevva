@@ -39,6 +39,11 @@ There is no configured linter, formatter, or type checker. `compileall` is the
 available basic source-compilation check; choose focused manual TUI checks for
 UI behavior.
 
+The checked-in geographic resource is generated from Natural Earth 5.1.1's
+1:50m Admin-0 Map Units dataset. Runtime code uses only the compact gzip JSON
+resource; `pyshp` is an optional preprocessing tool. Regeneration instructions
+and attribution are in `wevva/data/README.md`.
+
 The package uses Hatchling (`pyproject.toml`) and declares the `wevva` console
 script. The maintainer-confirmed release workflow is:
 
@@ -54,7 +59,7 @@ repository. There is no CI procedure in the repository.
 ## Local verification constraints
 
 Running the TUI needs an interactive, colour-capable terminal. The full layout
-is documented as needing at least 192x53. Emoji output depends on the terminal,
+is documented as needing at least 186x53. Emoji output depends on the terminal,
 font, and locale; use `--no-emoji` when assessing alignment.
 
 Live behavior needs network access to Open-Meteo forecast, geocoding, and air
