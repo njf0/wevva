@@ -42,3 +42,21 @@ async def fetch_weather_summary(
         lon=lon,
         temperature_unit=temperature_unit,
     )
+
+
+async def fetch_current_weather(
+    *,
+    lat: float,
+    lon: float,
+    temperature_unit: str = 'celsius',
+    wind_speed_unit: str = 'kmh',
+    precipitation_unit: str = 'mm',
+) -> dict:
+    """Fetch current-only Open-Meteo conditions for a coordinate."""
+    return await OpenMeteoForecast.fetch_current_conditions(
+        lat=lat,
+        lon=lon,
+        temperature_unit=temperature_unit,
+        wind_speed_unit=wind_speed_unit,
+        precipitation_unit=precipitation_unit,
+    )

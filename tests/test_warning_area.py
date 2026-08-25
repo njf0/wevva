@@ -13,7 +13,9 @@ from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.services.tropical import NearbyTropicalSystem
-from wevva.widgets.tropical_track import TropicalStormTrackScope
+from wevva.widgets.tropical_systems import (
+    NearbyTropicalSystemsLauncher,
+)
 from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.warning_area import (
     WarningAreaPalette,
@@ -26,7 +28,8 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsSidebar,
     WeatherAlertsPanel,
 )
-from wevva_warnings import TropicalSystem
+from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
+from wevva_warnings.registry import get_source
 
 
 def _ghana_alert(identifier: str = 'ghana-rain', *, geometry=None) -> Alert:
@@ -188,19 +191,18 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
         console.print(getattr(sidebar.content, '_Static__content'))
         return console.export_text()
 
-    async def test_details_and_scopes_are_adjacent_siblings(self) -> None:
+    async def test_cap_details_and_compact_storm_launcher_are_independent(self) -> None:
         app = _WarningSidebarApp()
         async with app.run_test(size=(80, 40)) as pilot:
             await pilot.pause()
             sidebar = app.query_one(WeatherAlertDetailsSidebar)
             details = app.query_one(WeatherAlertDetailsPanel)
-            storm = app.query_one(TropicalStormTrackScope)
             warning = app.query_one(WarningAreaScope)
+            collection = app.query_one(NearbyTropicalSystemsLauncher)
 
             self.assertIs(details.parent, sidebar)
-            self.assertIs(storm.parent, sidebar)
             self.assertIs(warning.parent, sidebar)
-            self.assertEqual(list(sidebar.children), [details, storm, warning])
+            self.assertIs(collection.parent, sidebar)
 
             system = TropicalSystem(
                 id='test-storm',
@@ -216,22 +218,30 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
                         'coordinates': [[1.0, 4.5], [0.5, 5.0], [0.0, 5.5]],
                     },
                 },
+                source_info=get_source('cphc_gis_central_pacific'),
             )
+            await sidebar.update_global_tropical_systems(
+                [CanonicalTropicalSystem('TEST', [system])],
+                loaded=True,
+            )
+            await pilot.pause()
+            launcher = collection.query_one('#nearby-tropical-list')
+            console = Console(width=80, file=StringIO(), record=True)
+            console.print(getattr(launcher, '_Static__content'))
+            self.assertIn('TEST', console.export_text())
+            self.assertEqual(len(sidebar.query('TropicalStormTrackScope')), 0)
+
             sidebar.update_tropical_system(NearbyTropicalSystem(system, 150.0))
             await pilot.pause()
-            self.assertTrue(storm.display)
             self.assertFalse(warning.display)
-            self.assertEqual(storm.region.y, details.region.y + details.region.height + 1)
-            self.assertEqual(storm.styles.margin.top, 1)
+            self.assertFalse(details.display)
 
             sidebar.update_alert(_ghana_alert())
             await pilot.pause()
-            self.assertFalse(storm.display)
             self.assertTrue(warning.display)
             self.assertEqual(warning.region.y, details.region.y + details.region.height + 1)
             self.assertEqual(warning.styles.margin.top, 1)
             self.assertEqual(sidebar.styles.hatch[0], '╱')
-            self.assertEqual(storm.styles.background, sidebar.styles.background)
             self.assertEqual(warning.styles.background, sidebar.styles.background)
 
     async def test_widget_renders_warning_map_in_braille(self) -> None:
@@ -274,7 +284,6 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             first_geometry = warning._scope.warning if warning._scope else None
             self.assertTrue(warning.display)
-            self.assertFalse(app.query_one(TropicalStormTrackScope).display)
             self.assertIn('first heavy rain warning', self._details_text(sidebar))
 
             sidebar.update_alert(second)
@@ -345,7 +354,7 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(warning.content_size.height, 20)
             self.assertEqual(warning.region.height, 22)
 
-    async def test_storm_height_recomputes_when_sidebar_width_changes(self) -> None:
+    async def test_compact_launcher_does_not_grow_a_dashboard_track(self) -> None:
         app = _WarningSidebarApp()
         app.location = LocationMetadata(
             latitude=19.7297,
@@ -377,21 +386,24 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
                     ],
                 },
             },
+            source_info=get_source('cphc_gis_central_pacific'),
         )
 
         async with app.run_test(size=(100, 50)) as pilot:
             sidebar = app.query_one(WeatherAlertDetailsSidebar)
-            storm = app.query_one(TropicalStormTrackScope)
-            sidebar.update_tropical_system(NearbyTropicalSystem(system, 150.0))
+            await sidebar.update_global_tropical_systems(
+                [CanonicalTropicalSystem('TEST', [system])],
+                loaded=True,
+            )
             await pilot.pause()
-            initial_height = storm._preferred_content_height
+            launcher = app.query_one(NearbyTropicalSystemsLauncher)
+            initial_height = launcher.region.height
 
             sidebar.styles.width = 60
             await pilot.pause()
 
-            assert initial_height is not None
-            self.assertGreater(storm._preferred_content_height or 0, initial_height)
-            self.assertEqual(storm.content_size.height, storm._preferred_content_height)
+            self.assertEqual(len(sidebar.query('TropicalStormTrackScope')), 0)
+            self.assertEqual(launcher.region.height, initial_height)
 
     async def test_switching_alert_tabs_updates_the_same_warning_scope(self) -> None:
         app = _WarningWeatherApp()

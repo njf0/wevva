@@ -202,6 +202,49 @@ class OpenMeteoForecast:
             response.raise_for_status()
             return response.json()
 
+    @classmethod
+    async def fetch_current_conditions(
+        cls,
+        lat: float,
+        lon: float,
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+        precipitation_unit: str = 'mm',
+    ) -> dict:
+        """Fetch the compact current conditions used at a storm centre."""
+        temperature_unit, wind_speed_unit, precipitation_unit = cls.normalize_units(
+            temperature_unit,
+            wind_speed_unit,
+            precipitation_unit,
+        )
+        params: dict[str, Any] = {
+            'latitude': lat,
+            'longitude': lon,
+            'timezone': 'auto',
+            'current': [
+                'temperature_2m',
+                'apparent_temperature',
+                'precipitation_probability',
+                'precipitation',
+                'weather_code',
+                'surface_pressure',
+                'is_day',
+                'wind_speed_10m',
+                'wind_gusts_10m',
+                'wind_direction_10m',
+            ],
+        }
+        if temperature_unit != DEFAULT_TEMPERATURE_UNIT:
+            params['temperature_unit'] = temperature_unit
+        if wind_speed_unit != DEFAULT_WIND_SPEED_UNIT:
+            params['wind_speed_unit'] = wind_speed_unit
+        if precipitation_unit != DEFAULT_PRECIPITATION_UNIT:
+            params['precipitation_unit'] = precipitation_unit
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(cls.BASE_URL, params=params)
+            response.raise_for_status()
+            return response.json()
+
     @staticmethod
     def extract_metadata(response: dict) -> LocationMetadata:
         # Return LocationMetadata with API-provided fields

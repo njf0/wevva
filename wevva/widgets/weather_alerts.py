@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
-import re
 
 from rich.console import Group
 from rich.markup import escape
@@ -14,17 +14,17 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Static, Tab, Tabs
+from wevva_warnings import CanonicalTropicalSystem
 
 from wevva.alerts import Alert
 from wevva.geography import short_location_name
 from wevva.messages import NearbyTropicalSystemSelected, WeatherAlertSelected
 from wevva.services.tropical import NearbyTropicalSystem
 from wevva.widgets.tropical_systems import (
+    NearbyTropicalSystemsLauncher,
     build_tropical_system_text,
-    build_tropical_system_details,
     build_tropical_tab_label,
 )
-from wevva.widgets.tropical_track import TropicalStormTrackScope
 from wevva.widgets.warning_area import WarningAreaScope
 
 SEVERITY_THEME_KEYS: dict[str, str] = {
@@ -39,7 +39,7 @@ SEVERITY_THEME_KEYS: dict[str, str] = {
 ORANGE_SEVERITIES = {'severe', 'orange', 'amber'}
 
 _ALERT_LIST_ITEM = re.compile(
-    r'^(?P<indent>[ \t]*)(?P<marker>[-+*]|\d+[.)]|•)\s+(?P<body>.*?)\s*$',
+    r'^(?P<indent>[ \t]*)(?P<marker>[-+*]|\d+[.)]|●)\s+(?P<body>.*?)\s*$',
 )
 _ALERT_SUBSECTION = re.compile(r'^[ \t]*\*[ \t]+(?P<body>[A-Z][A-Z /&-]*:)[ \t]*$')
 _ALERT_HEADING_UNDERLINE = re.compile(r'^[ \t]*-{3,}[ \t]*$')
@@ -292,7 +292,7 @@ class WeatherAlertDetailsPanel(VerticalScroll):
 
 
 class WeatherAlertDetailsSidebar(Container):
-    """Docked host with scrolling details above a fixed geographic scope."""
+    """Compact storm launcher with an optional scrolling CAP reader."""
 
     DEFAULT_CSS = """
     WeatherAlertDetailsSidebar {
@@ -304,15 +304,18 @@ class WeatherAlertDetailsSidebar(Container):
         background: $background;
         hatch: right $background-lighten-1;
     }
+
     """
 
     def __init__(self, *, id: str = 'weather-alert-details-sidebar') -> None:
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
-        yield WeatherAlertDetailsPanel()
-        yield TropicalStormTrackScope()
+        details = WeatherAlertDetailsPanel()
+        details.display = False
+        yield details
         yield WarningAreaScope()
+        yield NearbyTropicalSystemsLauncher()
 
     @property
     def details(self) -> WeatherAlertDetailsPanel:
@@ -339,13 +342,13 @@ class WeatherAlertDetailsSidebar(Container):
         )
 
     def update_alert(self, alert: Alert) -> None:
+        self.details.display = True
         self.details.border_title = 'Alert Details'
         self.content.display = True
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.details.set_styles(f'border: round {color}; border-title-color: {color};')
         self.content.update(alert_renderable(alert))
-        self.query_one(TropicalStormTrackScope).clear()
         latitude, longitude, location_name, country_code = self._location_context()
         self.query_one(WarningAreaScope).update_alert(
             alert,
@@ -356,23 +359,26 @@ class WeatherAlertDetailsSidebar(Container):
             warning_color=color,
         )
 
-    def update_tropical_system(self, nearby: NearbyTropicalSystem) -> None:
-        """Show supplementary facts for the selected nearby tropical report."""
-        self.details.border_title = 'Tropical System Details'
-        accent = self.app.theme_variables.get('text-accent')
-        if accent:
-            self.details.set_styles(f'border: round {accent}; border-title-color: {accent};')
-        self.content.display = True
-        self.content.update(build_tropical_system_details(nearby, self.app.theme_variables))
-        latitude, longitude, location_name, country_code = self._location_context()
-        self.query_one(TropicalStormTrackScope).update_system(
-            nearby.system,
-            location_latitude=latitude,
-            location_longitude=longitude,
-            location_name=location_name,
-            country_code=country_code,
-        )
+    def update_tropical_system(self, _nearby: NearbyTropicalSystem) -> None:
+        """Keep the local storm tab independent from the global launcher."""
+        self.details.display = False
         self.query_one(WarningAreaScope).clear()
+
+    async def update_global_tropical_systems(
+        self,
+        systems: list[CanonicalTropicalSystem],
+        *,
+        loaded: bool,
+    ) -> None:
+        """Render a compact summary from the global canonical collection."""
+        latitude, longitude, _location_name, _country_code = self._location_context()
+        self.query_one(NearbyTropicalSystemsLauncher).update_systems(
+            systems,
+            latitude=latitude,
+            longitude=longitude,
+            loaded=loaded,
+        )
+
 
 def alert_markdown(alert: Alert) -> str:
     """Return a conservatively de-wrapped text representation for compatibility."""
@@ -403,9 +409,7 @@ def alert_renderable(alert: Alert):
     if alert.description and alert.description.strip():
         renderables.extend((Text(''), *_alert_text_renderables(alert.description)))
     if alert.instruction and alert.instruction.strip():
-        renderables.extend(
-            (Text(''), *_alert_text_renderables(alert.instruction, base_style='italic'))
-        )
+        renderables.extend((Text(''), *_alert_text_renderables(alert.instruction, base_style='italic')))
     official_link = _official_warning_link(alert)
     if official_link is not None:
         renderables.extend((Text(''), official_link))
@@ -448,14 +452,14 @@ def _alert_text_blocks(value: str) -> list[_AlertTextBlock]:
             continue
 
         if subsection := _ALERT_SUBSECTION.fullmatch(line):
-            blocks.append(_AlertTextBlock('subsection', subsection.group('body'), '•'))
+            blocks.append(_AlertTextBlock('subsection', subsection.group('body'), '●'))
             index += 1
             continue
 
         list_item = _ALERT_LIST_ITEM.fullmatch(line)
         if list_item is not None:
             marker = list_item.group('marker')
-            display_marker = marker if marker[0].isdigit() else '•'
+            display_marker = marker if marker[0].isdigit() else '●'
             parts = [list_item.group('body')]
             item_indent = len(list_item.group('indent').expandtabs(4))
             index += 1

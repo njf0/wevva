@@ -58,6 +58,8 @@ You can launch it directly with `uvx wevva`.
 - `d` Delete the highlighted saved location
 - `l` Show or hide saved locations
 - `i` Show or hide alert details
+- `t` Investigate active tropical systems
+- `w` Return from Tropical Systems to the weather screen
 - `u` Open settings
 - `h` Open this help screen
 - `q` Quit
@@ -66,6 +68,8 @@ You can launch it directly with `uvx wevva`.
 ## Navigation Notes
 
 - Use arrow keys/tab to move focus across tables and widgets.
+- On Tropical Systems, `r` refreshes active systems and their source products.
+- On Tropical Systems, `t` toggles position dots and `c` toggles the official cone.
 - Highlighting rows/columns updates linked weather context.
 - If a fetch fails, use `r` to retry or `s` to choose another place.
 
@@ -76,6 +80,7 @@ You can launch it directly with `uvx wevva`.
 - Selecting an alert tab shows the full provider text in the details sidebar.
 - Where a provider includes an official warning URL, `wevva` shows a direct link on the alert panel.
 - Warning maps use full Braille cells for filled interiors and partial Braille cells along geographic edges.
+- The Tropical Systems screen keeps global storm investigation separate from location-specific alerts and loads official issuing-centre products only when selected.
 
 ## CLI Highlights
 

@@ -150,11 +150,14 @@ class GeographicCanvas:
         layers: Iterable[tuple[str, str | None]],
         *,
         solid_braille_layers: Iterable[str] = (),
+        centering_layers: Iterable[str] | None = None,
     ) -> GeographicFrame:
         layer_list = list(layers)
         solid_layers = set(solid_braille_layers)
         self._offset_x, self._offset_y = self._centering_offset(
-            layer for layer, _style in layer_list
+            centering_layers
+            if centering_layers is not None
+            else (layer for layer, _style in layer_list)
         )
         characters = [[' ' for _ in range(self.width)] for _ in range(self.height)]
         styles: list[list[Style | str | None]] = [

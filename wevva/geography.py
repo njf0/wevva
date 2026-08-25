@@ -10,6 +10,8 @@ import json
 import math
 from typing import Any, Iterable
 
+from wevva_warnings import DisplayGeography
+
 
 LonLat = tuple[float, float]
 LinearRing = tuple[LonLat, ...]
@@ -20,6 +22,14 @@ _EARTH_RADIUS_KM = 6371.0088
 _SMALL_UNIT_CLUSTER_KM = 750.0
 _LARGE_COMPONENT_CLUSTER_KM = 250.0
 _LARGE_COMPONENT_SPAN_KM = 2000.0
+
+# The compact Admin-0 resource contains the Hawaiian polygons as part of the
+# US map unit, but does not retain Natural Earth's subdivision identifiers.
+# Keep this geography-level fallback here rather than teaching storm sources
+# about coordinates.
+_SUBUNIT_ANCHORS: dict[str, tuple[str, float, float]] = {
+    'US-HI': ('US', 19.7297, -155.09),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +136,17 @@ def map_unit(country_code: str) -> GeographicUnit | None:
     return GeographicUnit(code=code, names=names, polygons=polygons)
 
 
+@lru_cache(maxsize=1)
+def world_map_unit_polygons() -> MultiPolygon:
+    """Return the checked-in Natural Earth land polygons for every map unit."""
+    return tuple(
+        polygon
+        for raw_unit in _map_units().values()
+        if isinstance(raw_unit, dict)
+        for polygon in _coerce_polygons(raw_unit.get('polygons'))
+    )
+
+
 def select_geographic_unit(
     country_code: str | None,
     *,
@@ -156,6 +177,49 @@ def select_geographic_unit(
         if polygon is anchor or _polygon_distance_km(polygon, latitude, longitude) <= cluster_radius
     )
     return GeographicUnit(code=unit.code, names=unit.names, polygons=selected)
+
+
+@lru_cache(maxsize=64)
+def subunit(code: str) -> GeographicUnit | None:
+    """Resolve an ISO 3166-2 subdivision from the compact Natural Earth data."""
+    normalized = code.strip().upper()
+    fallback = _SUBUNIT_ANCHORS.get(normalized)
+    if fallback is None:
+        return None
+    parent_code, latitude, longitude = fallback
+    selected = select_geographic_unit(
+        parent_code,
+        latitude=latitude,
+        longitude=longitude,
+    )
+    if selected is None:
+        return None
+    return GeographicUnit(
+        code=normalized,
+        names=selected.names,
+        polygons=selected.polygons,
+    )
+
+
+def resolve_display_geography(
+    display_geography: DisplayGeography,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> GeographicUnit | None:
+    """Resolve one declarative geography hint without conflating its kind."""
+    if not display_geography.code.strip():
+        return None
+    if display_geography.kind == 'country':
+        # An explicit country hint declares the land context itself. Selecting
+        # a local component from the offshore storm centre can reduce that
+        # country to a remote islet (for example Hernan west of Mexico).
+        return map_unit(display_geography.code)
+    if display_geography.kind == 'map_unit':
+        return map_unit(display_geography.code)
+    if display_geography.kind == 'subunit':
+        return subunit(display_geography.code)
+    return None
 
 
 def viewport_from_lonlat(
@@ -204,6 +268,66 @@ def project_polygons(polygons: MultiPolygon, viewport: GeographicViewport) -> tu
         )
         for polygon in polygons
     )
+
+
+def project_visible_polygons(
+    polygons: MultiPolygon,
+    viewport: GeographicViewport,
+) -> tuple[tuple[tuple[ProjectedPoint, ...], ...], ...]:
+    """Project only polygons whose local bounds intersect a viewport."""
+    visible = []
+    for polygon in polygons:
+        if not polygon:
+            continue
+        outer, longitude_shift = _project_continuous_ring(polygon[0], viewport)
+        projected = (
+            outer,
+            *(
+                _project_continuous_ring(ring, viewport, longitude_shift)[0]
+                for ring in polygon[1:]
+            ),
+        )
+        if not projected or not projected[0]:
+            continue
+        outer = projected[0]
+        if (
+            max(point.x for point in outer) < viewport.min_x
+            or min(point.x for point in outer) > viewport.max_x
+            or max(point.y for point in outer) < viewport.min_y
+            or min(point.y for point in outer) > viewport.max_y
+        ):
+            continue
+        visible.append(projected)
+    return tuple(visible)
+
+
+def _project_continuous_ring(
+    ring: LinearRing,
+    viewport: GeographicViewport,
+    longitude_shift: float | None = None,
+) -> tuple[tuple[ProjectedPoint, ...], float]:
+    """Project a ring without wrapping it across the viewport's opposite seam."""
+    if not ring:
+        return (), 0.0 if longitude_shift is None else longitude_shift
+    first_longitude = ring[0][0]
+    delta = wrapped_longitude_delta(first_longitude, viewport.origin_longitude)
+    deltas = [delta]
+    previous_longitude = first_longitude
+    for longitude, _latitude in ring[1:]:
+        delta += wrapped_longitude_delta(longitude, previous_longitude)
+        deltas.append(delta)
+        previous_longitude = longitude
+    if longitude_shift is None:
+        longitude_shift = round((sum(deltas) / len(deltas)) / 360.0) * 360.0
+    projected = tuple(
+        ProjectedPoint(
+            x=(longitude_delta - longitude_shift)
+            * math.cos(math.radians((latitude + viewport.origin_latitude) / 2.0)),
+            y=latitude - viewport.origin_latitude,
+        )
+        for longitude_delta, (_longitude, latitude) in zip(deltas, ring)
+    )
+    return projected, longitude_shift
 
 
 def polygon_points(polygons: MultiPolygon) -> Iterable[LonLat]:
@@ -370,8 +494,12 @@ __all__ = [
     'point_in_polygon',
     'polygon_points',
     'project_polygons',
+    'project_visible_polygons',
+    'resolve_display_geography',
     'select_geographic_unit',
     'short_location_name',
+    'subunit',
     'viewport_from_lonlat',
+    'world_map_unit_polygons',
     'wrapped_longitude_delta',
 ]

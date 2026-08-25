@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import unittest
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from types import SimpleNamespace
-import unittest
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 from rich.console import Console
+from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
 
 from wevva.alerts import Alert
 from wevva.app import Wevva
@@ -19,8 +20,8 @@ from wevva.services.tropical import (
     NearbyTropicalSystem,
     center_distance_km,
     forecast_track_distance_km,
-    get_tropical_system_candidates,
     get_nearby_tropical_systems,
+    get_tropical_system_candidates,
     haversine_distance_km,
     nearby_tropical_systems_from_candidates,
 )
@@ -31,7 +32,6 @@ from wevva.widgets.tropical_systems import (
     build_tropical_tab_label,
 )
 from wevva.widgets.weather_alerts import WeatherAlertsPanel
-from wevva_warnings import TropicalSystem
 
 
 class _WeatherScreen:
@@ -101,7 +101,7 @@ class TropicalServiceTests(unittest.TestCase):
         self.assertEqual([nearby.system.id for nearby in systems], ['test-system'])
 
     def test_empty_raw_result_is_cacheable(self) -> None:
-        with patch('wevva.services.tropical.get_tropical_systems', return_value=[]) as lookup:
+        with patch('wevva.services.tropical.get_canonical_tropical_systems', return_value=[]) as lookup:
             systems, completed = get_tropical_system_candidates()
 
         self.assertEqual(systems, [])
@@ -109,7 +109,7 @@ class TropicalServiceTests(unittest.TestCase):
         lookup.assert_called_once_with()
 
     def test_provider_failure_is_quiet(self) -> None:
-        with patch('wevva.services.tropical.get_tropical_systems', side_effect=RuntimeError('offline')):
+        with patch('wevva.services.tropical.get_canonical_tropical_systems', side_effect=RuntimeError('offline')):
             systems, completed = get_tropical_system_candidates()
 
         self.assertEqual(systems, [])
@@ -284,8 +284,7 @@ class TropicalDisplayTests(unittest.TestCase):
 
         self.assertEqual(
             text.plain,
-            'DOLPHIN\n'
-            '74 mi away · Moving Northwest · Northwest Pacific',
+            'DOLPHIN\n74 mi away · Moving Northwest · Northwest Pacific',
         )
         self.assertEqual(text.plain.count('\n'), 1)
         self.assertNotIn('Centre', text.plain)
@@ -295,7 +294,11 @@ class TropicalDisplayTests(unittest.TestCase):
         separator_start = text.plain.index(' · ')
         basin_start = text.plain.index('Northwest Pacific')
         self.assertFalse(any(span.start <= distance_start < span.end and span.style == 'dim' for span in text.spans))
-        self.assertTrue(any(span.start == separator_start and span.end == separator_start + 3 and span.style == 'dim' for span in text.spans))
+        self.assertTrue(
+            any(
+                span.start == separator_start and span.end == separator_start + 3 and span.style == 'dim' for span in text.spans
+            )
+        )
         self.assertFalse(any(span.start <= basin_start < span.end and span.style == 'dim' for span in text.spans))
 
     def test_markdown_details_include_available_facts_and_linked_coordinates(self) -> None:
@@ -403,7 +406,8 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
             system=_system(source_info=SimpleNamespace(name='Hong Kong Observatory', issuer_country_code='HK')),
             distance_km=15.0,
         )
-        lookup = AsyncMock(return_value=([nearby.system], True))
+        canonical = CanonicalTropicalSystem('DOLPHIN', [nearby.system])
+        lookup = AsyncMock(return_value=([canonical], True))
         match = Mock(return_value=[nearby])
 
         with (
@@ -429,24 +433,24 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cached_candidates, ())
         self.assertIsNotNone(self.app._tropical_system_cache)
         assert self.app._tropical_system_cache is not None
-        self.assertEqual(self.app._tropical_system_cache[1], (nearby.system,))
-        alert_updates = [
-            message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)
-        ]
+        self.assertEqual(self.app._tropical_system_cache[1], (canonical,))
+        alert_updates = [message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)]
         self.assertEqual(alert_updates[-1].tropical_systems, [nearby])
+        self.assertEqual(alert_updates[-1].canonical_tropical_systems, [canonical])
+        self.assertTrue(alert_updates[-1].tropical_systems_loaded)
         self.assertTrue(any(isinstance(message, TropicalSystemsProgress) for message in self.app.weather_screen.messages))
         self.assertEqual(
             match.call_args_list,
             [
                 call(
-                    [nearby.system],
+                    [canonical],
                     22.31,
                     114.21,
                     selected_country_code='HK',
                     progress=ANY,
                 ),
                 call(
-                    (nearby.system,),
+                    (canonical,),
                     23.01,
                     115.01,
                     selected_country_code='HK',
@@ -487,15 +491,68 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(lookup.await_count, 3)
 
+    async def test_cached_global_storms_resort_when_selected_location_changes(self) -> None:
+        east = CanonicalTropicalSystem(
+            'EAST',
+            [_system(id='east', name='EAST', center_lat=0.0, center_lon=10.0)],
+        )
+        west = CanonicalTropicalSystem(
+            'WEST',
+            [_system(id='west', name='WEST', center_lat=0.0, center_lon=-10.0)],
+        )
+        lookup = AsyncMock(return_value=([west, east], True))
+        match = Mock(return_value=[])
+        self.app.location = LocationMetadata(latitude=0.0, longitude=9.0, country_code='GB')
+
+        with (
+            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
+            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
+            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
+            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
+        ):
+            self.app._schedule_alert_refresh(1, tropical_lat=0.0, tropical_lon=9.0)
+            assert self.app._alerts_task is not None
+            await self.app._alerts_task
+            assert self.app._tropical_context_task is not None
+            await self.app._tropical_context_task
+
+            first = [
+                message
+                for message in self.app.weather_screen.messages
+                if isinstance(message, WeatherAlertsUpdated) and message.tropical_systems_loaded
+            ][-1]
+            self.assertEqual(
+                [system.name for system in first.canonical_tropical_systems],
+                ['EAST', 'WEST'],
+            )
+
+            self.app.location = LocationMetadata(latitude=0.0, longitude=-9.0, country_code='GB')
+            self.app._refresh_generation = 2
+            self.app._schedule_alert_refresh(2, tropical_lat=0.0, tropical_lon=-9.0)
+            assert self.app._alerts_task is not None
+            await self.app._alerts_task
+
+        second = [
+            message
+            for message in self.app.weather_screen.messages
+            if isinstance(message, WeatherAlertsUpdated) and message.tropical_systems_loaded
+        ][-1]
+        self.assertEqual(
+            [system.name for system in second.canonical_tropical_systems],
+            ['WEST', 'EAST'],
+        )
+        self.assertEqual(lookup.await_count, 1)
+
     async def test_location_change_reuses_an_inflight_raw_tropical_fetch(self) -> None:
         tropical_lookup_started = asyncio.Event()
         release_tropical_lookup = asyncio.Event()
         raw_system = _system(center_lat=22.4, center_lon=114.3)
+        canonical = CanonicalTropicalSystem('DOLPHIN', [raw_system])
 
         async def delayed_tropical_lookup():
             tropical_lookup_started.set()
             await release_tropical_lookup.wait()
-            return [raw_system], True
+            return [canonical], True
 
         lookup = AsyncMock(side_effect=delayed_tropical_lookup)
         match = Mock(return_value=[])
@@ -525,7 +582,7 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lookup.await_count, 1)
         self.assertIsNotNone(self.app._tropical_system_cache)
         match.assert_called_once_with(
-            (raw_system,),
+            (canonical,),
             23.01,
             115.01,
             selected_country_code='HK',
@@ -544,6 +601,7 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
             return [], True
 
         native_lookup = AsyncMock(return_value=([], True))
+
         async def delayed_tropical_lookup():
             tropical_lookup_started.set()
             await release_tropical_lookup.wait()
@@ -597,9 +655,7 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
             assert self.app._tropical_context_task is not None
             await self.app._tropical_context_task
 
-        alert_updates = [
-            message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)
-        ]
+        alert_updates = [message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)]
         self.assertEqual(len(alert_updates), 2)
 
     async def test_failed_raw_tropical_lookup_finishes_its_progress_panel(self) -> None:

@@ -9,11 +9,21 @@ committed `uv.lock`.
 uv sync --locked
 ```
 
-Warning progress and country-level warning caching use `wevva-warnings`. The
-native point-query split introduced by Task 0013 must use the corresponding
-published warning-library release. Before that release, a local sibling checkout
-can be used by temporarily adding a `tool.uv.sources` override; do not commit
-that override or its lockfile result for a release.
+Warning progress, canonical tropical systems, and country-level warning caching
+use `wevva-warnings`. This development checkout currently resolves the declared
+`wevva-warnings==0.5.3` dependency from the editable sibling path
+`../wevva-warnings` through `[tool.uv.sources]`; `uv.lock` records the same path.
+This allows both projects to be developed and tested together. Remove the
+source override and regenerate the lockfile when switching back to a published
+release.
+
+The sibling checkout is therefore part of the current development state. When
+moving this work between machines, commit or otherwise transfer both
+repositories: first `wevva-warnings`, then `wevva`, recording the warning
+library commit in the application handoff. Place the clones alongside one
+another so the editable path remains `../wevva-warnings`. A commit containing
+only this repository is not sufficient to reproduce the tropical APIs until a
+compatible warning-library release exists.
 
 The following local commands have been checked in this repository:
 

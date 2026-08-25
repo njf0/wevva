@@ -7,7 +7,7 @@ from typing import ClassVar
 
 import httpx
 from textual.app import App
-from wevva_warnings import TropicalSystem
+from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from wevva.alerts import Alert
 from wevva.config import (
@@ -36,6 +36,7 @@ from wevva.messages import (
 from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
+from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.services.alerts import (
     _combine_alerts,
@@ -44,17 +45,21 @@ from wevva.services.alerts import (
     normalize_country_code,
 )
 from wevva.services.tropical import (
+    get_tropical_products_async,
     get_tropical_system_candidates_async,
     nearby_tropical_systems_from_candidates,
+    sort_canonical_tropical_systems,
 )
-from wevva.services.weather import fetch_weather_summary
+from wevva.geography import short_location_name
+from wevva.services.weather import fetch_current_weather, fetch_weather_summary
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
 AlertCacheKey = tuple[str | None, str]
 ForecastCacheKey = tuple[float, float, str, str, str]
 ForecastCacheEntry = tuple[float, WeatherUpdated]
-TropicalCacheEntry = tuple[float, tuple[TropicalSystem, ...]]
+TropicalCacheEntry = tuple[float, tuple[CanonicalTropicalSystem, ...]]
+TropicalProductCacheKey = tuple[str, str, str]
 
 
 def _weather_fetch_failure_message(error: Exception) -> str:
@@ -138,8 +143,13 @@ class Wevva(App, inherit_bindings=False):
         self._alert_cache_clock = time.monotonic
         self._tropical_system_cache: TropicalCacheEntry | None = None
         self._tropical_system_cache_clock = time.monotonic
-        self._tropical_system_fetch_task: asyncio.Task[tuple[list[TropicalSystem], bool]] | None = None
+        self._tropical_system_fetch_task: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]] | None = None
         self._tropical_context_task: asyncio.Task[None] | None = None
+        self._tropical_product_cache: dict[TropicalProductCacheKey, tuple[TropicalProduct, ...]] = {}
+        self._tropical_product_tasks: dict[
+            TropicalProductCacheKey,
+            asyncio.Task[list[TropicalProduct]],
+        ] = {}
         self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
         self._saved_weather_generation = 0
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
@@ -249,6 +259,102 @@ class Wevva(App, inherit_bindings=False):
     def action_help(self):  # textual binding: 'h'
         """Open help screen."""
         self.push_screen(HelpScreen())
+
+    async def open_tropical_systems_screen(self) -> None:
+        """Open the dedicated global storm workspace from the shared cache."""
+        cached = self._tropical_system_cache
+        systems = list(cached[1]) if cached is not None else []
+        forecast = self.forecast_metadata
+        latitude = getattr(forecast, 'latitude', None)
+        longitude = getattr(forecast, 'longitude', None)
+        if latitude is None:
+            latitude = self.location.latitude
+        if longitude is None:
+            longitude = self.location.longitude
+        await self.push_screen(
+            TropicalSystemsScreen(
+                systems,
+                location_latitude=latitude,
+                location_longitude=longitude,
+                location_name=short_location_name(self.location),
+                product_loader=self.load_tropical_products,
+                centre_weather_loader=self.load_tropical_centre_weather,
+                systems_loader=self.load_tropical_systems if cached is None else None,
+                refresh_loader=self.refresh_tropical_systems,
+            )
+        )
+
+    async def load_tropical_centre_weather(self, latitude: float, longitude: float) -> dict:
+        """Fetch current conditions at one source observation's storm centre."""
+        return await fetch_current_weather(
+            lat=latitude,
+            lon=longitude,
+            temperature_unit=self.temperature_unit,
+            wind_speed_unit=self.wind_speed_unit,
+            precipitation_unit=self.precipitation_unit,
+        )
+
+    async def load_tropical_systems(self) -> list[CanonicalTropicalSystem]:
+        """Return the shared canonical set for a screen opened before discovery."""
+        cached = self._tropical_system_cache
+        if cached is not None:
+            return list(cached[1])
+        systems, completed = await asyncio.shield(self._get_tropical_system_fetch_task())
+        if not completed:
+            raise RuntimeError('Canonical tropical-system retrieval did not complete')
+        self._cache_tropical_systems(systems)
+        return systems
+
+    async def refresh_tropical_systems(self) -> list[CanonicalTropicalSystem]:
+        """Force a new shared canonical fetch for the active tropical screen."""
+        self._tropical_system_cache = None
+        self._tropical_product_cache.clear()
+        systems, completed = await asyncio.shield(self._get_tropical_system_fetch_task())
+        if not completed:
+            raise RuntimeError('Canonical tropical-system retrieval did not complete')
+        self._cache_tropical_systems(systems)
+        return systems
+
+    async def load_tropical_products(self, system: TropicalSystem) -> list[TropicalProduct]:
+        """Fetch one source observation lazily and reuse it across screen visits."""
+        key = self._tropical_product_cache_key(system)
+        cached = self._tropical_product_cache.get(key)
+        if cached is not None:
+            return list(cached)
+        task = self._tropical_product_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(get_tropical_products_async(system))
+            self._tropical_product_tasks[key] = task
+            task.add_done_callback(
+                lambda completed_task, cache_key=key: self._store_tropical_products(
+                    cache_key,
+                    completed_task,
+                )
+            )
+        products = await asyncio.shield(task)
+        self._tropical_product_cache[key] = tuple(products)
+        return list(products)
+
+    def _store_tropical_products(
+        self,
+        key: TropicalProductCacheKey,
+        task: asyncio.Task[list[TropicalProduct]],
+    ) -> None:
+        """Retain a completed lazy request even if its screen was closed."""
+        if self._tropical_product_tasks.get(key) is task:
+            del self._tropical_product_tasks[key]
+        if task.cancelled():
+            return
+        try:
+            products = task.result()
+        except Exception:
+            return
+        self._tropical_product_cache[key] = tuple(products)
+
+    @staticmethod
+    def _tropical_product_cache_key(system: TropicalSystem) -> TropicalProductCacheKey:
+        issued = system.issued_at.isoformat() if system.issued_at is not None else ''
+        return system.source, system.id, issued
 
     def action_save_current_location(self) -> None:
         """Persist the active location in the saved-location list."""
@@ -516,7 +622,7 @@ class Wevva(App, inherit_bindings=False):
         self._alerts_task = None
 
     def _cancel_tropical_context_task(self) -> None:
-        """Cancel stale location-specific matching, not the shared raw fetch."""
+        """Cancel stale local matching, not the shared canonical fetch."""
         if self._tropical_context_task is not None and not self._tropical_context_task.done():
             self._tropical_context_task.cancel()
         self._tropical_context_task = None
@@ -531,6 +637,8 @@ class Wevva(App, inherit_bindings=False):
     ) -> None:
         """Fetch ordinary alerts, then refresh nearby tropical context in the background."""
         self._cancel_tropical_context_task()
+        if force_refresh:
+            self._tropical_product_cache.clear()
         lat = self.location.latitude
         lon = self.location.longitude
         if lat is None or lon is None:
@@ -560,6 +668,7 @@ class Wevva(App, inherit_bindings=False):
                 >= self.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
             ):
                 self._tropical_system_cache = None
+                self._tropical_product_cache.clear()
                 tropical_entry = None
                 tropical_cache_expired = True
         self._alerts_task = asyncio.create_task(
@@ -590,7 +699,7 @@ class Wevva(App, inherit_bindings=False):
         cached_candidates: tuple[Alert, ...] | None,
         tropical_lat: float | None,
         tropical_lon: float | None,
-        cached_tropical_systems: tuple[TropicalSystem, ...] | None,
+        cached_tropical_systems: tuple[CanonicalTropicalSystem, ...] | None,
         allow_late_tropical_cache: bool,
     ) -> None:
         """Fetch ordinary alerts, then start tropical context in the background."""
@@ -691,7 +800,13 @@ class Wevva(App, inherit_bindings=False):
                     cached_tropical_systems = refreshed_tropical_entry[1]
 
             tropical_systems = []
+            canonical_tropical_systems = []
             if cached_tropical_systems is not None and tropical_lat is not None and tropical_lon is not None:
+                canonical_tropical_systems = sort_canonical_tropical_systems(
+                    cached_tropical_systems,
+                    tropical_lat,
+                    tropical_lon,
+                )
                 tropical_systems = await asyncio.to_thread(
                     nearby_tropical_systems_from_candidates,
                     cached_tropical_systems,
@@ -707,7 +822,9 @@ class Wevva(App, inherit_bindings=False):
                 WeatherAlertsUpdated(
                     alerts=alerts,
                     tropical_systems=tropical_systems,
+                    canonical_tropical_systems=canonical_tropical_systems,
                     tropical_systems_pending=tropical_systems_pending,
+                    tropical_systems_loaded=cached_tropical_systems is not None,
                 )
             )
 
@@ -739,7 +856,7 @@ class Wevva(App, inherit_bindings=False):
     async def _publish_tropical_context_when_ready(
         self,
         *,
-        tropical_lookup: asyncio.Task[tuple[list[TropicalSystem], bool]],
+        tropical_lookup: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]],
         alerts: list[Alert],
         lat: float,
         lon: float,
@@ -748,7 +865,7 @@ class Wevva(App, inherit_bindings=False):
         country_code: str | None,
         refresh_generation: int,
     ) -> None:
-        """Publish nearby systems after a background, location-independent raw fetch."""
+        """Publish global groups and nearby matches after one background fetch."""
         loop = asyncio.get_running_loop()
 
         def report_tropical_progress(event: str, payload: dict[str, object]) -> None:
@@ -763,7 +880,7 @@ class Wevva(App, inherit_bindings=False):
             )
 
         try:
-            raw_tropical_systems, completed = await asyncio.shield(tropical_lookup)
+            fetched_tropical_systems, completed = await asyncio.shield(tropical_lookup)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -776,7 +893,8 @@ class Wevva(App, inherit_bindings=False):
             )
             return
         if completed:
-            self._cache_tropical_systems(raw_tropical_systems)
+            canonical_tropical_systems = fetched_tropical_systems
+            self._cache_tropical_systems(canonical_tropical_systems)
         if not completed:
             self._post_tropical_progress_if_current(
                 'tropical_finished',
@@ -794,7 +912,7 @@ class Wevva(App, inherit_bindings=False):
             return
         tropical_systems = await asyncio.to_thread(
             nearby_tropical_systems_from_candidates,
-            raw_tropical_systems,
+            canonical_tropical_systems,
             tropical_lat,
             tropical_lon,
             selected_country_code=country_code,
@@ -807,11 +925,20 @@ class Wevva(App, inherit_bindings=False):
         ):
             return
         self.weather_screen.post_message(
-            WeatherAlertsUpdated(alerts=alerts, tropical_systems=tropical_systems)
+            WeatherAlertsUpdated(
+                alerts=alerts,
+                tropical_systems=tropical_systems,
+                canonical_tropical_systems=sort_canonical_tropical_systems(
+                    canonical_tropical_systems,
+                    tropical_lat,
+                    tropical_lon,
+                ),
+                tropical_systems_loaded=True,
+            )
         )
 
-    def _get_tropical_system_fetch_task(self) -> asyncio.Task[tuple[list[TropicalSystem], bool]]:
-        """Return the one in-flight global raw-system fetch for this session."""
+    def _get_tropical_system_fetch_task(self) -> asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]:
+        """Return the one in-flight global canonical fetch for this session."""
         task = self._tropical_system_fetch_task
         if task is not None:
             if task.done():
@@ -825,8 +952,8 @@ class Wevva(App, inherit_bindings=False):
         self._tropical_system_fetch_task = task
         return task
 
-    def _store_tropical_system_cache(self, task: asyncio.Task[tuple[list[TropicalSystem], bool]]) -> None:
-        """Cache a completed raw fetch even if its original location changed."""
+    def _store_tropical_system_cache(self, task: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]) -> None:
+        """Cache a completed global fetch even if its original location changed."""
         if self._tropical_system_fetch_task is not task:
             return
         self._tropical_system_fetch_task = None
@@ -839,8 +966,8 @@ class Wevva(App, inherit_bindings=False):
         if completed:
             self._cache_tropical_systems(systems)
 
-    def _cache_tropical_systems(self, systems: list[TropicalSystem]) -> None:
-        """Store raw global reports separately from country warning candidates."""
+    def _cache_tropical_systems(self, systems: list[CanonicalTropicalSystem]) -> None:
+        """Store global canonical groups separately from country warnings."""
         self._tropical_system_cache = (
             self._tropical_system_cache_clock(),
             tuple(systems),

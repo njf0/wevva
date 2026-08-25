@@ -11,6 +11,7 @@
 - Place search using Open-Meteo geocoding
 - Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
 - Current and upcoming weather alerts (normalized provider data)
+- Global active tropical-system investigation with source-specific tracks and official products
 - Unit preferences (temperature, wind, precipitation)
 - Theme toggle and optional emoji rendering
 - Interactive setup wizard for defaults
@@ -93,6 +94,19 @@ uvx wevva --clear-default-location
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
 
+## Tropical Systems
+
+Press `t` from the weather screen to open the global Active Tropical Systems
+workspace. Canonical storm names are shown once, while each issuing centre's
+meteorology, track, and lazily retrieved official products remain separate.
+The main weather screen retains only nearby-storm awareness and
+location-specific alert detail.
+
+The track uses a fitted global Natural Earth backdrop, centred position dots,
+and a provider cone when available. On this screen, `t` toggles the position
+dots, `c` toggles the cone, `r` refreshes the tropical data and `w` returns to
+weather.
+
 ## Library Usage
 
 This library is designed to be used as a TUI, but I have also exposed a minimal set of functions for fetching weather data and geocoding that can be used in other Python contexts. These are available as both async and sync versions, depending on your needs.
@@ -147,17 +161,21 @@ for alert in alerts:
     print(alert.event, alert.severity, alert.expires)
 ```
 
-## In-App Keys
+## Weather-Screen Keys
 
 - `s` search for place
 - `r` refresh weather
 - `a` save current location
 - `d` delete highlighted saved location
 - `l` toggle saved locations sidebar
+- `t` investigate active tropical systems
 - `u` open unit settings
 - `h` or `?` open help
 - `c` credits
 - `q` quit
+
+The Tropical Systems screen has its own contextual `t`/`c` track controls;
+press `h` in the application for the complete shortcut guide.
 
 ## Config
 

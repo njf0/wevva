@@ -11,9 +11,12 @@ import re
 import unicodedata
 
 from wevva_warnings import (
+    CanonicalTropicalSystem,
     TropicalSystem,
+    TropicalProduct,
     WarningQueryProgress,
-    get_tropical_systems,
+    get_canonical_tropical_systems,
+    get_tropical_products,
     get_tropical_systems_near,
     match_tropical_systems_to_point,
 )
@@ -107,22 +110,28 @@ def get_nearby_tropical_systems(
     return _nearby_systems_from_matched(systems, lat, lon, selected_country_code)
 
 
-def get_tropical_system_candidates() -> tuple[list[TropicalSystem], bool]:
-    """Fetch raw source-wide tropical reports for the session-only cache.
+def get_tropical_system_candidates() -> tuple[list[CanonicalTropicalSystem], bool]:
+    """Fetch canonical global systems for the session-only cache.
 
-    The returned reports are deliberately not associated with a country or a
-    location.  A caller must match them again for every selected point.
+    Each group's observations remain the exact source reports returned by
+    ``wevva-warnings``. A caller may flatten them for the separate local
+    proximity query, but must not synthesize group meteorology.
     """
     try:
-        return get_tropical_systems(), True
+        return get_canonical_tropical_systems(), True
     except Exception:
         # An incomplete global source refresh is inconclusive.  Do not cache
         # this empty fallback or use it as evidence of no tropical activity.
         return [], False
 
 
+async def get_tropical_products_async(system: TropicalSystem) -> list[TropicalProduct]:
+    """Load one observation's optional official products off the UI thread."""
+    return await asyncio.to_thread(get_tropical_products, system)
+
+
 def nearby_tropical_systems_from_candidates(
-    systems: Iterable[TropicalSystem],
+    systems: Iterable[CanonicalTropicalSystem | TropicalSystem],
     lat: float,
     lon: float,
     *,
@@ -135,7 +144,7 @@ def nearby_tropical_systems_from_candidates(
     global retrieval remains cacheable while this location-specific work can
     run in a worker thread.
     """
-    candidates = list(systems)
+    candidates = flatten_canonical_tropical_systems(systems)
     _report_progress(progress, 'tropical_check_total', total=len(candidates))
     try:
         matched = _match_candidates_with_progress(candidates, lat, lon, progress)
@@ -307,9 +316,106 @@ async def get_nearby_tropical_systems_async(
     )
 
 
-async def get_tropical_system_candidates_async() -> tuple[list[TropicalSystem], bool]:
-    """Run the cacheable raw tropical-source fetch outside the TUI loop."""
+async def get_tropical_system_candidates_async() -> tuple[list[CanonicalTropicalSystem], bool]:
+    """Run the cacheable canonical tropical fetch outside the TUI loop."""
     return await asyncio.to_thread(get_tropical_system_candidates)
+
+
+def flatten_canonical_tropical_systems(
+    systems: Iterable[CanonicalTropicalSystem | TropicalSystem],
+) -> list[TropicalSystem]:
+    """Return source observations unchanged for local proximity matching."""
+    observations: list[TropicalSystem] = []
+    for system in systems:
+        if isinstance(system, CanonicalTropicalSystem):
+            observations.extend(system.observations)
+        elif isinstance(system, TropicalSystem):
+            observations.append(system)
+    return observations
+
+
+def canonical_sort_distance_km(
+    system: CanonicalTropicalSystem,
+    lat: float,
+    lon: float,
+) -> float | None:
+    """Return the minimum source-centre distance for presentation ordering."""
+    distances = [
+        distance
+        for observation in system.observations
+        if (distance := center_distance_km(observation, lat, lon)) is not None
+    ]
+    return min(distances) if distances else None
+
+
+def sort_canonical_tropical_systems(
+    systems: Iterable[CanonicalTropicalSystem],
+    lat: float | None,
+    lon: float | None,
+) -> list[CanonicalTropicalSystem]:
+    """Order global systems nearest-first without adding a canonical centre."""
+    def sort_key(system: CanonicalTropicalSystem) -> tuple[bool, float, str]:
+        distance = (
+            canonical_sort_distance_km(system, lat, lon)
+            if lat is not None and lon is not None
+            else None
+        )
+        return (
+            distance is None,
+            distance if distance is not None else float('inf'),
+            (system.name or '').casefold(),
+        )
+
+    return sorted(systems, key=sort_key)
+
+
+def canonical_tropical_severity_rank(system: CanonicalTropicalSystem) -> int:
+    """Return the strongest declared observation class for UI ordering only."""
+    return max(
+        (
+            _tropical_classification_rank(observation.classification)
+            for observation in system.observations
+        ),
+        default=0,
+    )
+
+
+def sort_canonical_tropical_systems_by_severity(
+    systems: Iterable[CanonicalTropicalSystem],
+) -> list[CanonicalTropicalSystem]:
+    """Order global systems strongest-first without synthesising meteorology."""
+    return sorted(
+        systems,
+        key=lambda system: (
+            -canonical_tropical_severity_rank(system),
+            (system.name or '').casefold(),
+        ),
+    )
+
+
+def _tropical_classification_rank(value: object) -> int:
+    """Map common issuing-centre class names to a restrained display rank."""
+    classification = value.strip().casefold().replace('-', ' ') if isinstance(value, str) else ''
+    if not classification:
+        return 0
+
+    category = re.search(r'\bcategory\s*([1-5])\b', classification)
+    if category is not None:
+        return 30 + int(category.group(1)) * 10
+
+    classes = (
+        (80, ('super typhoon', 'very intense tropical cyclone')),
+        (70, ('severe typhoon', 'intense tropical cyclone')),
+        (60, ('hurricane', 'typhoon')),
+        (50, ('severe tropical storm', 'strong tropical storm')),
+        (40, ('moderate tropical storm', 'tropical storm', 'tropical cyclone')),
+        (30, ('tropical depression', 'developing tropical depression')),
+        (20, ('tropical disturbance', 'tropical low', 'disturbance')),
+    )
+    for rank, names in classes:
+        if any(name in classification for name in names):
+            return rank
+    return 0
 
 
 def _nearby_system_sort_key(
@@ -326,12 +432,18 @@ def _nearby_system_sort_key(
 __all__ = [
     'NearbyTropicalSystem',
     'TROPICAL_SYSTEMS_RADIUS_KM',
+    'canonical_sort_distance_km',
+    'canonical_tropical_severity_rank',
     'center_distance_km',
+    'flatten_canonical_tropical_systems',
     'forecast_track_distance_km',
     'get_tropical_system_candidates',
     'get_tropical_system_candidates_async',
+    'get_tropical_products_async',
     'get_nearby_tropical_systems',
     'get_nearby_tropical_systems_async',
     'haversine_distance_km',
     'nearby_tropical_systems_from_candidates',
+    'sort_canonical_tropical_systems',
+    'sort_canonical_tropical_systems_by_severity',
 ]

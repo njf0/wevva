@@ -10,9 +10,11 @@ from wevva.geography import (
     ProjectedPoint,
     geojson_polygons,
     polygon_points,
+    project_visible_polygons,
     select_geographic_unit,
     short_location_name,
     viewport_from_lonlat,
+    world_map_unit_polygons,
 )
 from wevva.widgets.geographic_scope import (
     GeographicCanvas,
@@ -68,6 +70,27 @@ class GeographicUnitSelectionTests(unittest.TestCase):
 
 
 class SharedGeographicRenderingTests(unittest.TestCase):
+    def test_world_layer_contains_all_checked_in_map_units(self) -> None:
+        world = world_map_unit_polygons()
+
+        self.assertGreater(len(world), 100)
+
+    def test_visible_projection_does_not_wrap_remote_land_across_seam(self) -> None:
+        viewport = GeographicViewport(0.0, -135.0, -10.0, -10.0, 10.0, 10.0)
+        remote_polygon = (
+            (
+                (
+                    (44.0, -2.0),
+                    (46.0, -2.0),
+                    (46.0, 2.0),
+                    (44.0, 2.0),
+                    (44.0, -2.0),
+                ),
+            ),
+        )
+
+        self.assertEqual(project_visible_polygons(remote_polygon, viewport), ())
+
     def test_projected_aspect_and_preferred_height_use_the_padded_viewport(self) -> None:
         viewport = GeographicViewport(0.0, 0.0, 0.0, 0.0, 8.0, 4.0)
 

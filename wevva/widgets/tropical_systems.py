@@ -1,15 +1,146 @@
-"""Tabbed, contextual display for nearby tropical-system reports."""
+"""Local tropical context and the compact global storm launcher."""
 
 from __future__ import annotations
 
 from rich.console import Group
 from rich.markdown import Markdown
 from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Container
+from textual.widgets import Button, Static
+from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
 
-from wevva.services.tropical import NearbyTropicalSystem
-
+from wevva.services.tropical import (
+    NearbyTropicalSystem,
+    canonical_sort_distance_km,
+    center_distance_km,
+    sort_canonical_tropical_systems,
+)
 
 _KILOMETRES_TO_MILES = 0.621371192237334
+
+
+class NearbyTropicalSystemsLauncher(Container):
+    """Small dashboard summary that launches the full tropical workspace."""
+
+    MAX_SYSTEMS = 3
+    DEFAULT_CSS = """
+    NearbyTropicalSystemsLauncher {
+        width: 100%;
+        height: auto;
+        padding: 1;
+        border: round $secondary;
+        border-title-color: $secondary;
+        margin: 0;
+    }
+
+    #nearby-tropical-list {
+        width: 100%;
+        height: auto;
+    }
+
+    #open-tropical-systems {
+        width: 100%;
+        height: 3;
+        margin: 1 0 0 0;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.border_title = 'Nearby Tropical Systems'
+
+    def compose(self) -> ComposeResult:
+        yield Static('', id='nearby-tropical-list')
+        yield Button('t  Tropical Systems', id='open-tropical-systems')
+
+    def update_systems(
+        self,
+        systems: list[CanonicalTropicalSystem],
+        *,
+        latitude: float | None,
+        longitude: float | None,
+        loaded: bool,
+    ) -> None:
+        rows: list[Text] = []
+        ordered = sort_canonical_tropical_systems(systems, latitude, longitude)
+        for canonical in ordered[: self.MAX_SYSTEMS]:
+            observation = _nearest_observation(canonical, latitude, longitude)
+            name = _canonical_name(canonical)
+            classification = _classification_code(observation.classification if observation is not None else None)
+            distance = (
+                canonical_sort_distance_km(canonical, latitude, longitude)
+                if latitude is not None and longitude is not None
+                else None
+            )
+            line = Text(name)
+            if classification:
+                line.append(f'  {classification}', style='dim')
+            if distance is not None:
+                line.append(f'  {round(distance * _KILOMETRES_TO_MILES):,g} mi', style='dim')
+            rows.append(line)
+            if observation is not None:
+                secondary = ' · '.join(value for value in (_clean(observation.movement), _clean(observation.max_wind)) if value)
+                if secondary:
+                    rows.append(Text(f'  {secondary}', style='dim'))
+        if not rows:
+            rows.append(Text('No active tropical systems' if loaded else 'Tropical systems unavailable', style='dim'))
+        self.query_one('#nearby-tropical-list', Static).update(Group(*rows))
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == 'open-tropical-systems':
+            await self.app.open_tropical_systems_screen()
+
+
+def _nearest_observation(
+    system: CanonicalTropicalSystem,
+    latitude: float | None,
+    longitude: float | None,
+) -> TropicalSystem | None:
+    if not system.observations:
+        return None
+    if latitude is None or longitude is None:
+        return system.observations[0]
+    return min(
+        system.observations,
+        key=lambda observation: (
+            center_distance_km(observation, latitude, longitude) is None,
+            center_distance_km(observation, latitude, longitude) or float('inf'),
+        ),
+    )
+
+
+def _classification_code(value: object) -> str:
+    classification = _clean(value)
+    return {
+        'tropical depression': 'TD',
+        'developing tropical depression': 'TD',
+        'tropical storm': 'TS',
+        'severe tropical storm': 'STS',
+        'hurricane': 'HU',
+        'typhoon': 'TY',
+        'tropical cyclone': 'TC',
+    }.get(classification.casefold(), classification)
+
+
+def canonical_storm_key(system: CanonicalTropicalSystem) -> str:
+    """Return a refresh-stable identity key without inferring storm identity."""
+    name = _clean(system.name)
+    if name:
+        return f'name:{name.casefold()}'
+    observations = tuple((item.source, item.id) for item in system.observations)
+    return f'observations:{observations!r}'
+
+
+def source_tab_label(system: TropicalSystem) -> str:
+    """Build a concise deterministic label from the source identifier."""
+    source = _clean(system.source)
+    token = source.split('_', 1)[0] if source else ''
+    return token.upper() or 'SOURCE'
+
+
+def _canonical_name(system: CanonicalTropicalSystem) -> str:
+    return _clean(system.name) or (_system_name(system.observations[0]) if system.observations else 'Tropical system')
 
 
 def build_tropical_system_text(nearby: NearbyTropicalSystem, *, accent: str | None = None) -> Text:
@@ -67,11 +198,13 @@ def build_tropical_system_details(
     if classification := _clean(system.classification):
         leading_facts.append(f'- **Classification:** {classification}')
     if nearby.distance_km is not None:
-        leading_facts.append(f'- **Centre distance:** {_format_kilometres(nearby.distance_km)} ({_format_miles(nearby.distance_km)})')
+        leading_facts.append(
+            f'- **Centre distance:** {_format_kilometres(nearby.distance_km)} ({_format_miles(nearby.distance_km)})'
+        )
     if leading_facts:
         details.append(Markdown('\n'.join(leading_facts)))
     if system.center_lat is not None and system.center_lon is not None:
-        centre = Text(' • ')
+        centre = Text(' ● ')
         centre.append('Centre: ', style='bold')
         centre.append_text(build_tropical_coordinates_text(system.center_lat, system.center_lon, accent=accent))
         details.append(centre)
@@ -148,8 +281,11 @@ def _clean(value: object) -> str:
 
 
 __all__ = [
+    'NearbyTropicalSystemsLauncher',
     'build_tropical_coordinates_text',
     'build_tropical_system_details',
     'build_tropical_system_text',
     'build_tropical_tab_label',
+    'canonical_storm_key',
+    'source_tab_label',
 ]

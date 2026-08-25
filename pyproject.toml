@@ -26,6 +26,11 @@ dependencies = [
     "wevva-warnings==0.5.3",
 ]
 
+# Local development override. Remove this table to return to the published
+# wevva-warnings release without changing the project dependency above.
+[tool.uv.sources]
+wevva-warnings = { path = "../wevva-warnings", editable = true }
+
 [project.scripts]
 wevva = "wevva.cli:app"
 

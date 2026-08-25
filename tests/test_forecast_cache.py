@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import WeatherFetchFailed, WeatherUpdated
+from wevva.openmeteo import OpenMeteoForecast
 
 
 class _WeatherScreen:
@@ -107,6 +108,56 @@ class SavedWeatherSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary.temperature, 22.5)
         self.assertEqual(summary.temperature_unit, '°C')
         self.assertFalse(summary.error)
+
+
+class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_conditions_request_omits_hourly_and_daily_payloads(self) -> None:
+        response = Mock()
+        response.json.return_value = {'current': {'temperature_2m': 84}}
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        client.get.return_value = response
+
+        with patch('wevva.openmeteo.httpx.AsyncClient', return_value=client):
+            result = await OpenMeteoForecast.fetch_current_conditions(
+                17.8,
+                -153.5,
+                temperature_unit='fahrenheit',
+                wind_speed_unit='mph',
+                precipitation_unit='inch',
+            )
+
+        self.assertEqual(result, {'current': {'temperature_2m': 84}})
+        _url, = client.get.await_args.args
+        params = client.get.await_args.kwargs['params']
+        self.assertIn('current', params)
+        self.assertNotIn('hourly', params)
+        self.assertNotIn('daily', params)
+        self.assertEqual(params['temperature_unit'], 'fahrenheit')
+        self.assertEqual(params['wind_speed_unit'], 'mph')
+        self.assertEqual(params['precipitation_unit'], 'inch')
+        response.raise_for_status.assert_called_once_with()
+
+    async def test_application_uses_configured_units_for_storm_centre(self) -> None:
+        app = Wevva(
+            temperature_unit='fahrenheit',
+            wind_speed_unit='mph',
+            precipitation_unit='inch',
+        )
+        loader = AsyncMock(return_value={'current': {}})
+
+        with patch('wevva.app.fetch_current_weather', new=loader):
+            result = await app.load_tropical_centre_weather(17.8, -153.5)
+
+        self.assertEqual(result, {'current': {}})
+        loader.assert_awaited_once_with(
+            lat=17.8,
+            lon=-153.5,
+            temperature_unit='fahrenheit',
+            wind_speed_unit='mph',
+            precipitation_unit='inch',
+        )
 
 
 if __name__ == '__main__':
