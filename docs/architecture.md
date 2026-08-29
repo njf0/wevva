@@ -102,11 +102,10 @@ country-code lookup, and small display helpers. `wevva/wevva.tcss` supplies
 global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
-The right sidebar combines an optional independently scrolling CAP detail
-reader and warning-area scope with a compact Nearby Tropical Systems launcher.
-It shows at most the nearest few canonical systems and deliberately contains no
-maps or supplementary-product reader. The central alert tabs retain nearby
-tropical entries and ordinary CAP alerts independently.
+The right sidebar contains an optional independently scrolling CAP detail
+reader and warning-area scope. The central alert tabs retain location-matched
+tropical entries and ordinary CAP alerts independently; the global canonical
+storm collection is presented only in the dedicated tropical workspace.
 
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
 with `t`. Its severity-ordered, full-classification storm selector is followed
@@ -116,11 +115,12 @@ current-conditions table for the selected source centre, and persistent
 track-fitted Storm Track pane occupy the wider left column; a two-cell gutter
 separates the right-hand fixed
 product tabs and independently scrolling document body. The storm-selection
-workspace behind both columns retains the application hatch. `Overview` is
-always present. Other tabs come only from lazy
-`get_tropical_products()` results, with literal plain text, explicit Markdown,
-and restrained tables for the structured forecast point shapes supplied by
-`wevva-warnings`. The workspace is a bounded panel inside a full-height
+workspace behind both columns retains the application hatch. NHC and CPHC
+observations with a useful discovery headline or summary receive a `Forecast`
+tab; other tabs come only from lazy `get_tropical_products()` results. Product
+content uses literal plain text, explicit Markdown, and restrained tables for
+the structured forecast point shapes supplied by `wevva-warnings`. The
+workspace is a bounded panel inside a full-height
 centring stage and occupies roughly sixty percent of the terminal; at compact
 widths the panel expands into a small screen inset while retaining the same
 summary/conditions/track-left and document-right topology with relaxed column
@@ -151,17 +151,20 @@ The storm scope combines the current position and the complete useful source
 forecast horizon in one padded, track-fitted regional viewport. It clips the
 checked-in global Natural Earth map-unit layer into that viewport rather than
 using `DisplayGeography` to select one source country; open-ocean views
-may consequently contain no land. Source geography metadata may contribute one
-visible map-unit/subunit label, but it never changes the land layer or viewport;
-an off-screen context is not labelled. The selected forecast location never
-supplies storm-map context. The current position and regular 24-hour forecast
-fixes receive visible centred dots without a connecting line. When supplied,
-an official cone is a secondary-coloured Braille layer. The screen's `t` and
-`c` bindings independently hide position markers and the cone; both toggles
-retain the complete scope for placement so the viewport and remaining markers
-do not move or clip. The warning scope instead keeps a stable whole selected
-country/map-unit viewport so the warning polygon's relative coverage remains
-meaningful.
+may consequently contain no land. Up to three collision-fitted place labels
+come from Natural Earth's ranked 1:50m Populated Places layer, prioritising
+regional significance and then proximity to the track. Issuer and source
+geography metadata never supplies a storm-map label, so a provider's home
+country cannot be mistaken for the land under a storm. The selected forecast
+location never supplies storm-map context. The current position and regular
+24-hour forecast fixes receive visible centred dots without a connecting line.
+When supplied, an official cone is a secondary-coloured Braille layer. The
+screen's `t` and `c` bindings independently hide position markers and the cone;
+both toggles retain the complete scope for placement so the viewport and
+remaining markers do not move or clip. A once-per-observation information
+notification identifies a missing forecast track, cone, or both. The warning
+scope instead keeps a stable whole selected country/map-unit viewport so the
+warning polygon's relative coverage remains meaningful.
 
 The CAP prose panel and tropical product body each own their scrollbar, while
 geographic scopes remain bounded inside their respective areas. Compact scope
@@ -178,15 +181,15 @@ scope's raster layers and avoids a second visibility-dependent translation, so
 toggling the cone cannot reposition or discard forecast markers.
 
 `wevva/geography.py` owns the deliberately small shared geographic path:
-Natural Earth map-unit loading and local-component selection, GeoJSON
-Polygon/MultiPolygon and line extraction, local projection, and viewport
-bounds. `wevva/widgets/geographic_scope.py` supplies the logical filled-polygon,
-polyline, and point raster plus 2×4 Braille composition. Warning areas assign
-every fully covered land/warning cell to one full `⣿` glyph, snapping internal
-colour boundaries to cells while retaining partial Braille at the exterior
-geographic edge. Storm forecasts instead use centred position dots over an
-optional secondary-coloured Braille cone; they do not use the warning fill
-policy or draw a connecting line. The storm widget adds only forecast-path
+Natural Earth map-unit and populated-place loading, local-component selection,
+GeoJSON Polygon/MultiPolygon and line extraction, local projection, and
+viewport bounds. `wevva/widgets/geographic_scope.py` supplies the logical
+filled-polygon, polyline, and point raster plus 2×4 Braille composition.
+Warning areas assign every fully covered land/warning cell to one full `⣿`
+glyph, snapping internal colour boundaries to cells while retaining partial
+Braille at the exterior geographic edge. Storm forecasts instead use centred
+position dots over an optional secondary-coloured Braille cone; they do not use
+the warning fill policy or draw a connecting line. The storm widget adds only forecast-path
 selection, its inclusive viewport policy, markers, cone, and semantic styles;
 the warning widget adds the selected CAP
 Polygon/MultiPolygon, stable context viewport policy, severity fill, and

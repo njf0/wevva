@@ -50,6 +50,18 @@ class ProjectedPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class PopulatedPlace:
+    """One ranked Natural Earth place available as local map context."""
+
+    name: str
+    longitude: float
+    latitude: float
+    scale_rank: int
+    label_rank: int
+    population: int
+
+
+@dataclass(frozen=True, slots=True)
 class GeographicViewport:
     """Local projected bounds with preserved longitude origin and latitude scale."""
 
@@ -145,6 +157,47 @@ def world_map_unit_polygons() -> MultiPolygon:
         if isinstance(raw_unit, dict)
         for polygon in _coerce_polygons(raw_unit.get('polygons'))
     )
+
+
+@lru_cache(maxsize=1)
+def world_populated_places() -> tuple[PopulatedPlace, ...]:
+    """Return the checked-in Natural Earth populated-place label points."""
+    resource = files('wevva.data').joinpath('natural_earth_50m_populated_places.json.gz')
+    try:
+        with resource.open('rb') as raw_file, gzip.GzipFile(fileobj=raw_file) as archive:
+            payload = json.load(archive)
+    except (EOFError, OSError, UnicodeError, json.JSONDecodeError):
+        return ()
+    raw_places = payload.get('places') if isinstance(payload, dict) else None
+    if not isinstance(raw_places, list):
+        return ()
+
+    places = []
+    for raw_place in raw_places:
+        if not isinstance(raw_place, list) or len(raw_place) != 6:
+            continue
+        name, longitude, latitude, scale_rank, label_rank, population = raw_place
+        if (
+            not isinstance(name, str)
+            or not name.strip()
+            or not _valid_lonlat(longitude, latitude)
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool)
+                for value in (scale_rank, label_rank, population)
+            )
+        ):
+            continue
+        places.append(
+            PopulatedPlace(
+                name=name.strip(),
+                longitude=float(longitude),
+                latitude=float(latitude),
+                scale_rank=scale_rank,
+                label_rank=label_rank,
+                population=population,
+            )
+        )
+    return tuple(places)
 
 
 def select_geographic_unit(
@@ -487,6 +540,7 @@ __all__ = [
     'LonLat',
     'MultiPolygon',
     'Polygon',
+    'PopulatedPlace',
     'ProjectedPoint',
     'geojson_polygons',
     'geojson_polylines',
@@ -501,5 +555,6 @@ __all__ = [
     'subunit',
     'viewport_from_lonlat',
     'world_map_unit_polygons',
+    'world_populated_places',
     'wrapped_longitude_delta',
 ]

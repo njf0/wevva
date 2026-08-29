@@ -13,19 +13,17 @@ from textual.widgets import Static
 
 from wevva.geography import (
     GeographicViewport,
-    MultiPolygon,
+    PopulatedPlace,
     ProjectedPoint,
     geojson_polygons,
     geojson_polylines,
-    map_unit,
     polygon_points,
     project_visible_polygons,
-    resolve_display_geography,
     viewport_from_lonlat,
     world_map_unit_polygons,
+    world_populated_places,
     wrapped_longitude_delta,
 )
-from wevva.utils.country_codes import get_country_name_by_alpha2
 from wevva.widgets.geographic_scope import (
     GeographicCanvas,
     ProjectedPolygon,
@@ -36,6 +34,8 @@ _MIN_CONTENT_HEIGHT = 7
 _MAX_CONTENT_HEIGHT = 16
 _BORDER_ROWS = 0
 _TRACK_VIEWPORT_PADDING = 0.10
+_MAX_PLACE_LABELS = 3
+_MAX_PLACE_CANDIDATES = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,10 +56,8 @@ class StormScopeGeometry:
     land: tuple[ProjectedPolygon, ...]
     storm: tuple[ProjectedPoint, ...]
     forecast_marker_indices: tuple[int, ...]
-    geography: ProjectedPoint | None
-    geography_name: str
-    geography_polygons: MultiPolygon = ()
     cone: tuple[ProjectedPolygon, ...] = ()
+    places: tuple[PopulatedPlace, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +68,7 @@ class ScopePalette:
     cone: str | None = None
     current: str | None = None
     forecast: str | None = None
-    geography: str | None = None
+    place: str | None = None
 
 
 def extract_storm_track(system: Any) -> tuple[GeoTrackPoint, ...]:
@@ -178,18 +176,13 @@ def build_storm_scope_geometry(
     )
     if viewport is None:
         return None
-    geography_polygons, geography_name = _source_geography_context(system)
-    visible_geography = project_visible_polygons(geography_polygons, viewport)
-    geography = _visible_geography_label_point(visible_geography, viewport)
     return StormScopeGeometry(
         viewport=viewport,
         land=_visible_world_polygons(viewport),
         storm=tuple(viewport.project(point.longitude, point.latitude) for point in track),
         forecast_marker_indices=tuple(index for index, point in enumerate(track) if index > 0 and point.forecast_marker),
-        geography=geography,
-        geography_name=geography_name,
-        geography_polygons=geography_polygons,
         cone=project_visible_polygons(cone, viewport),
+        places=world_populated_places(),
     )
 
 
@@ -216,31 +209,34 @@ def render_braille_scope(
         centering_layers=('land', 'cone'),
     )
 
-    geography = scope.geography
-    if scope.geography_polygons:
-        visible_geography = project_visible_polygons(scope.geography_polygons, canvas.viewport)
-        geography = _visible_geography_label_point(visible_geography, canvas.viewport)
-
-    markers: list[tuple[tuple[int, int], str, str, str | None]] = []
-    if geography is not None and scope.geography_name:
-        geography_cell = frame.marker(geography, '✦', palette.geography)
-        markers.append((geography_cell, '✦', scope.geography_name, palette.geography))
+    # Reserve every track position even when markers are hidden so toggling
+    # them cannot make place labels jump into their cells.
+    occupied = {canvas.cell_position(point) for point in scope.storm}
     if show_track:
         for index in reversed(scope.forecast_marker_indices):
-            cell = frame.marker(scope.storm[index], '●', palette.forecast)
-            markers.append((cell, '●', '', palette.forecast))
-        current_cell = frame.marker(scope.storm[0], '●', palette.current)
-        markers.append((current_cell, '●', '', palette.current))
+            frame.marker(scope.storm[index], '●', palette.forecast)
+        frame.marker(scope.storm[0], '●', palette.current)
 
-    occupied = {cell for cell, _glyph, _label, _style in markers}
-    if geography is not None and scope.geography_name:
-        frame.label(
-            geography_cell,
-            scope.geography_name,
-            palette.geography,
-            occupied,
+    labels_added = 0
+    for place, point in _visible_place_candidates(scope.places, canvas.viewport, scope.storm):
+        place_cell = canvas.cell_position(point)
+        if place_cell in occupied:
+            continue
+        candidate_occupied = set(occupied)
+        candidate_occupied.add(place_cell)
+        if not frame.label(
+            place_cell,
+            place.name,
+            palette.place,
+            candidate_occupied,
             gap=1,
-        )
+        ):
+            continue
+        frame.marker(point, '✦', palette.place)
+        occupied = candidate_occupied
+        labels_added += 1
+        if labels_added == _MAX_PLACE_LABELS:
+            break
     return frame.to_text()
 
 
@@ -273,6 +269,11 @@ class TropicalStormTrackScope(Static):
     @property
     def cone_visible(self) -> bool:
         return self._cone_visible
+
+    @property
+    def cone_available(self) -> bool:
+        """Return whether the selected source supplied a renderable cone."""
+        return self._scope is not None and bool(self._scope.cone)
 
     def toggle_track(self) -> None:
         """Toggle current and forecast position markers without changing scope."""
@@ -346,7 +347,7 @@ class TropicalStormTrackScope(Static):
             cone=theme.get('secondary'),
             current=theme.get('text-error'),
             forecast=theme.get('text-warning'),
-            geography=theme.get('text-success') or theme.get('text-primary'),
+            place=theme.get('text-success') or theme.get('text-primary'),
         )
         return render_braille_scope(
             self._scope,
@@ -377,60 +378,46 @@ class LargeTropicalStormTrackScope(TropicalStormTrackScope):
         """Let the parent pane allocate height; projection fitting stays aspect-safe."""
 
 
-def _source_geography_context(system: Any) -> tuple[MultiPolygon, str]:
-    """Resolve source context for labeling against the final fitted viewport."""
-    source_info = getattr(system, 'source_info', None)
-    display_geography = getattr(system, 'display_geography', None)
-    if display_geography is None:
-        display_geography = getattr(source_info, 'display_geography', None)
-    issuer_code = getattr(source_info, 'issuer_country_code', None)
-    if display_geography is not None:
-        unit = resolve_display_geography(display_geography)
-        label = getattr(display_geography, 'name', None)
-        fallback_code = getattr(display_geography, 'code', None)
-    elif isinstance(issuer_code, str):
-        unit = map_unit(issuer_code)
-        label = get_country_name_by_alpha2(issuer_code.strip().upper())
-        fallback_code = issuer_code
-    else:
-        return (), ''
-    if unit is None:
-        return (), ''
-    if not isinstance(label, str) or not label.strip():
-        normalized_code = fallback_code.strip().upper() if isinstance(fallback_code, str) else ''
-        label = get_country_name_by_alpha2(normalized_code) or next(iter(reversed(unit.names)), '')
-    return unit.polygons, label.strip() if isinstance(label, str) else ''
-
-
 @lru_cache(maxsize=128)
 def _visible_world_polygons(viewport: GeographicViewport) -> tuple[ProjectedPolygon, ...]:
     """Project the global backdrop once for each fitted viewport."""
     return project_visible_polygons(world_map_unit_polygons(), viewport)
 
 
-def _visible_geography_label_point(
-    polygons: tuple[ProjectedPolygon, ...],
+def _visible_place_candidates(
+    places: tuple[PopulatedPlace, ...],
     viewport: GeographicViewport,
-) -> ProjectedPoint | None:
-    """Choose a stable in-frame point on the visible source geography."""
-    if not polygons:
-        return None
-    candidates = [
-        point
-        for polygon in polygons
-        for point in polygon[0]
-        if viewport.min_x <= point.x <= viewport.max_x and viewport.min_y <= point.y <= viewport.max_y
-    ]
-    if not candidates:
-        return ProjectedPoint(
-            (viewport.min_x + viewport.max_x) / 2.0,
-            (viewport.min_y + viewport.max_y) / 2.0,
+    storm: tuple[ProjectedPoint, ...],
+) -> tuple[tuple[PopulatedPlace, ProjectedPoint], ...]:
+    """Choose prominent visible places, favouring those near the storm track."""
+    candidates = []
+    for place in places:
+        point = viewport.project(place.longitude, place.latitude)
+        if not (
+            viewport.min_x <= point.x <= viewport.max_x
+            and viewport.min_y <= point.y <= viewport.max_y
+        ):
+            continue
+        distance = min(
+            (
+                (point.x - storm_point.x) ** 2 + (point.y - storm_point.y) ** 2
+                for storm_point in storm
+            ),
+            default=0.0,
         )
-    centre_x = (viewport.min_x + viewport.max_x) / 2.0
-    centre_y = (viewport.min_y + viewport.max_y) / 2.0
-    return min(
-        candidates,
-        key=lambda point: (point.x - centre_x) ** 2 + (point.y - centre_y) ** 2,
+        candidates.append((place, point, distance))
+    candidates.sort(
+        key=lambda candidate: (
+            candidate[0].scale_rank,
+            candidate[0].label_rank,
+            candidate[2],
+            -candidate[0].population,
+            candidate[0].name,
+        )
+    )
+    return tuple(
+        (place, point)
+        for place, point, _distance in candidates[:_MAX_PLACE_CANDIDATES]
     )
 
 

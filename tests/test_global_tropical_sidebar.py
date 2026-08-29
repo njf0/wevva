@@ -2,29 +2,23 @@
 
 from __future__ import annotations
 
-from io import StringIO
 import unittest
 
-from rich.console import Console
-from textual.app import App, ComposeResult
 from wevva_warnings import CanonicalTropicalSystem, DisplayGeography, TropicalSystem
 from wevva_warnings.registry import get_source
 
 from wevva.geography import map_unit, resolve_display_geography, subunit
-from wevva.location_metadata import LocationMetadata
 from wevva.services.tropical import (
     canonical_tropical_severity_rank,
     canonical_sort_distance_km,
     sort_canonical_tropical_systems,
     sort_canonical_tropical_systems_by_severity,
 )
-from wevva.widgets.tropical_systems import NearbyTropicalSystemsLauncher
 from wevva.widgets.tropical_track import (
     ScopePalette,
     build_storm_scope_geometry,
     render_braille_scope,
 )
-from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar
 
 
 def _observation(
@@ -69,27 +63,6 @@ def _bounds(unit) -> tuple[float, float, float, float]:
         max(point[0] for point in points),
         max(point[1] for point in points),
     )
-
-
-def _rendered_static(widget) -> str:
-    console = Console(width=80, file=StringIO(), record=True)
-    console.print(getattr(widget, '_Static__content'))
-    return console.export_text()
-
-
-class _SidebarApp(App):
-    def __init__(self) -> None:
-        super().__init__()
-        self.location = LocationMetadata(
-            latitude=55.9533,
-            longitude=-3.1883,
-            name='Edinburgh',
-            country_code='GB',
-        )
-        self.forecast_metadata = LocationMetadata(latitude=55.9533, longitude=-3.1883)
-
-    def compose(self) -> ComposeResult:
-        yield WeatherAlertDetailsSidebar()
 
 
 class CanonicalOrderingTests(unittest.TestCase):
@@ -252,11 +225,11 @@ class DisplayGeographyTests(unittest.TestCase):
 
         assert edinburgh_scope is not None and neutral_scope is not None
         self.assertEqual(edinburgh_scope, neutral_scope)
-        self.assertIsNotNone(edinburgh_scope.geography)
-        self.assertEqual(edinburgh_scope.geography_name, 'Hawaii')
         self.assertTrue(edinburgh_scope.land)
+        rendered = render_braille_scope(edinburgh_scope, width=68, height=13)
+        self.assertNotIn('Hawaii', rendered.plain)
 
-    def test_global_backdrop_resolves_context_but_draws_only_visible_land(self) -> None:
+    def test_global_backdrop_draws_only_land_visible_to_each_track(self) -> None:
         jma = _observation(
             'nangka-jma',
             'jma_tropical',
@@ -278,12 +251,29 @@ class DisplayGeographyTests(unittest.TestCase):
         cma_scope = build_storm_scope_geometry(cma)
 
         assert jma_scope is not None and cma_scope is not None
-        self.assertEqual(jma_scope.geography_name, 'Japan')
-        self.assertEqual(cma_scope.geography_name, 'China')
         self.assertFalse(jma_scope.land)
         self.assertTrue(cma_scope.land)
         self.assertNotEqual(jma_scope.viewport, cma_scope.viewport)
         self.assertNotEqual(jma_scope.land, cma_scope.land)
+        self.assertNotIn('Japan', render_braille_scope(jma_scope, width=60, height=16).plain)
+        self.assertNotIn('China', render_braille_scope(cma_scope, width=60, height=16).plain)
+
+    def test_inland_china_track_is_labelled_with_nearby_cities_not_issuer(self) -> None:
+        saudel = _observation(
+            'saudel-cma',
+            'cma_tropical',
+            'SAUDEL',
+            center_lat=26.9,
+            center_lon=114.6,
+            track=[[114.6, 26.9], [113.2, 26.5], [111.8, 25.9]],
+        )
+
+        scope = build_storm_scope_geometry(saudel)
+
+        assert scope is not None
+        rendered = render_braille_scope(scope, width=60, height=20)
+        self.assertIn('Hengyang', rendered.plain)
+        self.assertNotIn('China', rendered.plain)
 
     def test_reunion_track_uses_all_global_land_visible_in_its_viewport(self) -> None:
         reunion = _observation(
@@ -298,9 +288,8 @@ class DisplayGeographyTests(unittest.TestCase):
         scope = build_storm_scope_geometry(reunion)
 
         assert scope is not None
-        self.assertEqual(scope.geography_name, 'Réunion')
-        self.assertIsNone(scope.geography)
         self.assertFalse(scope.land)
+        self.assertNotIn('Réunion', render_braille_scope(scope, width=60, height=16).plain)
 
     def test_open_ocean_track_does_not_force_remote_mexico_into_view(self) -> None:
         eastern_pacific = _observation(
@@ -323,8 +312,6 @@ class DisplayGeographyTests(unittest.TestCase):
         scope = build_storm_scope_geometry(eastern_pacific)
 
         assert scope is not None
-        self.assertEqual(scope.geography_name, 'United States')
-        self.assertIsNone(scope.geography)
         self.assertFalse(scope.land)
         rendered = render_braille_scope(
             scope,
@@ -333,6 +320,8 @@ class DisplayGeographyTests(unittest.TestCase):
             palette=ScopePalette(land='red'),
         )
         self.assertFalse(any(span.style == 'red' for span in rendered.spans))
+        self.assertNotIn('United States', rendered.plain)
+        self.assertNotIn('✦', rendered.plain)
         track_columns = [
             column
             for line in rendered.plain.splitlines()
@@ -340,69 +329,6 @@ class DisplayGeographyTests(unittest.TestCase):
             if character != ' '
         ]
         self.assertGreater(max(track_columns) - min(track_columns), 20)
-
-
-class CompactTropicalLauncherTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        self.jma = _observation(
-            'nangka-jma',
-            'jma_tropical',
-            'NANGKA',
-            center_lat=28.0,
-            center_lon=135.0,
-            pressure='970 hPa',
-            movement='NW 15 km/h',
-            track=[[135.0, 28.0], [136.0, 29.0], [137.0, 30.0]],
-        )
-        self.cma = _observation(
-            'nangka-cma',
-            'cma_tropical',
-            'NANGKA',
-            center_lat=20.0,
-            center_lon=120.0,
-            pressure='990 hPa',
-            movement='N 20 km/h',
-            track=[[120.0, 20.0], [119.0, 21.0], [118.0, 22.0]],
-        )
-        self.nangka = CanonicalTropicalSystem('NANGKA', [self.jma, self.cma])
-        self.lala = CanonicalTropicalSystem(
-            'LALA',
-            [
-                _observation(
-                    'lala-cphc',
-                    'cphc_gis_central_pacific',
-                    'LALA',
-                    center_lat=15.2,
-                    center_lon=-145.5,
-                    track=[[-145.5, 15.2], [-150.0, 17.0]],
-                )
-            ],
-        )
-
-    async def test_sidebar_is_a_compact_launcher_not_a_second_investigation_ui(self) -> None:
-        app = _SidebarApp()
-        async with app.run_test(size=(80, 55)) as pilot:
-            sidebar = app.query_one(WeatherAlertDetailsSidebar)
-            await sidebar.update_global_tropical_systems([self.nangka, self.lala], loaded=True)
-            await pilot.pause()
-            launcher = app.query_one(NearbyTropicalSystemsLauncher)
-            rendered = _rendered_static(launcher.query_one('#nearby-tropical-list'))
-
-            self.assertIn('NANGKA', rendered)
-            self.assertIn('LALA', rendered)
-            self.assertEqual(len(app.query('TropicalStormTrackScope')), 0)
-            self.assertEqual(len(app.query('CanonicalTropicalSystemCard')), 0)
-
-    async def test_successful_empty_result_has_a_compact_empty_state(self) -> None:
-        app = _SidebarApp()
-        async with app.run_test(size=(80, 30)) as pilot:
-            sidebar = app.query_one(WeatherAlertDetailsSidebar)
-            await sidebar.update_global_tropical_systems([], loaded=True)
-            await pilot.pause()
-
-            launcher = app.query_one(NearbyTropicalSystemsLauncher)
-            rendered = _rendered_static(launcher.query_one('#nearby-tropical-list'))
-            self.assertIn('No active tropical systems', rendered)
 
 
 if __name__ == '__main__':

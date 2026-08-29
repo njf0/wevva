@@ -14,14 +14,11 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Static, Tab, Tabs
-from wevva_warnings import CanonicalTropicalSystem
-
 from wevva.alerts import Alert
 from wevva.geography import short_location_name
 from wevva.messages import NearbyTropicalSystemSelected, WeatherAlertSelected
 from wevva.services.tropical import NearbyTropicalSystem
 from wevva.widgets.tropical_systems import (
-    NearbyTropicalSystemsLauncher,
     build_tropical_system_text,
     build_tropical_tab_label,
 )
@@ -292,7 +289,7 @@ class WeatherAlertDetailsPanel(VerticalScroll):
 
 
 class WeatherAlertDetailsSidebar(Container):
-    """Compact storm launcher with an optional scrolling CAP reader."""
+    """Optional scrolling CAP reader with its geographic warning scope."""
 
     DEFAULT_CSS = """
     WeatherAlertDetailsSidebar {
@@ -315,7 +312,6 @@ class WeatherAlertDetailsSidebar(Container):
         details.display = False
         yield details
         yield WarningAreaScope()
-        yield NearbyTropicalSystemsLauncher()
 
     @property
     def details(self) -> WeatherAlertDetailsPanel:
@@ -360,24 +356,9 @@ class WeatherAlertDetailsSidebar(Container):
         )
 
     def update_tropical_system(self, _nearby: NearbyTropicalSystem) -> None:
-        """Keep the local storm tab independent from the global launcher."""
+        """Hide CAP-only details while a local tropical tab is selected."""
         self.details.display = False
         self.query_one(WarningAreaScope).clear()
-
-    async def update_global_tropical_systems(
-        self,
-        systems: list[CanonicalTropicalSystem],
-        *,
-        loaded: bool,
-    ) -> None:
-        """Render a compact summary from the global canonical collection."""
-        latitude, longitude, _location_name, _country_code = self._location_context()
-        self.query_one(NearbyTropicalSystemsLauncher).update_systems(
-            systems,
-            latitude=latitude,
-            longitude=longitude,
-            loaded=loaded,
-        )
 
 
 def alert_markdown(alert: Alert) -> str:

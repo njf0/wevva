@@ -15,6 +15,7 @@ from wevva.geography import (
     short_location_name,
     viewport_from_lonlat,
     world_map_unit_polygons,
+    world_populated_places,
 )
 from wevva.widgets.geographic_scope import (
     GeographicCanvas,
@@ -74,6 +75,14 @@ class SharedGeographicRenderingTests(unittest.TestCase):
         world = world_map_unit_polygons()
 
         self.assertGreater(len(world), 100)
+
+    def test_populated_place_layer_contains_ranked_local_context(self) -> None:
+        places = world_populated_places()
+
+        self.assertGreater(len(places), 1000)
+        by_name = {place.name: place for place in places}
+        self.assertAlmostEqual(by_name['Honolulu'].longitude, -157.8583)
+        self.assertEqual(by_name['Nanchang'].scale_rank, 2)
 
     def test_visible_projection_does_not_wrap_remote_land_across_seam(self) -> None:
         viewport = GeographicViewport(0.0, -135.0, -10.0, -10.0, 10.0, 10.0)

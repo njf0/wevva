@@ -97,7 +97,6 @@ class WeatherScreen(Screen[None]):
         self._locations_sidebar_has_content = False
         self._alert_details_sidebar_has_content = False
         self._local_alert_details_has_content = False
-        self._global_tropical_sidebar_has_content = False
         self._locations_sidebar_width_collapsed = False
         self._alert_details_sidebar_width_collapsed = False
 
@@ -422,11 +421,11 @@ class WeatherScreen(Screen[None]):
         self.set_saved_locations_sidebar_visible(False)
 
     def action_show_alert_details(self) -> None:
-        """Show the compact tropical launcher and any selected CAP details."""
+        """Show selected CAP details."""
         self.set_alert_details_sidebar_visible(True)
 
     def action_hide_alert_details(self) -> None:
-        """Hide the tropical launcher and CAP details sidebar."""
+        """Hide the CAP details sidebar."""
         self.set_alert_details_sidebar_visible(False)
 
     # --- Messages ---
@@ -461,12 +460,6 @@ class WeatherScreen(Screen[None]):
 
     async def on_weather_alerts_updated(self, event: WeatherAlertsUpdated) -> None:
         """Render the combined alert and tropical-system tab panel."""
-        if event.tropical_systems_loaded:
-            await self.alert_details_sidebar.update_global_tropical_systems(
-                event.canonical_tropical_systems,
-                loaded=True,
-            )
-            self._global_tropical_sidebar_has_content = True
         await self.render_alert_panel(
             event.alerts,
             event.tropical_systems,
@@ -492,17 +485,14 @@ class WeatherScreen(Screen[None]):
         self._sync_sidebar_visibility()
 
     def on_nearby_tropical_system_selected(self, event: NearbyTropicalSystemSelected) -> None:
-        """Keep a local tropical tab from replacing the global storm launcher."""
+        """Hide CAP-only details while a local tropical tab is selected."""
         self.alert_details_sidebar.update_tropical_system(event.system)
         self._local_alert_details_has_content = False
         self._sync_alert_sidebar_content()
         self._sync_sidebar_visibility()
 
     def _sync_alert_sidebar_content(self) -> None:
-        self._alert_details_sidebar_has_content = (
-            self._local_alert_details_has_content
-            or self._global_tropical_sidebar_has_content
-        )
+        self._alert_details_sidebar_has_content = self._local_alert_details_has_content
 
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""

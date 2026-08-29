@@ -112,6 +112,24 @@ class _BindingApp(_ScreenApp):
         self.app_actions.append('delete')
 
 
+class _NotificationApp(_ScreenApp):
+    def __init__(self, screen: TropicalSystemsScreen) -> None:
+        super().__init__(screen)
+        self.notified: list[tuple[str, str]] = []
+
+    def notify(
+        self,
+        message: str,
+        *,
+        title: str = '',
+        severity: str = 'information',
+        timeout: float | None = None,
+        markup: bool = True,
+    ) -> None:
+        del title, timeout, markup
+        self.notified.append((message, severity))
+
+
 class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.jma = _observation(
@@ -173,6 +191,9 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([tab.label.plain for tab in sources.query('Tab')], ['JMA', 'CMA'])
             self.assertTrue(sources.display)
             self.assertEqual(calls, ['jma_tropical'])
+            products = screen.query_one('#tropical-product-tabs', Tabs)
+            self.assertEqual(list(products.query('Tab')), [])
+            self.assertFalse(products.display)
             summary = screen.query_one(TropicalStormSummary)
             product_body = screen.query_one('#tropical-product-body', VerticalScroll)
             root = screen.query_one('#tropical-screen-root')
@@ -202,7 +223,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNot(app.screen, screen)
 
-    async def test_source_switch_changes_exact_summary_track_geography_and_products(self) -> None:
+    async def test_source_switch_changes_exact_summary_track_land_and_products(self) -> None:
         calls: list[str] = []
 
         async def loader(system: TropicalSystem) -> list[TropicalProduct]:
@@ -241,7 +262,6 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('970 hPa', _data_table_text(summary))
             self.assertNotIn('990 hPa', _data_table_text(summary))
             assert first_scope is not None
-            self.assertEqual(first_scope.geography_name, 'Japan')
             self.assertFalse(first_scope.land)
 
             screen.query_one('#tropical-source-tabs', Tabs).active = 'tropical-screen-source-1'
@@ -251,8 +271,8 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('990 hPa', _data_table_text(summary))
             self.assertNotIn('970 hPa', _data_table_text(summary))
             assert second_scope is not None
-            self.assertEqual(second_scope.geography_name, 'China')
             self.assertTrue(second_scope.land)
+            self.assertEqual(first_scope.places, second_scope.places)
             self.assertNotEqual(first_scope.storm, second_scope.storm)
             self.assertNotEqual(first_scope.land, second_scope.land)
             self.assertEqual(calls, ['jma_tropical', 'cma_tropical'])
@@ -423,8 +443,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             track = screen.query_one(LargeTropicalStormTrackScope)
             self.assertFalse(sources.display)
             assert track._scope is not None
-            self.assertIsNotNone(track._scope.geography)
-            self.assertEqual(track._scope.geography_name, 'Hawaii')
+            self.assertTrue(track._scope.places)
             self.assertTrue(track._scope.land)
 
     async def test_source_and_product_selection_survive_visiting_another_storm(self) -> None:
@@ -483,15 +502,17 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             tabs = screen.query_one('#tropical-product-tabs', Tabs)
             self.assertEqual(
                 [tab.label.plain for tab in tabs.query('Tab')],
-                ['Overview', 'Public Advisory'],
+                ['Forecast', 'Public Advisory'],
             )
             self.assertEqual(calls, 1)
             summary = screen.query_one(TropicalStormSummary)
             self.assertIn('15 Aug 2026', summary.get_cell('last-update', 'value'))
+            body = screen.query_one('#tropical-product-body', VerticalScroll)
+            self.assertIn('Tropical Storm LALA', _rendered(body.query_one(Static)))
+            self.assertIn('LALA provider summary', _rendered(body.query_one(Static)))
 
             tabs.active = 'tropical-product-0'
             await pilot.pause()
-            body = screen.query_one('#tropical-product-body', VerticalScroll)
             self.assertEqual(len(body.query(Markdown)), 0)
             self.assertIn('* literal provider bullet', _rendered(body.query_one(Static)))
 
@@ -573,7 +594,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Wind', centre_only)
         self.assertNotIn('Pressure', centre_only)
 
-    async def test_product_failure_and_missing_track_leave_overview_usable(self) -> None:
+    async def test_product_failure_and_missing_track_leave_clear_status(self) -> None:
         no_track = _observation(
             'quiet-jma',
             'jma_tropical',
@@ -590,7 +611,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             [CanonicalTropicalSystem('QUIET', [no_track])],
             product_loader=loader,
         )
-        app = _ScreenApp(screen)
+        app = _NotificationApp(screen)
         async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
             await pilot.pause()
@@ -598,10 +619,60 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(screen.query_one('#tropical-track-unavailable', Static).display)
             self.assertEqual(
                 [tab.label.plain for tab in screen.query('#tropical-product-tabs Tab')],
-                ['Overview'],
+                [],
             )
+            self.assertFalse(screen.query_one('#tropical-product-tabs', Tabs).display)
             body_text = _rendered(screen.query_one('#tropical-product-body', VerticalScroll).query_one(Static))
             self.assertIn('Supplementary products are temporarily unavailable', body_text)
+            self.assertEqual(
+                app.notified,
+                [('Forecast track and cone are not available from JMA.', 'information')],
+            )
+
+            await screen._show_observation()
+            self.assertEqual(len(app.notified), 1)
+
+    async def test_track_without_cone_notifies_once(self) -> None:
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return []
+
+        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        app = _NotificationApp(screen)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+
+            self.assertEqual(
+                app.notified,
+                [('Forecast cone is not available from CPHC.', 'information')],
+            )
+            await screen._show_observation()
+            self.assertEqual(len(app.notified), 1)
+
+    async def test_track_with_cone_does_not_notify(self) -> None:
+        self.cphc.geometries['cone'] = {
+            'type': 'Polygon',
+            'coordinates': [
+                [
+                    [-145.0, 14.5],
+                    [-154.5, 18.5],
+                    [-155.5, 19.5],
+                    [-144.5, 15.5],
+                    [-145.0, 14.5],
+                ]
+            ],
+        }
+
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return []
+
+        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        app = _NotificationApp(screen)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+
+            self.assertEqual(app.notified, [])
 
     async def test_layout_protects_document_width_and_switches_topology(self) -> None:
         async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
@@ -721,7 +792,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(body.loading)
             self.assertEqual(
                 [tab.label.plain for tab in screen.query('#tropical-product-tabs Tab')],
-                ['Overview', 'Public Advisory'],
+                ['Forecast', 'Public Advisory'],
             )
 
     async def test_weather_binding_replaces_escape_and_location_bindings_are_hidden(self) -> None:

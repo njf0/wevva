@@ -54,9 +54,8 @@ explicit rather than hidden in conversation history.
 
 ## Approach
 
-The weather screen keeps a compact Nearby Tropical Systems launcher and its
-existing location-specific tropical/CAP alert tabs. The dedicated screen owns
-global storm investigation: severity-ordered canonical storm tabs,
+The weather screen keeps its location-specific tropical/CAP alert tabs, while
+the dedicated screen owns global storm investigation: severity-ordered canonical storm tabs,
 source-specific observations, current weather near the selected centre, a
 persistent fitted track/cone pane, and lazy official products.
 

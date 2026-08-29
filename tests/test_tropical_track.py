@@ -178,8 +178,7 @@ class TropicalTrackGeometryTests(unittest.TestCase):
                 for point in ring
             )
         )
-        self.assertIsNone(scope.geography)
-        self.assertEqual(scope.geography_name, '')
+        self.assertTrue(scope.places)
         self.assertEqual(scope.forecast_marker_indices, (2, 4, 6, 7, 8))
         storm_width = max(point.x for point in scope.storm) - min(point.x for point in scope.storm)
         self.assertAlmostEqual(scope.viewport.width / storm_width, 1.2)
@@ -258,8 +257,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
             land=(),
             storm=(ProjectedPoint(2.0, 5.0), ProjectedPoint(8.0, 5.0)),
             forecast_marker_indices=(),
-            geography=None,
-            geography_name='',
             cone=(
                 (
                     (
@@ -304,8 +301,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
                 ProjectedPoint(9.0, 6.0),
             ),
             forecast_marker_indices=(1, 2),
-            geography=None,
-            geography_name='',
             cone=(
                 (
                     (
@@ -360,8 +355,9 @@ class TropicalTrackRenderingTests(unittest.TestCase):
         self.assertEqual(len(rendered.plain.splitlines()), 13)
         self.assertTrue(all(len(line) == 34 for line in rendered.plain.splitlines()))
         self.assertNotIn('NOW', rendered.plain)
-        self.assertNotIn('Hilo', rendered.plain)
-        self.assertNotIn('✦', rendered.plain)
+        self.assertIn('Honolulu', rendered.plain)
+        self.assertIn('Hilo', rendered.plain)
+        self.assertIn('✦', rendered.plain)
         self.assertNotIn('+24', rendered.plain)
         self.assertNotIn('LOCATION', rendered.plain)
         self.assertEqual(rendered.plain.count('●'), 6)
@@ -378,8 +374,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
             land=(),
             storm=(ProjectedPoint(7.0, 5.0), ProjectedPoint(3.0, 5.0)),
             forecast_marker_indices=(1,),
-            geography=None,
-            geography_name='',
         )
 
         rendered = render_braille_scope(

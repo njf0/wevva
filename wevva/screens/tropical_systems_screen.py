@@ -239,6 +239,7 @@ class TropicalSystemsScreen(Screen[None]):
         self._centre_weather: dict[tuple[float, float], dict[str, Any]] = {}
         self._centre_weather_errors: set[tuple[float, float]] = set()
         self._centre_weather_tasks: dict[tuple[float, float], asyncio.Task[None]] = {}
+        self._availability_notifications: set[tuple[str, bool, bool]] = set()
         self._selection_generation = 0
         self._tasks: set[asyncio.Task[None]] = set()
         self._updating_tabs = 0
@@ -283,10 +284,9 @@ class TropicalSystemsScreen(Screen[None]):
                     with Container(id='tropical-product-pane') as product_pane:
                         product_pane.border_title = 'Storm Information'
                         with Container(id='tropical-product-content'):
-                            yield Tabs(
-                                Tab('Overview', id='tropical-product-overview'),
-                                id='tropical-product-tabs',
-                            )
+                            product_tabs = Tabs(id='tropical-product-tabs')
+                            product_tabs.display = False
+                            yield product_tabs
                             yield VerticalScroll(id='tropical-product-body')
         yield Footer()
 
@@ -511,6 +511,7 @@ class TropicalSystemsScreen(Screen[None]):
             self.log.error(f'Unable to render tropical track: {error!r}')
             track.clear()
         self.query_one('#tropical-track-unavailable', Static).display = not track.display
+        self._notify_track_availability(observation, track)
         self._show_centre_weather(observation)
 
         key = _observation_key(observation)
@@ -525,6 +526,32 @@ class TropicalSystemsScreen(Screen[None]):
         await self._populate_product_tabs(observation, generation)
         if generation != self._selection_generation:
             return
+
+    def _notify_track_availability(
+        self,
+        observation: TropicalSystem,
+        track: LargeTropicalStormTrackScope,
+    ) -> None:
+        """Notify once per observation when a forecast map layer is absent."""
+        track_available = track.display
+        cone_available = track.cone_available
+        if track_available and cone_available:
+            return
+        key = (_observation_key(observation), track_available, cone_available)
+        if key in self._availability_notifications:
+            return
+        self._availability_notifications.add(key)
+        source = source_tab_label(observation)
+        if not track_available and not cone_available:
+            missing = 'Forecast track and cone are'
+        elif not track_available:
+            missing = 'Forecast track is'
+        else:
+            missing = 'Forecast cone is'
+        self.app.notify(
+            f'{missing} not available from {source}.',
+            severity='information',
+        )
 
     def _show_centre_weather(self, observation: TropicalSystem) -> None:
         """Show cached centre conditions or start one independent current request."""
@@ -609,20 +636,28 @@ class TropicalSystemsScreen(Screen[None]):
             tabs = self.query_one('#tropical-product-tabs', Tabs)
             key = _observation_key(observation)
             products = self._products.get(key, ())
-            desired = self._product_by_observation.get(key, 'tropical-product-overview')
-            valid_ids = {'tropical-product-overview'}
+            tab_specs: list[tuple[str, str]] = []
+            if _has_us_forecast_summary(observation):
+                tab_specs.append(('tropical-product-forecast', 'Forecast'))
+            tab_specs.extend(
+                (f'tropical-product-{index}', product.label)
+                for index, product in enumerate(products)
+            )
+            valid_ids = {tab_id for tab_id, _label in tab_specs}
+            desired = self._product_by_observation.get(key)
+            if desired not in valid_ids:
+                desired = tab_specs[0][0] if tab_specs else None
             self._updating_tabs += 1
             try:
                 await tabs.clear()
-                await tabs.add_tab(Tab('Overview', id='tropical-product-overview'))
-                for index, product in enumerate(products):
-                    tab_id = f'tropical-product-{index}'
-                    valid_ids.add(tab_id)
-                    await tabs.add_tab(Tab(product.label, id=tab_id))
-                if desired not in valid_ids:
-                    desired = 'tropical-product-overview'
+                for tab_id, label in tab_specs:
+                    await tabs.add_tab(Tab(label, id=tab_id))
+                tabs.display = bool(tab_specs)
                 tabs.active = desired
-                self._product_by_observation[key] = desired
+                if desired is None:
+                    self._product_by_observation.pop(key, None)
+                else:
+                    self._product_by_observation[key] = desired
             finally:
                 self._updating_tabs -= 1
             if generation == self._selection_generation:
@@ -637,10 +672,20 @@ class TropicalSystemsScreen(Screen[None]):
         body = self.query_one('#tropical-product-body', VerticalScroll)
         await body.remove_children()
         tabs = self.query_one('#tropical-product-tabs', Tabs)
-        active = tabs.active or 'tropical-product-overview'
+        active = tabs.active
         key = _observation_key(observation)
-        if active == 'tropical-product-overview':
-            await body.mount(Static(self._overview(observation)))
+        if active == 'tropical-product-forecast':
+            await body.mount(Static(self._forecast_summary(observation)))
+            return
+        if active is None:
+            if key in self._loading_keys:
+                return
+            message = (
+                'Supplementary products are temporarily unavailable.'
+                if key in self._product_errors
+                else 'No supplementary products are available.'
+            )
+            await body.mount(Static(Text(message, style='dim italic')))
             return
         try:
             index = int(active.rsplit('-', 1)[-1])
@@ -689,24 +734,13 @@ class TropicalSystemsScreen(Screen[None]):
             rows.append(('Last update', _format_time(update_time)))
         return rows
 
-    def _overview(self, observation: TropicalSystem) -> Group:
+    def _forecast_summary(self, observation: TropicalSystem) -> Group:
+        """Render the useful NHC/CPHC discovery headline and summary."""
         parts: list[Any] = []
-        heading = _clean(observation.headline) or _clean(observation.name) or 'Overview'
+        heading = _clean(observation.headline) or _clean(observation.name) or 'Forecast'
         parts.append(Text(heading, style='bold'))
         if summary := _clean(observation.summary):
             parts.extend((Text(''), Text(summary)))
-        products = self._products.get(_observation_key(observation), ())
-        if products:
-            parts.extend((Text(''), Text('Available official products', style='bold')))
-            for product in products:
-                freshness = f' · {_format_time(product.issued_at)}' if product.issued_at else ''
-                parts.append(Text(f'● {product.label}{freshness}'))
-        elif _observation_key(observation) in self._loading_keys:
-            parts.extend((Text(''), Text('Loading official products…', style='dim italic')))
-        elif _observation_key(observation) in self._product_errors:
-            parts.extend((Text(''), Text('Supplementary products are temporarily unavailable.', style='dim italic')))
-        else:
-            parts.extend((Text(''), Text('No supplementary products are available.', style='dim italic')))
         if url := _clean(observation.url):
             link = Text('View official source', style='markdown.link')
             link.stylize(Style(link=url, underline=True))
@@ -872,6 +906,14 @@ def _has_pressure(point: dict[str, Any]) -> bool:
 def _observation_key(system: TropicalSystem) -> str:
     issued = system.issued_at.isoformat() if system.issued_at else ''
     return f'{system.source}\0{system.id}\0{issued}'
+
+
+def _has_us_forecast_summary(system: TropicalSystem) -> bool:
+    """Return whether an NHC/CPHC discovery summary merits its own tab."""
+    source = _clean(system.source).casefold()
+    return source.startswith(('nhc_gis_', 'cphc_gis_')) and bool(
+        _clean(system.headline) or _clean(system.summary)
+    )
 
 
 def _last_update_key(system: TropicalSystem) -> str:

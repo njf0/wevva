@@ -13,9 +13,6 @@ from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.services.tropical import NearbyTropicalSystem
-from wevva.widgets.tropical_systems import (
-    NearbyTropicalSystemsLauncher,
-)
 from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.warning_area import (
     WarningAreaPalette,
@@ -28,7 +25,7 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsSidebar,
     WeatherAlertsPanel,
 )
-from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
+from wevva_warnings import TropicalSystem
 from wevva_warnings.registry import get_source
 
 
@@ -191,18 +188,17 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
         console.print(getattr(sidebar.content, '_Static__content'))
         return console.export_text()
 
-    async def test_cap_details_and_compact_storm_launcher_are_independent(self) -> None:
+    async def test_cap_details_and_warning_scope_share_the_sidebar(self) -> None:
         app = _WarningSidebarApp()
         async with app.run_test(size=(80, 40)) as pilot:
             await pilot.pause()
             sidebar = app.query_one(WeatherAlertDetailsSidebar)
             details = app.query_one(WeatherAlertDetailsPanel)
             warning = app.query_one(WarningAreaScope)
-            collection = app.query_one(NearbyTropicalSystemsLauncher)
 
             self.assertIs(details.parent, sidebar)
             self.assertIs(warning.parent, sidebar)
-            self.assertIs(collection.parent, sidebar)
+            self.assertEqual(list(sidebar.children), [details, warning])
 
             system = TropicalSystem(
                 id='test-storm',
@@ -220,17 +216,6 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
                 },
                 source_info=get_source('cphc_gis_central_pacific'),
             )
-            await sidebar.update_global_tropical_systems(
-                [CanonicalTropicalSystem('TEST', [system])],
-                loaded=True,
-            )
-            await pilot.pause()
-            launcher = collection.query_one('#nearby-tropical-list')
-            console = Console(width=80, file=StringIO(), record=True)
-            console.print(getattr(launcher, '_Static__content'))
-            self.assertIn('TEST', console.export_text())
-            self.assertEqual(len(sidebar.query('TropicalStormTrackScope')), 0)
-
             sidebar.update_tropical_system(NearbyTropicalSystem(system, 150.0))
             await pilot.pause()
             self.assertFalse(warning.display)
@@ -353,57 +338,6 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(warning._preferred_content_height, 20)
             self.assertEqual(warning.content_size.height, 20)
             self.assertEqual(warning.region.height, 22)
-
-    async def test_compact_launcher_does_not_grow_a_dashboard_track(self) -> None:
-        app = _WarningSidebarApp()
-        app.location = LocationMetadata(
-            latitude=19.7297,
-            longitude=-155.09,
-            name='Hilo',
-            country='United States',
-            country_code='US',
-        )
-        app.forecast_metadata = LocationMetadata(latitude=19.7297, longitude=-155.09)
-        system = TropicalSystem(
-            id='wide-storm',
-            source='cphc_gis_central_pacific',
-            classification='Tropical Storm',
-            name='TEST',
-            headline='Tropical Storm TEST',
-            center_lat=15.2,
-            center_lon=-145.5,
-            geometries={
-                'forecast_track': {
-                    'type': 'LineString',
-                    'coordinates': [
-                        [-145.5, 15.2],
-                        [-146.9, 15.9],
-                        [-149.2, 16.6],
-                        [-151.7, 17.4],
-                        [-154.1, 18.0],
-                        [-156.3, 18.7],
-                        [-159.0, 19.6],
-                    ],
-                },
-            },
-            source_info=get_source('cphc_gis_central_pacific'),
-        )
-
-        async with app.run_test(size=(100, 50)) as pilot:
-            sidebar = app.query_one(WeatherAlertDetailsSidebar)
-            await sidebar.update_global_tropical_systems(
-                [CanonicalTropicalSystem('TEST', [system])],
-                loaded=True,
-            )
-            await pilot.pause()
-            launcher = app.query_one(NearbyTropicalSystemsLauncher)
-            initial_height = launcher.region.height
-
-            sidebar.styles.width = 60
-            await pilot.pause()
-
-            self.assertEqual(len(sidebar.query('TropicalStormTrackScope')), 0)
-            self.assertEqual(launcher.region.height, initial_height)
 
     async def test_switching_alert_tabs_updates_the_same_warning_scope(self) -> None:
         app = _WarningWeatherApp()
