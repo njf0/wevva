@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from rich.console import Console
 from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
 
-from wevva.alerts import Alert
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
-from wevva.messages import TropicalSystemsProgress, WeatherAlertsUpdated, WeatherUpdated
+from wevva.messages import WeatherAlertsUpdated
 from wevva.services.tropical import (
     NearbyTropicalSystem,
     center_distance_km,
@@ -31,7 +29,6 @@ from wevva.widgets.tropical_systems import (
     build_tropical_system_text,
     build_tropical_tab_label,
 )
-from wevva.widgets.weather_alerts import WeatherAlertsPanel
 
 
 class _WeatherScreen:
@@ -382,16 +379,6 @@ class TropicalDisplayTests(unittest.TestCase):
 
         self.assertEqual(label.plain, 'Typhoon DOLPHIN')
 
-    def test_combined_panel_places_tropical_tabs_before_weather_alerts(self) -> None:
-        nearby = NearbyTropicalSystem(system=_system(), distance_km=15.0)
-        alert = Alert(id='rain', source='test', event='Rain', headline='Rain warning')
-
-        panel = WeatherAlertsPanel([alert], tropical_systems=[nearby])
-
-        self.assertEqual(panel.items, [nearby, alert])
-        self.assertEqual(panel.panel_title(), '1 Tropical System Alert · 1 Severe Weather Alert')
-
-
 class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.app = Wevva(initial_location=LocationMetadata(latitude=22.3, longitude=114.2, country_code='HK'))
@@ -401,333 +388,37 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
     def test_raw_tropical_cache_lasts_thirty_minutes(self) -> None:
         self.assertEqual(self.app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS, 30 * 60)
 
-    async def test_raw_tropical_reports_use_a_separate_global_cache_and_match_each_location(self) -> None:
-        nearby = NearbyTropicalSystem(
-            system=_system(source_info=SimpleNamespace(name='Hong Kong Observatory', issuer_country_code='HK')),
-            distance_km=15.0,
-        )
-        canonical = CanonicalTropicalSystem('DOLPHIN', [nearby.system])
-        lookup = AsyncMock(return_value=([canonical], True))
-        match = Mock(return_value=[nearby])
-
+    async def test_weather_alert_refresh_does_not_fetch_tropical_systems(self) -> None:
+        tropical_lookup = AsyncMock(return_value=([], True))
         with (
             patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
             patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            first_tropical_context = self.app._tropical_context_task
-            assert first_tropical_context is not None
-            await first_tropical_context
-            self.assertIsNotNone(self.app._tropical_system_cache)
-            self.app.location = LocationMetadata(latitude=23.0, longitude=115.0, country_code='HK')
-            self.app._schedule_alert_refresh(1, tropical_lat=23.01, tropical_lon=115.01)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-
-        self.assertEqual(lookup.await_count, 1)
-        cached_candidates = self.app._alert_cache[('HK', 'auto')][1]
-        self.assertEqual(cached_candidates, ())
-        self.assertIsNotNone(self.app._tropical_system_cache)
-        assert self.app._tropical_system_cache is not None
-        self.assertEqual(self.app._tropical_system_cache[1], (canonical,))
-        alert_updates = [message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)]
-        self.assertEqual(alert_updates[-1].tropical_systems, [nearby])
-        self.assertEqual(alert_updates[-1].canonical_tropical_systems, [canonical])
-        self.assertTrue(alert_updates[-1].tropical_systems_loaded)
-        self.assertTrue(any(isinstance(message, TropicalSystemsProgress) for message in self.app.weather_screen.messages))
-        self.assertEqual(
-            match.call_args_list,
-            [
-                call(
-                    [canonical],
-                    22.31,
-                    114.21,
-                    selected_country_code='HK',
-                    progress=ANY,
-                ),
-                call(
-                    (canonical,),
-                    23.01,
-                    115.01,
-                    selected_country_code='HK',
-                    progress=ANY,
-                ),
-            ],
-        )
-
-    async def test_tropical_raw_cache_expires_and_force_refresh_bypasses_it(self) -> None:
-        self.app._tropical_system_cache_clock = lambda: 1_000.0
-        lookup = AsyncMock(return_value=([], True))
-        match = Mock(return_value=[])
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-            self.app._tropical_system_cache_clock = lambda: 1_000.0 + self.app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-            self.app._schedule_alert_refresh(1, force_refresh=True, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-        self.assertEqual(lookup.await_count, 3)
-
-    async def test_cached_global_storms_resort_when_selected_location_changes(self) -> None:
-        east = CanonicalTropicalSystem(
-            'EAST',
-            [_system(id='east', name='EAST', center_lat=0.0, center_lon=10.0)],
-        )
-        west = CanonicalTropicalSystem(
-            'WEST',
-            [_system(id='west', name='WEST', center_lat=0.0, center_lon=-10.0)],
-        )
-        lookup = AsyncMock(return_value=([west, east], True))
-        match = Mock(return_value=[])
-        self.app.location = LocationMetadata(latitude=0.0, longitude=9.0, country_code='GB')
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=0.0, tropical_lon=9.0)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-            first = [
-                message
-                for message in self.app.weather_screen.messages
-                if isinstance(message, WeatherAlertsUpdated) and message.tropical_systems_loaded
-            ][-1]
-            self.assertEqual(
-                [system.name for system in first.canonical_tropical_systems],
-                ['EAST', 'WEST'],
-            )
-
-            self.app.location = LocationMetadata(latitude=0.0, longitude=-9.0, country_code='GB')
-            self.app._refresh_generation = 2
-            self.app._schedule_alert_refresh(2, tropical_lat=0.0, tropical_lon=-9.0)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-
-        second = [
-            message
-            for message in self.app.weather_screen.messages
-            if isinstance(message, WeatherAlertsUpdated) and message.tropical_systems_loaded
-        ][-1]
-        self.assertEqual(
-            [system.name for system in second.canonical_tropical_systems],
-            ['WEST', 'EAST'],
-        )
-        self.assertEqual(lookup.await_count, 1)
-
-    async def test_location_change_reuses_an_inflight_raw_tropical_fetch(self) -> None:
-        tropical_lookup_started = asyncio.Event()
-        release_tropical_lookup = asyncio.Event()
-        raw_system = _system(center_lat=22.4, center_lon=114.3)
-        canonical = CanonicalTropicalSystem('DOLPHIN', [raw_system])
-
-        async def delayed_tropical_lookup():
-            tropical_lookup_started.set()
-            await release_tropical_lookup.wait()
-            return [canonical], True
-
-        lookup = AsyncMock(side_effect=delayed_tropical_lookup)
-        match = Mock(return_value=[])
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            first_refresh = self.app._alerts_task
-            assert first_refresh is not None
-            await first_refresh
-            await tropical_lookup_started.wait()
-
-            self.app.location = LocationMetadata(latitude=23.0, longitude=115.0, country_code='HK')
-            self.app._refresh_generation = 2
-            self.app._schedule_alert_refresh(2, tropical_lat=23.01, tropical_lon=115.01)
-            second_refresh = self.app._alerts_task
-            assert second_refresh is not None
-            release_tropical_lookup.set()
-            await second_refresh
-            second_tropical_context = self.app._tropical_context_task
-            if second_tropical_context is not None:
-                await second_tropical_context
-
-        self.assertEqual(lookup.await_count, 1)
-        self.assertIsNotNone(self.app._tropical_system_cache)
-        match.assert_called_once_with(
-            (canonical,),
-            23.01,
-            115.01,
-            selected_country_code='HK',
-            progress=ANY,
-        )
-
-    async def test_raw_tropical_lookup_starts_after_country_alerts(self) -> None:
-        country_lookup_started = asyncio.Event()
-        release_country_lookup = asyncio.Event()
-        tropical_lookup_started = asyncio.Event()
-        release_tropical_lookup = asyncio.Event()
-
-        async def delayed_country_lookup(*args, **kwargs):
-            country_lookup_started.set()
-            await release_country_lookup.wait()
-            return [], True
-
-        native_lookup = AsyncMock(return_value=([], True))
-
-        async def delayed_tropical_lookup():
-            tropical_lookup_started.set()
-            await release_tropical_lookup.wait()
-            return [], True
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=delayed_country_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
-            patch('wevva.app.get_tropical_system_candidates_async', new=delayed_tropical_lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=Mock(return_value=[])),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await country_lookup_started.wait()
-            await asyncio.sleep(0)
-            self.assertEqual(native_lookup.await_count, 1)
-            self.assertFalse(tropical_lookup_started.is_set())
-            release_country_lookup.set()
-            await self.app._alerts_task
-            await tropical_lookup_started.wait()
-            release_tropical_lookup.set()
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-    async def test_raw_tropical_lookup_updates_after_normal_alerts_with_progress(self) -> None:
-        tropical_lookup_started = asyncio.Event()
-        release_tropical_lookup = asyncio.Event()
-
-        async def delayed_tropical_lookup(*args, **kwargs):
-            tropical_lookup_started.set()
-            await release_tropical_lookup.wait()
-            return [], True
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=delayed_tropical_lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=Mock(return_value=[])),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            await tropical_lookup_started.wait()
-            alert_updates = [
-                message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)
-            ]
-            self.assertEqual(len(alert_updates), 1)
-            self.assertEqual(alert_updates[0].tropical_systems, [])
-            self.assertTrue(any(isinstance(message, TropicalSystemsProgress) for message in self.app.weather_screen.messages))
-            release_tropical_lookup.set()
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-        alert_updates = [message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)]
-        self.assertEqual(len(alert_updates), 2)
-
-    async def test_failed_raw_tropical_lookup_finishes_its_progress_panel(self) -> None:
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=AsyncMock(return_value=([], False))),
-        ):
-            self.app._schedule_alert_refresh(1, tropical_lat=22.31, tropical_lon=114.21)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-        tropical_events = [
-            message.event for message in self.app.weather_screen.messages if isinstance(message, TropicalSystemsProgress)
-        ]
-        self.assertEqual(tropical_events, ['tropical_fetch_started', 'tropical_finished'])
-
-    async def test_refresh_uses_final_forecast_coordinates_for_tropical_query(self) -> None:
-        forecast_metadata = LocationMetadata(latitude=22.3125, longitude=114.21875)
-        event = WeatherUpdated(metadata=forecast_metadata, current=None, hourly=None, daily=None)
-        self.app.controller.fetch = AsyncMock(return_value=event)
-        lookup = AsyncMock(return_value=([], True))
-        match = Mock(return_value=[])
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
-        ):
-            await self.app._refresh_weather(force_alert_refresh=False)
-            assert self.app._alerts_task is not None
-            await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
-
-        lookup.assert_awaited_once_with()
-        match.assert_called_once_with(
-            [],
-            22.3125,
-            114.21875,
-            selected_country_code='HK',
-            progress=ANY,
-        )
-
-    async def test_alert_only_refresh_reuses_displayed_forecast_coordinates_for_tropical_matching(self) -> None:
-        self.app.location = LocationMetadata(latitude=22.3, longitude=114.2, country_code='HK')
-        self.app.forecast_metadata = LocationMetadata(latitude=22.3125, longitude=114.21875)
-        lookup = AsyncMock(return_value=([], True))
-        match = Mock(return_value=[])
-
-        with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))),
-            patch('wevva.app.get_tropical_system_candidates_async', new=lookup),
-            patch('wevva.app.nearby_tropical_systems_from_candidates', new=match),
+            patch('wevva.app.get_tropical_system_candidates_async', new=tropical_lookup),
         ):
             self.app._schedule_alert_refresh(1)
             assert self.app._alerts_task is not None
             await self.app._alerts_task
-            assert self.app._tropical_context_task is not None
-            await self.app._tropical_context_task
 
-        match.assert_called_once_with(
-            [],
-            22.3125,
-            114.21875,
-            selected_country_code='HK',
-            progress=ANY,
-        )
+        tropical_lookup.assert_not_awaited()
+        self.assertIsNone(self.app._tropical_system_fetch_task)
+        self.assertIsNone(self.app._tropical_system_cache)
+        updates = [message for message in self.app.weather_screen.messages if isinstance(message, WeatherAlertsUpdated)]
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].alerts, [])
+
+    async def test_expired_workspace_cache_is_refetched_on_demand(self) -> None:
+        stale = CanonicalTropicalSystem('STALE', [_system(name='STALE')])
+        fresh = CanonicalTropicalSystem('FRESH', [_system(name='FRESH')])
+        self.app._tropical_system_cache_clock = lambda: 1_000.0
+        self.app._cache_tropical_systems([stale])
+        self.app._tropical_system_cache_clock = lambda: 1_000.0 + self.app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
+        lookup = AsyncMock(return_value=([fresh], True))
+
+        with patch('wevva.app.get_tropical_system_candidates_async', new=lookup):
+            systems = await self.app.load_tropical_systems()
+
+        self.assertEqual(systems, [fresh])
+        lookup.assert_awaited_once_with()
 
 
 if __name__ == '__main__':

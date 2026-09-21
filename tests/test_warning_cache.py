@@ -332,32 +332,5 @@ class WarningProgressTests(unittest.TestCase):
             )
         )
 
-    def test_tropical_fetch_uses_an_indeterminate_progress_bar(self) -> None:
-        self.assertEqual(
-            SavedLocationsSidebar._tropical_progress_details('tropical_fetch_started', {}),
-            (0, None),
-        )
-        self.assertEqual(
-            SavedLocationsSidebar._tropical_progress_title(None),
-            'Fetching tropical systems',
-        )
-
-    def test_tropical_total_switches_to_measured_progress(self) -> None:
-        self.assertEqual(
-            SavedLocationsSidebar._tropical_progress_details('tropical_check_total', {'total': 3}),
-            (0, 3),
-        )
-        self.assertEqual(
-            SavedLocationsSidebar._tropical_progress_details(
-                'tropical_checked',
-                {'completed': 2, 'total': 3},
-            ),
-            (2, 3),
-        )
-        self.assertEqual(
-            SavedLocationsSidebar._tropical_progress_title(3),
-            'Checking tropical systems',
-        )
-
 if __name__ == '__main__':
     unittest.main()

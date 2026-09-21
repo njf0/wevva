@@ -9,8 +9,8 @@ committed `uv.lock`.
 uv sync --locked
 ```
 
-Warning progress, canonical tropical systems, and country-level warning caching
-use `wevva-warnings`. This development checkout currently resolves the declared
+Warning progress, the dedicated canonical tropical workspace, and country-level
+warning caching use `wevva-warnings`. This development checkout currently resolves the declared
 `wevva-warnings==0.5.3` dependency from the editable sibling path
 `../wevva-warnings` through `[tool.uv.sources]`; `uv.lock` records the same path.
 This allows both projects to be developed and tested together. Remove the

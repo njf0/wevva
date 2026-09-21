@@ -15,8 +15,10 @@ place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places
              -> PlaceSelected -> Wevva.action_refresh()
              -> WeatherController.fetch() -> weather + air quality -> WeatherUpdated
              -> WeatherScreen -> child widgets
-             -> background alerts + global canonical/nearby tropical context
+             -> background alerts
              -> WeatherAlertsUpdated
+
+t key -> TropicalSystemsScreen -> global canonical tropical systems + products
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -60,29 +62,21 @@ request air quality and warnings.
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
   sidebar shows an indeterminate bar while a provider request is pending and
   switches to measured progress once the provider returns its alert count.
-  Reusable country alerts and native point alerts start together. Once their
-  result is rendered, an uncached canonical tropical refresh continues in the
-  background and updates both the compact storm launcher and local alert tabs
-  only if the location is still current. Its sidebar progress is indeterminate
-  while global reports are fetched, then shows measured local matching
-  progress; tropical reports remain ordered before ordinary alerts.
+  Reusable country alerts and native point alerts start together. Tropical
+  retrieval is not part of this weather-location refresh path.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
-  `get_canonical_tropical_systems()` and keeps them in a separate thirty-minute,
-  session-only cache. Canonical groups remain identity wrappers: the dedicated
+  `get_canonical_tropical_systems()` only for the dedicated tropical workspace
+  and keeps them in a separate thirty-minute, session-only cache. Canonical
+  groups remain identity wrappers: the dedicated
   `TropicalSystemsScreen` shows each untouched source observation separately,
   and orders groups by the strongest declared source classification without
   merging meteorology. Supplementary `TropicalProduct` values are loaded lazily
   for the selected observation and cached by source, ID, and issue time. The
-  service flattens those same observations only when it calls
-  `match_tropical_systems_to_point()` afresh for every selected location using
-  the final Open-Meteo forecast coordinates and
+  service retains standalone nearby-system helpers for API callers. Those
+  flatten source observations and use `match_tropical_systems_to_point()` with
   a 250 km (roughly 155 miles) radius around either the current centre or the
   supplied forecast track; supplied polygons continue to match by containment.
-  It calculates local centre distances
-  and normalises matching reports by source/ID and storm name, preferring a
-  same-country issuer or otherwise the newest report. Tropical reports never
-  enter the ordinary country-warning candidate cache; an empty or failed raw
-  lookup simply contributes no tabs.
+  These helpers do not participate in the main TUI weather refresh.
 - `wevva/config.py` reads/writes `~/.config/wevva/config.json`, validates
   preferences, and normalizes saved/default location metadata.
 
@@ -103,9 +97,8 @@ global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
 The right sidebar contains an optional independently scrolling CAP detail
-reader and warning-area scope. The central alert tabs retain location-matched
-tropical entries and ordinary CAP alerts independently; the global canonical
-storm collection is presented only in the dedicated tropical workspace.
+reader and warning-area scope. The central alert tabs contain ordinary CAP
+alerts; tropical systems are presented only in the dedicated workspace.
 
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
 with `t`. Its severity-ordered, full-classification storm selector is followed

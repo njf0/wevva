@@ -16,12 +16,7 @@ from textual.containers import Container, VerticalScroll
 from textual.widgets import Static, Tab, Tabs
 from wevva.alerts import Alert
 from wevva.geography import short_location_name
-from wevva.messages import NearbyTropicalSystemSelected, WeatherAlertSelected
-from wevva.services.tropical import NearbyTropicalSystem
-from wevva.widgets.tropical_systems import (
-    build_tropical_system_text,
-    build_tropical_tab_label,
-)
+from wevva.messages import WeatherAlertSelected
 from wevva.widgets.warning_area import WarningAreaScope
 
 SEVERITY_THEME_KEYS: dict[str, str] = {
@@ -115,13 +110,10 @@ class WeatherAlertsPanel(Container):
         self,
         alerts: list[Alert],
         *,
-        tropical_systems: list[NearbyTropicalSystem] | None = None,
         id: str | None = None,
     ):
         super().__init__(id=id)
         self.alerts = alerts
-        self.tropical_systems = tropical_systems or []
-        self.items: list[NearbyTropicalSystem | Alert] = [*self.tropical_systems, *self.alerts]
         self.selected_index = 0
 
     def compose(self) -> ComposeResult:
@@ -141,8 +133,8 @@ class WeatherAlertsPanel(Container):
         self.update_selected_alert()
 
     def populate_tabs(self) -> None:
-        for index, item in enumerate(self.items):
-            self.tabs.add_tab(Tab(label=self.build_tab_label(item), id=f'alert-item-{index}'))
+        for index, alert in enumerate(self.alerts):
+            self.tabs.add_tab(Tab(label=self.build_tab_label(alert), id=f'alert-item-{index}'))
         self.tabs.active = 'alert-item-0'
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
@@ -152,17 +144,7 @@ class WeatherAlertsPanel(Container):
         self.update_selected_alert()
 
     def update_selected_alert(self) -> None:
-        item = self.items[self.selected_index]
-        if isinstance(item, NearbyTropicalSystem):
-            accent = self.app.theme_variables.get('text-accent')
-            self.border_title = self.panel_title()
-            self.border_subtitle = None
-            self.apply_frame_color(accent)
-            self.body.update(build_tropical_system_text(item, accent=accent))
-            self.post_message(NearbyTropicalSystemSelected(system=item))
-            return
-
-        alert = item
+        alert = self.alerts[self.selected_index]
         severity_color = alert_severity_color(self.app.theme_variables, alert)
         self.border_title = self.panel_title()
         self.border_subtitle = None
@@ -172,21 +154,11 @@ class WeatherAlertsPanel(Container):
         self.post_message(WeatherAlertSelected(alert=alert))
 
     def panel_title(self) -> str:
-        """Describe the combined panel without treating storms as warnings."""
-        titles = []
-        tropical_count = len(self.tropical_systems)
+        """Describe the weather-alert collection."""
         alert_count = len(self.alerts)
-        if tropical_count:
-            titles.append(f'{tropical_count} Tropical System Alert{"s" if tropical_count != 1 else ""}')
-        if alert_count:
-            titles.append(f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}')
-        return ' · '.join(titles)
+        return f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
 
-    def build_tab_label(self, item: NearbyTropicalSystem | Alert) -> Text:
-        if isinstance(item, NearbyTropicalSystem):
-            return build_tropical_tab_label(item, accent=self.app.theme_variables.get('text-accent'))
-
-        alert = item
+    def build_tab_label(self, alert: Alert) -> Text:
         severity = (alert.severity or '').strip()
         condition = self.condition_name(alert)
         if severity.lower() == 'unknown':
@@ -354,12 +326,6 @@ class WeatherAlertDetailsSidebar(Container):
             country_code=country_code,
             warning_color=color,
         )
-
-    def update_tropical_system(self, _nearby: NearbyTropicalSystem) -> None:
-        """Hide CAP-only details while a local tropical tab is selected."""
-        self.details.display = False
-        self.query_one(WarningAreaScope).clear()
-
 
 def alert_markdown(alert: Alert) -> str:
     """Return a conservatively de-wrapped text representation for compatibility."""

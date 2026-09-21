@@ -12,7 +12,6 @@ from textual.app import App, ComposeResult
 from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.weather_screen import WeatherScreen
-from wevva.services.tropical import NearbyTropicalSystem
 from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.warning_area import (
     WarningAreaPalette,
@@ -199,27 +198,6 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(details.parent, sidebar)
             self.assertIs(warning.parent, sidebar)
             self.assertEqual(list(sidebar.children), [details, warning])
-
-            system = TropicalSystem(
-                id='test-storm',
-                source='test-source',
-                classification='Tropical Storm',
-                name='TEST',
-                headline='Tropical Storm TEST',
-                center_lat=4.5,
-                center_lon=1.0,
-                geometries={
-                    'forecast_track': {
-                        'type': 'LineString',
-                        'coordinates': [[1.0, 4.5], [0.5, 5.0], [0.0, 5.5]],
-                    },
-                },
-                source_info=get_source('cphc_gis_central_pacific'),
-            )
-            sidebar.update_tropical_system(NearbyTropicalSystem(system, 150.0))
-            await pilot.pause()
-            self.assertFalse(warning.display)
-            self.assertFalse(details.display)
 
             sidebar.update_alert(_ghana_alert())
             await pilot.pause()

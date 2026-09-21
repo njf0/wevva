@@ -27,7 +27,6 @@ from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
     PlaceSelected,
     SavedLocationSelected,
-    TropicalSystemsProgress,
     WeatherAlertsProgress,
     WeatherAlertsUpdated,
     WeatherFetchFailed,
@@ -47,8 +46,6 @@ from wevva.services.alerts import (
 from wevva.services.tropical import (
     get_tropical_products_async,
     get_tropical_system_candidates_async,
-    nearby_tropical_systems_from_candidates,
-    sort_canonical_tropical_systems,
 )
 from wevva.geography import short_location_name
 from wevva.services.weather import fetch_current_weather, fetch_weather_summary
@@ -144,7 +141,6 @@ class Wevva(App, inherit_bindings=False):
         self._tropical_system_cache: TropicalCacheEntry | None = None
         self._tropical_system_cache_clock = time.monotonic
         self._tropical_system_fetch_task: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]] | None = None
-        self._tropical_context_task: asyncio.Task[None] | None = None
         self._tropical_product_cache: dict[TropicalProductCacheKey, tuple[TropicalProduct, ...]] = {}
         self._tropical_product_tasks: dict[
             TropicalProductCacheKey,
@@ -196,7 +192,6 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_generation += 1
         refresh_generation = self._refresh_generation
         self._cancel_alerts_task()
-        self._cancel_tropical_context_task()
         self._schedule_saved_weather_refresh()
         try:
             forecast_cache_key = self._forecast_cache_key()
@@ -210,13 +205,9 @@ class Wevva(App, inherit_bindings=False):
                 self._forecast_cache[forecast_cache_key] = self._forecast_cache_clock(), event
             # Forward fresh data to the weather screen
             self.weather_screen.post_message(event)
-            forecast_lat = event.metadata.latitude
-            forecast_lon = event.metadata.longitude
             self._schedule_alert_refresh(
                 refresh_generation,
                 force_refresh=force_alert_refresh,
-                tropical_lat=forecast_lat,
-                tropical_lon=forecast_lon,
             )
         except Exception as e:
             # Forward error to the weather screen to surface it
@@ -261,8 +252,8 @@ class Wevva(App, inherit_bindings=False):
         self.push_screen(HelpScreen())
 
     async def open_tropical_systems_screen(self) -> None:
-        """Open the dedicated global storm workspace from the shared cache."""
-        cached = self._tropical_system_cache
+        """Open the dedicated global storm workspace from its own cache."""
+        cached = self._cached_tropical_systems()
         systems = list(cached[1]) if cached is not None else []
         forecast = self.forecast_metadata
         latitude = getattr(forecast, 'latitude', None)
@@ -296,7 +287,7 @@ class Wevva(App, inherit_bindings=False):
 
     async def load_tropical_systems(self) -> list[CanonicalTropicalSystem]:
         """Return the shared canonical set for a screen opened before discovery."""
-        cached = self._tropical_system_cache
+        cached = self._cached_tropical_systems()
         if cached is not None:
             return list(cached[1])
         systems, completed = await asyncio.shield(self._get_tropical_system_fetch_task())
@@ -438,7 +429,6 @@ class Wevva(App, inherit_bindings=False):
         elif warning_language_changed and self.location.latitude is not None and self.location.longitude is not None:
             self._refresh_generation += 1
             self._cancel_alerts_task()
-            self._cancel_tropical_context_task()
             self._schedule_alert_refresh(self._refresh_generation)
 
         if temperature_unit_changed and (self.location.latitude is None or self.location.longitude is None):
@@ -621,34 +611,17 @@ class Wevva(App, inherit_bindings=False):
             self._alerts_task.cancel()
         self._alerts_task = None
 
-    def _cancel_tropical_context_task(self) -> None:
-        """Cancel stale local matching, not the shared canonical fetch."""
-        if self._tropical_context_task is not None and not self._tropical_context_task.done():
-            self._tropical_context_task.cancel()
-        self._tropical_context_task = None
-
     def _schedule_alert_refresh(
         self,
         refresh_generation: int,
         *,
         force_refresh: bool = False,
-        tropical_lat: float | None = None,
-        tropical_lon: float | None = None,
     ) -> None:
-        """Fetch ordinary alerts, then refresh nearby tropical context in the background."""
-        self._cancel_tropical_context_task()
-        if force_refresh:
-            self._tropical_product_cache.clear()
+        """Fetch ordinary alerts independently of the tropical workspace."""
         lat = self.location.latitude
         lon = self.location.longitude
         if lat is None or lon is None:
             return
-        if tropical_lat is None or tropical_lon is None:
-            forecast_lat = getattr(self.forecast_metadata, 'latitude', None)
-            forecast_lon = getattr(self.forecast_metadata, 'longitude', None)
-            if forecast_lat is not None and forecast_lon is not None:
-                tropical_lat = forecast_lat
-                tropical_lon = forecast_lon
         country_code = normalize_country_code(self.location.country_code)
         warning_language = 'en' if self.warning_language == 'en' else 'auto'
         cache_key = (country_code, warning_language)
@@ -658,19 +631,6 @@ class Wevva(App, inherit_bindings=False):
             if entry is not None and self._alert_cache_clock() - entry[0] >= self.ALERT_CACHE_TTL_SECONDS:
                 del self._alert_cache[cache_key]
                 entry = None
-        tropical_entry: TropicalCacheEntry | None = None
-        tropical_cache_expired = False
-        if tropical_lat is not None and tropical_lon is not None and not force_refresh:
-            tropical_entry = self._tropical_system_cache
-            if (
-                tropical_entry is not None
-                and self._tropical_system_cache_clock() - tropical_entry[0]
-                >= self.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
-            ):
-                self._tropical_system_cache = None
-                self._tropical_product_cache.clear()
-                tropical_entry = None
-                tropical_cache_expired = True
         self._alerts_task = asyncio.create_task(
             self._fetch_alerts_for_location(
                 lat=lat,
@@ -680,10 +640,6 @@ class Wevva(App, inherit_bindings=False):
                 cache_key=cache_key,
                 refresh_generation=refresh_generation,
                 cached_candidates=entry[1] if entry is not None else None,
-                tropical_lat=tropical_lat,
-                tropical_lon=tropical_lon,
-                cached_tropical_systems=tropical_entry[1] if tropical_entry is not None else None,
-                allow_late_tropical_cache=not force_refresh and not tropical_cache_expired,
             )
         )
 
@@ -697,12 +653,8 @@ class Wevva(App, inherit_bindings=False):
         cache_key: AlertCacheKey,
         refresh_generation: int,
         cached_candidates: tuple[Alert, ...] | None,
-        tropical_lat: float | None,
-        tropical_lon: float | None,
-        cached_tropical_systems: tuple[CanonicalTropicalSystem, ...] | None,
-        allow_late_tropical_cache: bool,
     ) -> None:
-        """Fetch ordinary alerts, then start tropical context in the background."""
+        """Fetch and publish ordinary weather alerts."""
         loop = asyncio.get_running_loop()
         provider_names: dict[str, str] = {}
         native_lookup = asyncio.create_task(
@@ -726,17 +678,6 @@ class Wevva(App, inherit_bindings=False):
                 self._post_alert_progress_if_current,
                 event,
                 payload,
-                lat,
-                lon,
-                refresh_generation,
-            )
-
-        def report_tropical_progress(event: str, payload: dict[str, object]) -> None:
-            """Transfer tropical matching progress safely to the TUI loop."""
-            loop.call_soon_threadsafe(
-                self._post_tropical_progress_if_current,
-                event,
-                dict(payload),
                 lat,
                 lon,
                 refresh_generation,
@@ -790,152 +731,10 @@ class Wevva(App, inherit_bindings=False):
             ):
                 return
 
-            if cached_tropical_systems is None and allow_late_tropical_cache:
-                refreshed_tropical_entry = self._tropical_system_cache
-                if (
-                    refreshed_tropical_entry is not None
-                    and self._tropical_system_cache_clock() - refreshed_tropical_entry[0]
-                    < self.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
-                ):
-                    cached_tropical_systems = refreshed_tropical_entry[1]
-
-            tropical_systems = []
-            canonical_tropical_systems = []
-            if cached_tropical_systems is not None and tropical_lat is not None and tropical_lon is not None:
-                canonical_tropical_systems = sort_canonical_tropical_systems(
-                    cached_tropical_systems,
-                    tropical_lat,
-                    tropical_lon,
-                )
-                tropical_systems = await asyncio.to_thread(
-                    nearby_tropical_systems_from_candidates,
-                    cached_tropical_systems,
-                    tropical_lat,
-                    tropical_lon,
-                    selected_country_code=country_code,
-                    progress=report_tropical_progress,
-                )
-            tropical_systems_pending = (
-                cached_tropical_systems is None and tropical_lat is not None and tropical_lon is not None
-            )
-            self.weather_screen.post_message(
-                WeatherAlertsUpdated(
-                    alerts=alerts,
-                    tropical_systems=tropical_systems,
-                    canonical_tropical_systems=canonical_tropical_systems,
-                    tropical_systems_pending=tropical_systems_pending,
-                    tropical_systems_loaded=cached_tropical_systems is not None,
-                )
-            )
-
-            if tropical_systems_pending:
-                self._post_tropical_progress_if_current(
-                    'tropical_fetch_started',
-                    {},
-                    lat,
-                    lon,
-                    refresh_generation,
-                )
-                tropical_lookup = self._get_tropical_system_fetch_task()
-                self._tropical_context_task = asyncio.create_task(
-                    self._publish_tropical_context_when_ready(
-                        tropical_lookup=tropical_lookup,
-                        alerts=alerts,
-                        lat=lat,
-                        lon=lon,
-                        tropical_lat=tropical_lat,
-                        tropical_lon=tropical_lon,
-                        country_code=country_code,
-                        refresh_generation=refresh_generation,
-                    )
-                )
+            self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
         finally:
             if not native_lookup.done():
                 native_lookup.cancel()
-
-    async def _publish_tropical_context_when_ready(
-        self,
-        *,
-        tropical_lookup: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]],
-        alerts: list[Alert],
-        lat: float,
-        lon: float,
-        tropical_lat: float,
-        tropical_lon: float,
-        country_code: str | None,
-        refresh_generation: int,
-    ) -> None:
-        """Publish global groups and nearby matches after one background fetch."""
-        loop = asyncio.get_running_loop()
-
-        def report_tropical_progress(event: str, payload: dict[str, object]) -> None:
-            """Transfer local matching progress safely from the worker thread."""
-            loop.call_soon_threadsafe(
-                self._post_tropical_progress_if_current,
-                event,
-                dict(payload),
-                lat,
-                lon,
-                refresh_generation,
-            )
-
-        try:
-            fetched_tropical_systems, completed = await asyncio.shield(tropical_lookup)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            self._post_tropical_progress_if_current(
-                'tropical_finished',
-                {},
-                lat,
-                lon,
-                refresh_generation,
-            )
-            return
-        if completed:
-            canonical_tropical_systems = fetched_tropical_systems
-            self._cache_tropical_systems(canonical_tropical_systems)
-        if not completed:
-            self._post_tropical_progress_if_current(
-                'tropical_finished',
-                {},
-                lat,
-                lon,
-                refresh_generation,
-            )
-            return
-        if (
-            refresh_generation != self._refresh_generation
-            or self.location.latitude != lat
-            or self.location.longitude != lon
-        ):
-            return
-        tropical_systems = await asyncio.to_thread(
-            nearby_tropical_systems_from_candidates,
-            canonical_tropical_systems,
-            tropical_lat,
-            tropical_lon,
-            selected_country_code=country_code,
-            progress=report_tropical_progress,
-        )
-        if (
-            refresh_generation != self._refresh_generation
-            or self.location.latitude != lat
-            or self.location.longitude != lon
-        ):
-            return
-        self.weather_screen.post_message(
-            WeatherAlertsUpdated(
-                alerts=alerts,
-                tropical_systems=tropical_systems,
-                canonical_tropical_systems=sort_canonical_tropical_systems(
-                    canonical_tropical_systems,
-                    tropical_lat,
-                    tropical_lon,
-                ),
-                tropical_systems_loaded=True,
-            )
-        )
 
     def _get_tropical_system_fetch_task(self) -> asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]:
         """Return the one in-flight global canonical fetch for this session."""
@@ -953,7 +752,7 @@ class Wevva(App, inherit_bindings=False):
         return task
 
     def _store_tropical_system_cache(self, task: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]) -> None:
-        """Cache a completed global fetch even if its original location changed."""
+        """Cache a completed tropical-workspace fetch."""
         if self._tropical_system_fetch_task is not task:
             return
         self._tropical_system_fetch_task = None
@@ -973,6 +772,17 @@ class Wevva(App, inherit_bindings=False):
             tuple(systems),
         )
 
+    def _cached_tropical_systems(self) -> TropicalCacheEntry | None:
+        """Return an unexpired workspace cache entry."""
+        cached = self._tropical_system_cache
+        if cached is None:
+            return None
+        if self._tropical_system_cache_clock() - cached[0] < self.TROPICAL_SYSTEM_CACHE_TTL_SECONDS:
+            return cached
+        self._tropical_system_cache = None
+        self._tropical_product_cache.clear()
+        return None
+
     def _post_alert_progress_if_current(
         self,
         event: str,
@@ -989,20 +799,3 @@ class Wevva(App, inherit_bindings=False):
         ):
             return
         self.weather_screen.post_message(WeatherAlertsProgress(event=event, payload=payload))
-
-    def _post_tropical_progress_if_current(
-        self,
-        event: str,
-        payload: dict[str, object],
-        lat: float,
-        lon: float,
-        refresh_generation: int,
-    ) -> None:
-        """Post tropical progress only when it still belongs to the active location."""
-        if (
-            refresh_generation != self._refresh_generation
-            or self.location.latitude != lat
-            or self.location.longitude != lon
-        ):
-            return
-        self.weather_screen.post_message(TropicalSystemsProgress(event=event, payload=payload))
