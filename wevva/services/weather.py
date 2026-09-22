@@ -1,5 +1,7 @@
 """Asynchronous weather service that fetches weather data for given coordinates."""
 
+from collections.abc import Sequence
+
 from wevva.openmeteo import OpenMeteoForecast
 
 
@@ -40,6 +42,18 @@ async def fetch_weather_summary(
     return await OpenMeteoForecast.fetch_current_summary(
         lat=lat,
         lon=lon,
+        temperature_unit=temperature_unit,
+    )
+
+
+async def fetch_city_temperatures(
+    coordinates: Sequence[tuple[float, float]],
+    *,
+    temperature_unit: str = 'celsius',
+) -> dict[tuple[float, float], float]:
+    """Fetch only current temperature for each labelled map city."""
+    return await OpenMeteoForecast.fetch_current_temperatures(
+        coordinates,
         temperature_unit=temperature_unit,
     )
 

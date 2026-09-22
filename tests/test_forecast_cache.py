@@ -160,5 +160,59 @@ class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class CityTemperatureRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_request_batches_coordinates_and_asks_only_for_temperature(self) -> None:
+        response = Mock()
+        response.json.return_value = [
+            {'current': {'temperature_2m': 16.4}},
+            {'current': {'temperature_2m': 18.8}},
+        ]
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        client.get.return_value = response
+        coordinates = ((52.5238, 13.3996), (50.0997, 8.6750))
+
+        with patch('wevva.openmeteo.httpx.AsyncClient', return_value=client):
+            result = await OpenMeteoForecast.fetch_current_temperatures(
+                coordinates,
+                temperature_unit='fahrenheit',
+            )
+
+        self.assertEqual(
+            result,
+            {
+                coordinates[0]: 16.4,
+                coordinates[1]: 18.8,
+            },
+        )
+        _url, = client.get.await_args.args
+        params = client.get.await_args.kwargs['params']
+        self.assertEqual(params['latitude'], '52.5238,50.0997')
+        self.assertEqual(params['longitude'], '13.3996,8.675')
+        self.assertEqual(params['current'], 'temperature_2m')
+        self.assertNotIn('hourly', params)
+        self.assertNotIn('daily', params)
+        self.assertEqual(params['temperature_unit'], 'fahrenheit')
+        response.raise_for_status.assert_called_once_with()
+
+    async def test_application_forwards_captured_unit_for_city_temperatures(self) -> None:
+        app = Wevva(temperature_unit='fahrenheit')
+        loader = AsyncMock(return_value={})
+        coordinates = ((52.5238, 13.3996),)
+
+        with patch('wevva.app.fetch_city_temperatures', new=loader):
+            result = await app.load_location_map_temperatures(
+                coordinates,
+                'fahrenheit',
+            )
+
+        self.assertEqual(result, {})
+        loader.assert_awaited_once_with(
+            coordinates,
+            temperature_unit='fahrenheit',
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -61,6 +61,7 @@ class GeographicFrame:
         occupied: set[tuple[int, int]],
         *,
         gap: int = 0,
+        gap_style: str | None = None,
     ) -> bool:
         if not label:
             return False
@@ -93,7 +94,7 @@ class GeographicFrame:
                 continue
             for spacer_column, spacer_row in spacer_cells:
                 self.characters[spacer_row][spacer_column] = ' '
-                self.styles[spacer_row][spacer_column] = None
+                self.styles[spacer_row][spacer_column] = gap_style
             for offset, character in enumerate(label):
                 self.characters[label_row][start + offset] = character
                 self.styles[label_row][start + offset] = style

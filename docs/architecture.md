@@ -96,6 +96,16 @@ country-code lookup, and small display helpers. `wevva/wevva.tcss` supplies
 global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
+The main weather stack includes a country-scale location map immediately below
+current conditions. It uses the same Natural Earth map-unit, populated-place,
+local projection, Braille raster, and collision-fitted label path as the other
+geographic scopes. The selected location chooses a useful local component
+cluster of its country: for example, Hawaii is shown without continental US.
+Ranked cities are restricted to that selected land and the forecast location is
+drawn and labelled in a distinct semantic colour. Up to eight ranked cities
+receive current temperatures from one lightweight, non-blocking multi-location
+Open-Meteo request; failed or stale enrichment leaves the base map intact.
+
 The right sidebar contains an optional independently scrolling CAP detail
 reader and warning-area scope. The central alert tabs contain ordinary CAP
 alerts; tropical systems are presented only in the dedicated workspace.

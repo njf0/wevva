@@ -5,6 +5,7 @@ current, hourly, and daily views.
 """
 
 from datetime import datetime
+from collections.abc import Sequence
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -15,6 +16,7 @@ from wevva.constants import (
     DEFAULT_PRECIPITATION_UNIT,
     DEFAULT_TEMPERATURE_UNIT,
     DEFAULT_WIND_SPEED_UNIT,
+    REQUEST_TIMEOUT_S,
     VALID_PRECIPITATION_UNITS,
     VALID_TEMPERATURE_UNITS,
     VALID_WIND_SPEED_UNITS,
@@ -201,6 +203,44 @@ class OpenMeteoForecast:
             response = await client.get(cls.BASE_URL, params=params)
             response.raise_for_status()
             return response.json()
+
+    @classmethod
+    async def fetch_current_temperatures(
+        cls,
+        coordinates: Sequence[tuple[float, float]],
+        temperature_unit: str = 'celsius',
+    ) -> dict[tuple[float, float], float]:
+        """Fetch only current temperatures for several coordinate pairs."""
+        points = tuple(coordinates)
+        if not points:
+            return {}
+        temperature_unit = (
+            temperature_unit if temperature_unit in VALID_TEMPERATURE_UNITS else DEFAULT_TEMPERATURE_UNIT
+        )
+        params: dict[str, Any] = {
+            'latitude': ','.join(str(latitude) for latitude, _longitude in points),
+            'longitude': ','.join(str(longitude) for _latitude, longitude in points),
+            'current': 'temperature_2m',
+        }
+        if temperature_unit != DEFAULT_TEMPERATURE_UNIT:
+            params['temperature_unit'] = temperature_unit
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+            response = await client.get(cls.BASE_URL, params=params)
+            response.raise_for_status()
+            payload = response.json()
+
+        forecasts = payload if isinstance(payload, list) else [payload]
+        temperatures = {}
+        for point, forecast in zip(points, forecasts):
+            if not isinstance(forecast, dict):
+                continue
+            current = forecast.get('current')
+            if not isinstance(current, dict):
+                continue
+            temperature = current.get('temperature_2m')
+            if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
+                temperatures[point] = float(temperature)
+        return temperatures
 
     @classmethod
     async def fetch_current_conditions(

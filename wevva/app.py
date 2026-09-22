@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from collections.abc import Sequence
 from http import HTTPStatus
 from typing import ClassVar
 
@@ -48,7 +49,11 @@ from wevva.services.tropical import (
     get_tropical_system_candidates_async,
 )
 from wevva.geography import short_location_name
-from wevva.services.weather import fetch_current_weather, fetch_weather_summary
+from wevva.services.weather import (
+    fetch_city_temperatures,
+    fetch_current_weather,
+    fetch_weather_summary,
+)
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
@@ -157,7 +162,9 @@ class Wevva(App, inherit_bindings=False):
         self.precipitation_unit = precipitation_unit
         self.saved_locations = sorted(saved_locations or [], key=lambda item: location_label(item).casefold())
         # Initialize main weather screen once
-        self.weather_screen = WeatherScreen()
+        self.weather_screen = WeatherScreen(
+            city_temperature_loader=self.load_location_map_temperatures,
+        )
         # Theme selection from CLI (validated by Textual during assignment)
         if theme_name is not None:
             self.theme = theme_name
@@ -283,6 +290,17 @@ class Wevva(App, inherit_bindings=False):
             temperature_unit=self.temperature_unit,
             wind_speed_unit=self.wind_speed_unit,
             precipitation_unit=self.precipitation_unit,
+        )
+
+    async def load_location_map_temperatures(
+        self,
+        coordinates: Sequence[tuple[float, float]],
+        temperature_unit: str,
+    ) -> dict[tuple[float, float], float]:
+        """Fetch lightweight current readings for ranked location-map cities."""
+        return await fetch_city_temperatures(
+            coordinates,
+            temperature_unit=temperature_unit,
         )
 
     async def load_tropical_systems(self) -> list[CanonicalTropicalSystem]:

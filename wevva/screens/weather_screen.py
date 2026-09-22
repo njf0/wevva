@@ -6,6 +6,8 @@ the main UI self-contained as a `Screen` so the `App` can focus
 on orchestration (search/help, data refresh, and screen routing).
 """
 
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from typing import ClassVar
 
 from textual.app import ComposeResult
@@ -32,6 +34,7 @@ from wevva.widgets.context_bar import ContextBar
 from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
+from wevva.widgets.location_map import LocationMap
 from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar, WeatherAlertsPanel
 from wevva.widgets.weather_summary import WeatherSummary
@@ -49,6 +52,11 @@ ALERT_SEVERITY_RANK = {
     'yellow': 3,
     'green': 2,
 }
+
+CityTemperatureLoader = Callable[
+    [Sequence[tuple[float, float]], str],
+    Awaitable[dict[tuple[float, float], float]],
+]
 
 
 def alert_sort_key(alert: Alert) -> tuple[int, str, str]:
@@ -87,8 +95,16 @@ class WeatherScreen(Screen[None]):
     LOCATIONS_SIDEBAR_MIN_WIDTH = 144
     ALERT_DETAILS_SIDEBAR_MIN_WIDTH = 186
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        city_temperature_loader: CityTemperatureLoader | None = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
+        self._city_temperature_loader = city_temperature_loader
+        self._location_map_task: asyncio.Task[None] | None = None
+        self._location_map_generation = 0
         self._time_refresh_timer = None  # Track the 1-second update timer
         self._locations_sidebar_requested = False
         self._alert_details_sidebar_requested = False
@@ -232,6 +248,10 @@ class WeatherScreen(Screen[None]):
             self.current_weather = CurrentConditions(classes='current-weather')
             yield self.current_weather
 
+            # Country-scale context for the selected forecast location.
+            self.location_map = LocationMap()
+            yield self.location_map
+
             # Next 24 hours table (owns HourlyForecast)
             self.next_24_hours = Container(id='next-24-hours-table')
             with self.next_24_hours:
@@ -267,6 +287,11 @@ class WeatherScreen(Screen[None]):
             self._alert_details_sidebar_requested,
         ) = self._sidebar_defaults_for_width(self.size.width)
         self.update_saved_locations_sidebar()
+
+    def on_unmount(self) -> None:
+        if self._location_map_task is not None:
+            self._location_map_task.cancel()
+            self._location_map_task = None
 
     @classmethod
     def _sidebar_defaults_for_width(cls, width: int) -> tuple[bool, bool]:
@@ -436,6 +461,7 @@ class WeatherScreen(Screen[None]):
         # Explicitly post message to child widgets (messages don't auto-bubble to all descendants)
         self.context_bar.post_message(event)
         self.current_weather.post_message(event)
+        self._refresh_location_map(event.current)
         self.hourly_forecast.post_message(event)
         self.weather_summary.post_message(event)
 
@@ -455,6 +481,57 @@ class WeatherScreen(Screen[None]):
         # Start time refresh timer after data arrives (updates every second)
         if self._time_refresh_timer is None:
             self._time_refresh_timer = self.set_interval(1, self._refresh_time_display)
+
+    def _refresh_location_map(self, current: object | None = None) -> None:
+        """Render country context now and enrich city temperatures in the background."""
+        self._location_map_generation += 1
+        generation = self._location_map_generation
+        if self._location_map_task is not None and not self._location_map_task.done():
+            self._location_map_task.cancel()
+        current_temperature = None
+        get_temperature = getattr(current, 'get_temperature', None)
+        if callable(get_temperature):
+            current_temperature = get_temperature()
+        temperature_unit = getattr(self.app, 'temperature_unit', 'celsius')
+        self.location_map.update_location(
+            getattr(self.app, 'location', None),
+            current_temperature=current_temperature,
+            temperature_unit=temperature_unit,
+        )
+        coordinates = self.location_map.city_coordinates
+        if self._city_temperature_loader is None or not coordinates:
+            self._location_map_task = None
+            return
+        self._location_map_task = asyncio.create_task(
+            self._load_location_map_temperatures(
+                coordinates,
+                generation,
+                temperature_unit,
+            )
+        )
+
+    async def _load_location_map_temperatures(
+        self,
+        coordinates: Sequence[tuple[float, float]],
+        generation: int,
+        temperature_unit: str,
+    ) -> None:
+        """Apply city readings only to the location generation that requested them."""
+        try:
+            temperatures = await self._city_temperature_loader(
+                coordinates,
+                temperature_unit,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        if generation != self._location_map_generation or not self.location_map.is_attached:
+            return
+        self.location_map.update_temperatures(
+            temperatures,
+            temperature_unit=temperature_unit,
+        )
 
     async def on_weather_alerts_updated(self, event: WeatherAlertsUpdated) -> None:
         """Render the weather-alert tab panel."""
