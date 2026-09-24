@@ -11,6 +11,7 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.reactive import reactive
 
+from wevva.layout import CurrentDensity, DetailRow
 from wevva.messages import HourHighlighted, WeatherUpdated
 from wevva.utils import temp_colour, wind_colour
 from wevva.widgets.current_detail import CurrentDetailTable
@@ -27,10 +28,13 @@ class CurrentConditions(Container):
 
     DEFAULT_CSS = """
     CurrentConditions {
-        layout: horizontal;
-        align-horizontal: center;
-        margin-bottom: 1;
-        height: auto;
+        layout: grid;
+        grid-size: 4 1;
+        grid-columns: 1fr 1fr 1fr 1fr;
+        grid-gutter: 0 2;
+        width: 98;
+        max-width: 100%;
+        height: 7;
         hatch: right $background-lighten-1;
     }
     """
@@ -63,6 +67,21 @@ class CurrentConditions(Container):
         """Trigger initial display after mounting."""
         if self.hourly_model is not None:
             self._update_display()
+
+    def set_layout(
+        self,
+        density: CurrentDensity,
+        height: int,
+        detail_rows: tuple[DetailRow, ...],
+        full_detail_labels: bool,
+    ) -> None:
+        """Apply one shared density to the four existing instruments."""
+
+        self.styles.height = height
+        self.temp.set_layout(density, height)
+        self.precip.set_layout(density, height)
+        self.wind.set_layout(density, height)
+        self.detail.set_layout(detail_rows, height, full_detail_labels)
 
     def watch_hourly_model(self, model: Any | None) -> None:
         """React to hourly model changes."""
@@ -119,7 +138,7 @@ class CurrentConditions(Container):
 
         self.temp.set(
             t,
-            f'[i]Feels like [{feels_colour}]{feels}{t_unit}[/]',
+            f'[i]Feels [{feels_colour}]{feels}{t_unit}[/]',
             colour=colour,
             units=t_unit,
         )
@@ -140,7 +159,7 @@ class CurrentConditions(Container):
 
         self.wind.set(
             ws,
-            f'[i]Gusts of [{g_colour}]{gust}{ws_unit}[/]',
+            f'[i]Gusts [{g_colour}]{gust}{ws_unit}[/]',
             colour=s_colour,
             units=f'{ws_unit} {wdir}',
         )

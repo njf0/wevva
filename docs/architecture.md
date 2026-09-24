@@ -89,6 +89,10 @@ the TUI controller, although both paths independently merge air quality.
 
 ## Presentation
 
+The responsive layout language is documented in `docs/responsive-layout.md`,
+with its remaining implementation staged in
+`docs/tasks/0015-responsive-layout-redesign.md`.
+
 `wevva/screens/weather_screen.py` composes the weather screen and owns
 screen-level widget routing. Focused presentation logic is in
 `wevva/widgets/`; `wevva/utils/` contains condition formatting, colour scales,
@@ -96,9 +100,41 @@ country-code lookup, and small display helpers. `wevva/wevva.tcss` supplies
 global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
-The main weather stack includes a country-scale location map immediately below
-current conditions. It uses the same Natural Earth map-unit, populated-place,
-local projection, Braille raster, and collision-fitted label path as the other
+`wevva/layout.py` is the pure allocator for the responsive weather screen.
+Given the content viewport, warning presence, and requested auxiliary surfaces,
+it returns current-condition density and height, visible detail/hourly rows,
+daily columns and row count, context-block eligibility, and modal/sidebar
+presentation. Its constants explicitly include borders, tabs, padding, and
+gutters. `WeatherScreen` applies one result to stable widget instances after
+weather updates, warning changes, sidebar changes, and terminal resizes.
+
+The main panel retains `1 2` padding, centres the complete visible forecast
+stack vertically, and does not scroll vertically. Summary,
+warning, current-condition, and hourly frames share a centred 98-cell maximum.
+Current condition instruments switch between mounted `Digits`, two-line static
+values, and a smallest primary-value-only line; the detail table exposes only
+complete prioritized rows. Once 102 usable columns are available, its label
+field grows from six to eleven cells and restores full labels such as
+`Humidity`, `Visibility`, and `Cloud Cover`. Hourly day tabs retain up to 24 columns in a horizontally
+scrollable `DataTable` while complete value/graph rows follow the height budget.
+Narrow tables expose an explicit position thumb and keyboard hint; once all
+hours fit, their compact four-cell columns remain fixed inside a centred
+98-cell frame. Daily forecast rows and field groups are also complete budget
+units, and the centred frame contracts to the active columns. Rain probability
+and wind release their combined-value space when amount and gust gain dedicated
+columns. Rain amount is ordered immediately after rain probability and before
+wind. At 102 or more usable columns the daily forecast restores its original
+96-cell table: full weekday and condition names, dedicated rain amount and
+wind-direction fields, and gusts combined into the wind field. Its 98-cell
+bordered frame then shares the other forecast widgets' maximum width. The table
+appears only when at least two rows fit. At 80x24 the titled weather summary,
+an active bordered warning, a hatch row after each summary, the smallest
+one-line four-instrument row, and hourly condition/temperature/time fit in the
+22 rows between the header and footer. Rain is added before wind as rows become
+available; current conditions grow only after both value rows fit.
+
+The country map uses the same Natural Earth map-unit, populated-place, local
+projection, Braille raster, and collision-fitted label path as the other
 geographic scopes. The selected location chooses a useful local component
 cluster of its country: for example, Hawaii is shown without continental US.
 Ranked cities are restricted to that selected land and the forecast location is
@@ -106,9 +142,14 @@ drawn and labelled in a distinct semantic colour. Up to eight ranked cities
 receive current temperatures from one lightweight, non-blocking multi-location
 Open-Meteo request; failed or stale enrichment leaves the base map intact.
 
-The right sidebar contains an optional independently scrolling CAP detail
-reader and warning-area scope. The central alert tabs contain ordinary CAP
-alerts; tropical systems are presented only in the dedicated workspace.
+Weather-warning presence is a bordered focusable summary card. Mouse activation,
+Enter, or Space opens a modal containing the established alert tabs and an
+independently scrolling provider document. The existing optional right sidebar
+continues to contain a CAP detail reader and warning-area scope; making it and
+saved locations modal-first is a later task slice. The legacy map/context
+blocks are withheld from the primary stack until the atomic context matrix is
+implemented, so they cannot reintroduce page scrolling. Tropical systems are
+presented only in the dedicated workspace.
 
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
 with `t`. Its severity-ordered, full-classification storm selector is followed

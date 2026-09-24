@@ -75,9 +75,9 @@ You can launch it directly with `uvx wevva`.
 
 ## Alerts
 
-- Current and upcoming weather alerts are shown on the main weather screen when present.
+- Current and upcoming weather alerts appear as a one-line summary on the main weather screen.
 - Alerts load separately from the main forecast, so slower warning providers do not hold up the rest of the UI.
-- Selecting an alert tab shows the full provider text in the details sidebar.
+- Activate the summary with the mouse, Enter, or Space to open the tabbed warning reader; its provider document scrolls independently.
 - Where a provider includes an official warning URL, `wevva` shows a direct link on the alert panel.
 - Warning maps use full Braille cells for filled interiors and partial Braille cells along geographic edges.
 - The Tropical Systems screen keeps global storm investigation separate from location-specific alerts and loads official issuing-centre products only when selected.

@@ -13,6 +13,8 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
+from textual.events import Click, Key
+from textual.screen import ModalScreen
 from textual.widgets import Static, Tab, Tabs
 from wevva.alerts import Alert
 from wevva.geography import short_location_name
@@ -47,6 +49,23 @@ ALERT_PREFIX_WORDS = {
     'yellow',
     'green',
 }
+
+
+def alert_condition_name(alert: Alert) -> str:
+    """Return a concise provider-neutral event name."""
+
+    words = (alert.event or alert.headline or 'Weather Alert').replace('_', ' ').split()
+    while words and words[0].lower().rstrip(':') in ALERT_PREFIX_WORDS:
+        words.pop(0)
+
+    condition = ' '.join(words).strip()
+    if condition.lower().endswith(' warning'):
+        condition = condition[:-8].strip()
+    if not condition:
+        return 'Weather Alert'
+    if condition.islower():
+        return condition.title()
+    return condition
 
 
 def interpolated_hex(first: str | None, second: str | None) -> str | None:
@@ -197,18 +216,7 @@ class WeatherAlertsPanel(Container):
         return line
 
     def condition_name(self, alert: Alert) -> str:
-        words = (alert.event or alert.headline or 'Weather Alert').replace('_', ' ').split()
-        while words and words[0].lower().rstrip(':') in ALERT_PREFIX_WORDS:
-            words.pop(0)
-
-        condition = ' '.join(words).strip()
-        if condition.lower().endswith(' warning'):
-            condition = condition[:-8].strip()
-        if not condition:
-            return 'Weather Alert'
-        if condition.islower():
-            return condition.title()
-        return condition
+        return alert_condition_name(alert)
 
     def to_local_time(self, value: datetime | None) -> datetime | None:
         if value is None:
@@ -258,6 +266,127 @@ class WeatherAlertDetailsPanel(VerticalScroll):
     @property
     def content(self) -> Static:
         return self.query_one('#weather-alert-details', Static)
+
+
+class WeatherAlertsModal(ModalScreen[None]):
+    """Tabbed alert reader whose provider document scrolls independently."""
+
+    BINDINGS = [('escape', 'dismiss', 'Close')]
+
+    DEFAULT_CSS = """
+    WeatherAlertsModal {
+        align: center middle;
+        background: $background 65%;
+    }
+
+    #weather-alert-modal {
+        layout: vertical;
+        width: 92%;
+        max-width: 112;
+        height: 88%;
+        min-height: 12;
+        padding: 1 2;
+        border: thick $primary;
+        background: $background;
+    }
+
+    #weather-alert-modal WeatherAlertsPanel {
+        width: 100%;
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self, alerts: list[Alert]) -> None:
+        super().__init__()
+        self.alerts = list(alerts)
+
+    def compose(self) -> ComposeResult:
+        with Container(id='weather-alert-modal') as dialog:
+            dialog.border_title = 'Weather Warnings'
+            yield WeatherAlertsPanel(self.alerts, id='weather-alert-modal-tabs')
+            yield WeatherAlertDetailsPanel(id='weather-alert-modal-details')
+
+    def on_mount(self) -> None:
+        if self.alerts:
+            self._show_alert(self.alerts[0])
+
+    def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
+        event.stop()
+        self._show_alert(event.alert)
+
+    def _show_alert(self, alert: Alert) -> None:
+        details = self.query_one('#weather-alert-modal-details', WeatherAlertDetailsPanel)
+        colour = alert_severity_color(self.app.theme_variables, alert)
+        if colour:
+            details.set_styles(
+                f'border: round {colour}; border-title-color: {colour};'
+            )
+        details.content.update(alert_renderable(alert))
+
+
+class WeatherAlertSummary(Static):
+    """Bordered warning presence control for the primary weather layout."""
+
+    can_focus = True
+
+    DEFAULT_CSS = """
+    WeatherAlertSummary {
+        width: 100%;
+        height: 3;
+        min-width: 0;
+        padding: 0 1;
+        border: round $warning;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    WeatherAlertSummary:focus {
+        background: $boost;
+        text-style: underline;
+    }
+    """
+
+    def __init__(self, alerts: list[Alert]) -> None:
+        super().__init__('')
+        self.alerts = list(alerts)
+
+    def on_mount(self) -> None:
+        colour = alert_severity_color(self.app.theme_variables, self.alerts[0])
+        if colour:
+            self.set_styles(
+                f'border: round {colour}; border-title-color: {colour};'
+            )
+        self.update(self._label())
+        self.tooltip = 'Open weather warning details'
+
+    def _label(self) -> Text:
+        alert = self.alerts[0]
+        severity = (alert.severity or '').strip().title()
+        condition = alert_condition_name(alert)
+        event = (alert.event or '').strip().lower()
+        warning_suffix = ' Warning' if event.endswith(' warning') else ''
+        colour = alert_severity_color(self.app.theme_variables, alert)
+        label = Text()
+        if severity and severity.lower() != 'unknown':
+            label.append(severity, style=f'bold {colour}' if colour else 'bold')
+            label.append(' ')
+        label.append(f'{condition}{warning_suffix}', style='bold')
+        remaining = len(self.alerts) - 1
+        if remaining:
+            label.append(f' · +{remaining} more', style='dim')
+        return label
+
+    def on_click(self, event: Click) -> None:
+        event.stop()
+        self._open()
+
+    def on_key(self, event: Key) -> None:
+        if event.key in {'enter', 'space'}:
+            event.stop()
+            self._open()
+
+    def _open(self) -> None:
+        self.app.push_screen(WeatherAlertsModal(self.alerts))
 
 
 class WeatherAlertDetailsSidebar(Container):

@@ -70,7 +70,12 @@ class PrecipWidget(WeatherWidget):
 
         # Build lower text showing dominant type and amount
         lower = f'[i][{colour_hex}]{amount}{precip_unit}/hr[/] {label}[/]'
-        self.set(prob, lower_text=lower, colour=prob_colour, units='%')
+        self.set(
+            prob,
+            lower_text=lower,
+            colour=prob_colour,
+            units='%',
+        )
         self.refresh()
 
     def _get_dominant_precip_type(self, theme_vars: dict) -> tuple[str, float, str]:

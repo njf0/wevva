@@ -12,7 +12,6 @@ from textual.app import App, ComposeResult
 from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.weather_screen import WeatherScreen
-from wevva.widgets.saved_locations import SavedLocationsSidebar
 from wevva.widgets.warning_area import (
     WarningAreaPalette,
     WarningAreaScope,
@@ -22,6 +21,8 @@ from wevva.widgets.warning_area import (
 from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsPanel,
     WeatherAlertDetailsSidebar,
+    WeatherAlertSummary,
+    WeatherAlertsModal,
     WeatherAlertsPanel,
 )
 from wevva_warnings import TropicalSystem
@@ -317,7 +318,7 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(warning.content_size.height, 20)
             self.assertEqual(warning.region.height, 22)
 
-    async def test_switching_alert_tabs_updates_the_same_warning_scope(self) -> None:
+    async def test_switching_modal_alert_tabs_updates_scrolling_details(self) -> None:
         app = _WarningWeatherApp()
         first = _ghana_alert('first-tab')
         second = _ghana_alert(
@@ -340,18 +341,20 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             assert isinstance(screen, WeatherScreen)
             await screen.render_alert_panel([first, second])
             await pilot.pause()
-            warning = screen.query_one(WarningAreaScope)
-            progress = screen.query_one(SavedLocationsSidebar).warning_progress
-            panel = screen.query_one(WeatherAlertsPanel)
-            first_geometry = warning._scope.warning if warning._scope else None
+            summary = screen.query_one(WeatherAlertSummary)
+            summary.focus()
+            await pilot.press('enter')
+            await pilot.pause()
+            self.assertIsInstance(app.screen, WeatherAlertsModal)
+            panel = app.screen.query_one(WeatherAlertsPanel)
 
             panel.tabs.active = 'alert-item-1'
             await pilot.pause()
 
-            self.assertTrue(warning.display)
-            self.assertEqual(warning.styles.margin, progress.styles.margin)
-            self.assertNotEqual(warning._scope.warning if warning._scope else None, first_geometry)
-            self.assertIn('second-tab heavy rain warning', self._details_text(screen.alert_details_sidebar))
+            details = app.screen.query_one(WeatherAlertDetailsPanel)
+            console = Console(width=80, file=StringIO(), record=True)
+            console.print(getattr(details.content, '_Static__content'))
+            self.assertIn('second-tab heavy rain warning', console.export_text())
 
 
 if __name__ == '__main__':

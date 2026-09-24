@@ -12,6 +12,45 @@ from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import DataTable
 
+from wevva.layout import DetailRow
+
+
+_DETAIL_FIELDS = {
+    DetailRow.HUMIDITY: (
+        'Humid.',
+        'Humidity',
+        'get_humidity',
+        'text-secondary',
+        'relative_humidity_2m',
+        None,
+    ),
+    DetailRow.VISIBILITY: (
+        'Visib.',
+        'Visibility',
+        'get_visibility',
+        'text-warning',
+        None,
+        'km',
+    ),
+    DetailRow.PRESSURE: (
+        'Press.',
+        'Pressure',
+        'get_surface_pressure',
+        'text-error',
+        'surface_pressure',
+        None,
+    ),
+    DetailRow.UV_INDEX: ('UV', 'UV Index', 'get_uv_index', 'text-accent', 'uv_index', None),
+    DetailRow.CLOUD_COVER: (
+        'Cloud',
+        'Cloud Cover',
+        'get_cloud_cover',
+        'text-primary',
+        'cloud_cover',
+        None,
+    ),
+}
+
 
 class CurrentDetailTable(DataTable):
     """DataTable showing current condition details for a specific hour."""
@@ -22,12 +61,13 @@ class CurrentDetailTable(DataTable):
 
     DEFAULT_CSS = """
     CurrentDetailTable {
-        height: auto;
-        width: 22;
+        height: 7;
+        width: 1fr;
+        min-width: 0;
         border: round $primary;
         border-title-color: $primary;
         border-title-align: left;
-        # margin: 0 2 0 0;
+        scrollbar-size-horizontal: 0;
     }
     """
 
@@ -39,17 +79,50 @@ class CurrentDetailTable(DataTable):
     ):
         super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
         self.border_title = 'Detail'
-        self.add_column('Field', key='field')
-        self.add_column('Value', key='value', width=7)
-        self.add_row(Text('Humidity', style='dim'), Text('', style='bold'), key='humidity')
-        self.add_row(Text('Cloud Cov.', style='dim'), Text('', style='bold'), key='cloud_cover')
-        self.add_row(
-            Text('Visibility', style='dim'),
-            Text('', style='bold'),
-            key='visibility',
+        self._visible_rows = tuple(DetailRow)
+        self._full_labels = False
+        self._build_rows()
+
+    def _build_rows(self) -> None:
+        """Build only the complete rows selected by the layout budget."""
+
+        self.clear(columns=True)
+        self.add_column(
+            'Field',
+            key='field',
+            width=11 if self._full_labels else 6,
         )
-        self.add_row(Text('UV Index', style='dim'), Text('', style='bold'), key='uv_index')
-        self.add_row(Text('Pressure', style='dim'), Text('', style='bold'), key='pressure')
+        self.add_column('Value', key='value', width=6)
+        for row in self._visible_rows:
+            compact_label, full_label, *_ = _DETAIL_FIELDS[row]
+            label = full_label if self._full_labels else compact_label
+            self.add_row(
+                Text(label, style='dim'),
+                Text('', style='bold'),
+                key=row.value,
+            )
+
+    def set_layout(
+        self,
+        rows: tuple[DetailRow, ...],
+        height: int,
+        full_labels: bool,
+    ) -> None:
+        """Select complete detail rows and an exact bordered height."""
+
+        rows = tuple(rows)
+        full_labels = bool(full_labels)
+        changed = (
+            rows != self._visible_rows
+            or full_labels != self._full_labels
+        )
+        self._visible_rows = rows
+        self._full_labels = full_labels
+        self.styles.height = height
+        if changed:
+            self._build_rows()
+            if self.hourly_model is not None and self.is_mounted:
+                self._update_display()
 
     def on_mount(
         self,
@@ -80,17 +153,22 @@ class CurrentDetailTable(DataTable):
         """Populate rows from the hourly model for the given hour."""
         theme_vars = self.app.theme_variables
 
-        # Field configuration: (row_key, getter_method_name, theme_color_key, unit_key, display_unit)
-        fields = [
-            ('cloud_cover', 'get_cloud_cover', 'text-primary', 'cloud_cover', None),
-            ('humidity', 'get_humidity', 'text-secondary', 'relative_humidity_2m', None),
-            ('visibility', 'get_visibility', 'text-warning', None, 'km'),
-            ('uv_index', 'get_uv_index', 'text-accent', 'uv_index', None),
-            ('pressure', 'get_surface_pressure', 'text-error', 'surface_pressure', None),
-        ]
-
-        for row_key, getter_name, color_key, unit_key, display_unit in fields:
-            self._update_detail_cell(row_key, getter_name, theme_vars.get(color_key), unit_key, display_unit)
+        for row in self._visible_rows:
+            (
+                _,
+                _,
+                getter_name,
+                color_key,
+                unit_key,
+                display_unit,
+            ) = _DETAIL_FIELDS[row]
+            self._update_detail_cell(
+                row.value,
+                getter_name,
+                theme_vars.get(color_key),
+                unit_key,
+                display_unit,
+            )
 
         self.refresh()
 

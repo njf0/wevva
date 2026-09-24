@@ -32,34 +32,41 @@ class WeatherSummary(Container):
     DEFAULT_CSS = """
     WeatherSummary {
         layout: horizontal;
-        height: auto;
-        max-width: 100;
-        align-horizontal: center;
-        align-vertical: middle;
-        content-align: center middle;
+        height: 3;
+        width: 100%;
+        max-width: 98;
+        min-width: 0;
+        padding: 0 1;
         border: round $primary;
         border-title-color: $primary;
-        border-title-align: center;
-        # hatch: right $background-lighten-1;
+        align-horizontal: left;
+        align-vertical: middle;
+        content-align: left middle;
     }
     # child pieces
     #weather-summary-place {
         width: auto;
+        height: 1;
+        text-wrap: nowrap;
     }
 
     #weather-summary-datetime {
         width: auto;
+        height: 1;
+        text-wrap: nowrap;
     }
 
     #weather-summary-condition {
         width: auto;
+        height: 1;
+        text-wrap: nowrap;
     }
     """
 
     def __init__(self) -> None:
         """Initialize child statics."""
         super().__init__(id='weather-summary')
-        self.border_title = 'Weather Summary'
+        self._compact = False
 
     def compose(self) -> ComposeResult:  # type: ignore[override]
         yield Static('', id='weather-summary-condition')
@@ -81,8 +88,18 @@ class WeatherSummary(Container):
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
+        self.border_title = 'Weather Summary'
         if self.hourly is not None:
             self._update_summary()
+
+    def set_layout(self, width: int) -> None:
+        """Use shorter calendar language when horizontal space is scarce."""
+
+        compact = width < 100
+        if compact != self._compact:
+            self._compact = compact
+            if self.hourly is not None and self.is_mounted:
+                self._update_summary()
 
     # Reactive watchers ---------------------------------------------------
     def watch_hourly(self, model: Any | None) -> None:
@@ -122,11 +139,12 @@ class WeatherSummary(Container):
         if emoji:
             condition_text.append(emoji_prefix(emoji))
         condition_text.append(cond_name, style=f'bold italic {cond_color}')
+        condition_text.append(' ')
 
         # Format: '{condition} in {location} on {date} at {time}'
         self.condition.update(condition_text)
         self.place.update(Text.from_markup(self._build_place_markup(place)))
-        self.datetime.update(f'[dim][i] on [/dim][b]{date_str}[/b] [dim][i]at [/dim][b]{time_str}[/b]')
+        self.datetime.update(f'[dim][i]on [/dim][b]{date_str}[/b] [dim][i]at [/dim][b]{time_str}[/b]')
 
     def _build_location_tooltip(self) -> str:
         """Build detailed location info for tooltip."""
@@ -141,11 +159,13 @@ class WeatherSummary(Container):
     def _build_place_markup(self, place: str) -> str:
         """Return plain styled place markup."""
         escaped_place = escape(place)
-        return f'[dim][i] in [/dim][b {self.app.theme_variables.get("foreground")}]{escaped_place}[/]'
+        return f'[dim][i]in [/dim][b {self.app.theme_variables.get("foreground")}]{escaped_place}[/] '
 
     def _resolve_time(self, idx: int) -> tuple[str, str]:
         pt = self.hourly.get_point(idx)
         dt = pt.get('time')
+        if self._compact:
+            return dt.strftime('%a %d %b'), dt.strftime('%H:%M')
         return dt.strftime('%A %d %B %Y'), dt.strftime('%H:%M')
 
     def _condition_parts(self, idx: int, theme: dict) -> tuple[str, str, str]:

@@ -3,10 +3,13 @@
 Shows an optional top line, big digits, and a lower line.
 """
 
+from rich.markup import escape
 from rich.text import Text
 from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Digits, Static
+
+from wevva.layout import CurrentDensity
 
 
 class WeatherWidget(Widget):
@@ -19,12 +22,12 @@ class WeatherWidget(Widget):
     WeatherWidget {
         layout: vertical;
         height: 7;
-        width: 22;
+        width: 1fr;
+        min-width: 0;
         border: round $primary;
         border-title-color: $primary;
         border-title-align: left;
         padding: 0 1;
-        margin: 0 3 0 0;
         align-horizontal: left;
     }
     WeatherWidget > Static {
@@ -45,6 +48,29 @@ class WeatherWidget(Widget):
         height: auto;
         padding-left: 1;
         align-vertical: middle;
+    }
+    WeatherWidget #spacer {
+        height: 1fr;
+        min-height: 0;
+    }
+    WeatherWidget #compact-value {
+        display: none;
+        width: 100%;
+        height: 1;
+        text-overflow: ellipsis;
+        text-wrap: nowrap;
+    }
+    WeatherWidget.density-small #digits-row,
+    WeatherWidget.density-smallest #digits-row {
+        display: none;
+    }
+    WeatherWidget.density-small #compact-value,
+    WeatherWidget.density-smallest #compact-value {
+        display: block;
+    }
+    WeatherWidget.density-smallest #lower,
+    WeatherWidget.density-smallest #spacer {
+        display: none;
     }
     """
 
@@ -68,12 +94,16 @@ class WeatherWidget(Widget):
         self._units = units
         self.border_title = title
         self._show_spacer = bool(show_spacer)
+        self._density = CurrentDensity.STANDARD
 
     def compose(self):  # type: ignore[override]
         """Build child widgets; include a top line only if set."""
         if self._top_text:
             self._top = Static(Text.from_markup(self._top_text), id='top')
             yield self._top
+
+        self._compact = Static('', id='compact-value')
+        yield self._compact
 
         # Horizontal row for digits and units
         with Horizontal(id='digits-row'):
@@ -125,7 +155,27 @@ class WeatherWidget(Widget):
         if units is not None and hasattr(self, '_units_widget'):
             self._update_text_widget(self._units_widget, units)
         self._update_text_widget(self._lower, lower_text)
+        self._update_compact_value()
         self.refresh()
+
+    def set_layout(self, density: CurrentDensity, height: int) -> None:
+        """Select a mounted presentation without rebuilding the widget."""
+
+        self._density = density
+        self.set_class(density is CurrentDensity.STANDARD, 'density-standard')
+        self.set_class(density is CurrentDensity.SMALL, 'density-small')
+        self.set_class(density is CurrentDensity.SMALLEST, 'density-smallest')
+        self.styles.height = height
+        self._update_compact_value()
+
+    def _update_compact_value(self) -> None:
+        if not hasattr(self, '_compact'):
+            return
+        colour = self._colour or self.app.theme_variables.get('foreground')
+        content = Text.from_markup(
+            f'[bold {colour}]{escape(self._value)}{escape(str(self._units))}[/]'
+        )
+        self._compact.update(content)
 
     def _update_text_widget(self, widget: Static, content: str | Text) -> None:
         """Update a Static text widget with string or rich Text content."""

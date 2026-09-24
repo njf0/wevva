@@ -18,6 +18,7 @@ from textual.widgets import Footer, Header, Static
 
 from wevva.alerts import Alert
 from wevva.config import location_key
+from wevva.layout import DEFAULT_LAYOUT_METRICS, WeatherLayoutBudget, weather_layout_for
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
@@ -36,7 +37,7 @@ from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
 from wevva.widgets.location_map import LocationMap
 from wevva.widgets.saved_locations import SavedLocationsSidebar
-from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar, WeatherAlertsPanel
+from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar, WeatherAlertSummary
 from wevva.widgets.weather_summary import WeatherSummary
 
 ALERT_SEVERITY_RANK = {
@@ -113,14 +114,20 @@ class WeatherScreen(Screen[None]):
         self._local_alert_details_has_content = False
         self._locations_sidebar_width_collapsed = False
         self._alert_details_sidebar_width_collapsed = False
+        self._alerts: list[Alert] = []
+        self._layout_budget: WeatherLayoutBudget | None = None
 
     DEFAULT_CSS = """
     #main-panel {
         layout: vertical;
-        align-horizontal: center;
+        align-horizontal: left;
         align-vertical: middle;
-        content-align: center middle;
-        overflow-y: auto;
+        content-align: left top;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        padding: 1 2;
+        overflow: hidden hidden;
         hatch: right $background-lighten-1;
     }
 
@@ -134,7 +141,9 @@ class WeatherScreen(Screen[None]):
     }
 
     #next-24-hours-table {
-        padding: 0 1;
+        padding: 0;
+        width: 100%;
+        min-width: 0;
         align-horizontal: center;
         align-vertical: middle;
         content-align: center middle;
@@ -144,42 +153,54 @@ class WeatherScreen(Screen[None]):
     }
 
     #daily-forecast {
-        padding: 0 1;
+        padding: 0;
+        width: 100%;
+        min-width: 0;
         align-horizontal: center;
         align-vertical: middle;
         content-align: center middle;
         hatch: right $background-lighten-1;
         height: auto;
-        margin: 0 0 1 0;
+        margin: 0;
     }
 
     #summary-row {
         layout: horizontal;
         align-horizontal: center;
-        align-vertical: middle;
+        align-vertical: top;
         content-align: center middle;
         width: 100%;
-        height: auto;
-        margin: 0 0 1 0;
+        height: 4;
+        margin: 0;
         hatch: right $background-lighten-1;
     }
 
     #warnings-row {
         layout: horizontal;
         align-horizontal: center;
-        align-vertical: middle;
+        align-vertical: top;
         content-align: center middle;
         width: 100%;
-        height: auto;
+        height: 4;
+        hatch: right $background-lighten-1;
+    }
+
+    #current-conditions-row {
+        layout: horizontal;
+        align-horizontal: center;
+        align-vertical: top;
+        width: 100%;
+        height: 7;
+        margin: 0 0 1 0;
         hatch: right $background-lighten-1;
     }
 
     #weather-summary {
-        align-horizontal: center;
+        align-horizontal: left;
         align-vertical: middle;
         content-align: center middle;
-        height: auto;
-        width: 98;
+        height: 3;
+        width: 100%;
     }
 
 
@@ -195,12 +216,13 @@ class WeatherScreen(Screen[None]):
 
     #weather-warnings {
         layout: vertical;
-        align-horizontal: center;
+        align-horizontal: left;
         align-vertical: middle;
-        width: auto;
-        height: auto;
+        width: 100%;
+        max-width: 98;
+        height: 3;
         content-align: center middle;
-        overflow-y: auto;
+        overflow: hidden hidden;
         hatch: right $background-lighten-1;
     }
 
@@ -245,8 +267,10 @@ class WeatherScreen(Screen[None]):
                 yield self.weather_warnings
 
             # Current conditions: tiles + compact tables
-            self.current_weather = CurrentConditions(classes='current-weather')
-            yield self.current_weather
+            self.current_weather_row = Container(id='current-conditions-row')
+            with self.current_weather_row:
+                self.current_weather = CurrentConditions(classes='current-weather')
+                yield self.current_weather
 
             # Country-scale context for the selected forecast location.
             self.location_map = LocationMap()
@@ -331,6 +355,7 @@ class WeatherScreen(Screen[None]):
             )
         if self.is_mounted:
             self.refresh_bindings()
+            self.call_after_refresh(self._apply_layout)
 
     def on_resize(self, event: Resize) -> None:
         """Collapse sidebars that no longer fit, restoring them if space returns."""
@@ -341,6 +366,61 @@ class WeatherScreen(Screen[None]):
             event.size.width < self.ALERT_DETAILS_SIDEBAR_MIN_WIDTH
         )
         self._sync_sidebar_visibility()
+        if self.is_mounted:
+            self.call_after_refresh(self._apply_layout)
+
+    def _apply_layout(self) -> None:
+        """Apply one pure budget decision to stable mounted weather widgets."""
+
+        if not hasattr(self, 'main_panel') or not self.main_panel.is_mounted:
+            return
+        viewport = self.main_panel.region
+        if viewport.width <= 0 or viewport.height <= 0:
+            return
+
+        budget = weather_layout_for(
+            viewport.width,
+            viewport.height,
+            has_warnings=bool(self._alerts),
+        )
+        self._layout_budget = budget
+        self.summary_row.display = budget.show_summary
+        self.weather_summary.set_layout(budget.usable_width)
+        self.warnings_row.styles.height = (
+            DEFAULT_LAYOUT_METRICS.warning_rows if self._alerts else 0
+        )
+        self.weather_warnings.styles.height = (
+            DEFAULT_LAYOUT_METRICS.warning_card_rows if self._alerts else 0
+        )
+        self.current_weather.set_layout(
+            budget.current_density,
+            budget.current_height,
+            budget.detail_rows,
+            budget.full_detail_labels,
+        )
+        self.current_weather_row.styles.height = budget.current_height
+        self.hourly_forecast.set_layout(budget.hourly_rows)
+        hourly_height = (
+            DEFAULT_LAYOUT_METRICS.hourly_chrome_rows + len(budget.hourly_rows)
+        )
+        self.next_24_hours.styles.height = hourly_height
+
+        daily = self.query_one(DailyForecast)
+        daily.set_layout(budget.daily_columns, budget.daily_row_count)
+        self.daily_forecast.display = budget.daily_row_count > 0
+        self.next_24_hours.styles.margin = (
+            (0, 0, 1, 0) if budget.daily_row_count else (0, 0, 0, 0)
+        )
+        self.daily_forecast.styles.height = (
+            DEFAULT_LAYOUT_METRICS.daily_chrome_rows + budget.daily_row_count
+            if budget.daily_row_count
+            else 0
+        )
+
+        # Slice D will replace these legacy blocks with the atomic context
+        # matrix represented by budget.show_context_matrix.
+        self.location_map.display = False
+        self.bottom_info_bar.display = False
 
     def update_saved_locations_sidebar(self) -> None:
         """Sync saved-location sidebar from app state."""
@@ -475,8 +555,7 @@ class WeatherScreen(Screen[None]):
         self.error_banner.update('')
         self.error_banner.display = False
 
-        # Reveal bottom info bar once data is present
-        self.bottom_info_bar.display = True
+        self.call_after_refresh(self._apply_layout)
 
         # Start time refresh timer after data arrives (updates every second)
         if self._time_refresh_timer is None:
@@ -556,27 +635,31 @@ class WeatherScreen(Screen[None]):
         self.context_bar.refresh_time_display()
 
     async def render_alert_panel(self, alerts: list[Alert]) -> None:
-        """Mount ordinary weather-alert tabs, or none when empty."""
+        """Mount the fixed-height warning summary, or none when empty."""
         await self.weather_warnings.remove_children()
         self.saved_locations_sidebar.clear_warning_progress()
+        self._alerts = []
         if not alerts:
             self.warnings_row.display = False
             self.weather_warnings.display = False
             self._local_alert_details_has_content = False
             self._sync_alert_sidebar_content()
             self._sync_sidebar_visibility()
+            self.call_after_refresh(self._apply_layout)
             return
 
         ordered_alerts = sorted(alerts, key=alert_sort_key)
+        self._alerts = ordered_alerts
         self.alert_details_sidebar.update_alert(ordered_alerts[0])
         self._local_alert_details_has_content = True
         self._sync_alert_sidebar_content()
         self._sync_sidebar_visibility()
         await self.weather_warnings.mount(
-            WeatherAlertsPanel(ordered_alerts)
+            WeatherAlertSummary(ordered_alerts)
         )
         self.warnings_row.display = True
         self.weather_warnings.display = True
+        self.call_after_refresh(self._apply_layout)
 
     async def on_hour_highlighted(self, message: HourHighlighted) -> None:  # type: ignore[override]
         """Forward hour selection to current conditions row.

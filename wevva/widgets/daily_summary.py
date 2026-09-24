@@ -12,6 +12,7 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from wevva.conditions import get_condition
+from wevva.layout import DailyColumn, daily_column_widths
 from wevva.utils import emoji_prefix, rain_colour, temp_colour, wind_colour
 
 
@@ -27,6 +28,28 @@ class DailySummaryTable(DataTable):
             cell_padding=0,
             zebra_stripes=True,
         )
+        self._visible_columns = tuple(
+            column
+            for column in DailyColumn
+            if column is not DailyColumn.WIND_DIRECTION
+        )
+        self._row_count = 6
+
+    def set_layout(
+        self,
+        columns: tuple[DailyColumn, ...],
+        row_count: int,
+    ) -> None:
+        """Select complete field groups and complete forecast days."""
+
+        columns = tuple(columns)
+        row_count = max(0, int(row_count))
+        changed = columns != self._visible_columns or row_count != self._row_count
+        self._visible_columns = columns
+        self._row_count = row_count
+        self.styles.height = row_count
+        if changed and self.daily_model is not None and self.is_mounted:
+            self._update_display()
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -40,28 +63,40 @@ class DailySummaryTable(DataTable):
 
     def _update_display(self) -> None:
         """Rebuild the daily table from the provided model."""
+        selected_row = self.cursor_row
         self.clear(columns=True)
-        min_days = 2
-        if not self.daily_model.forecast_timeseries or len(self.daily_model.forecast_timeseries) < min_days:
+        if not self.daily_model.forecast_timeseries or self._row_count == 0:
             return
 
         # Cache units for performance
         self._units = self.daily_model.forecast_units
 
-        # Columns
-        self.add_column('Day', width=13)
-        self.add_column('Condition', width=31)
-        self.add_column('Min-Max', width=8)
-        self.add_column('Rain%', width=5)
-        self.add_column('Precip', width=7)
-        self.add_column('Wind', width=13)
-        self.add_column('Wind Direction', width=5)
-        self.add_column('Sunrise', width=7)
-        self.add_column('Sunset', width=7)
+        column_labels = {
+            DailyColumn.DATE: 'Day',
+            DailyColumn.CONDITION: 'Cond.',
+            DailyColumn.TEMPERATURE: 'Min-Max',
+            DailyColumn.RAIN: 'Rain',
+            DailyColumn.WIND: 'Wind',
+            DailyColumn.PRECIPITATION: 'Precip',
+            DailyColumn.GUST: 'Gust',
+            DailyColumn.WIND_DIRECTION: 'Wind Direction',
+            DailyColumn.SUNRISE: 'Rise',
+            DailyColumn.SUNSET: 'Set',
+        }
+        widths = daily_column_widths(self._visible_columns)
+        for column, width in zip(self._visible_columns, widths, strict=True):
+            self.add_column(column_labels[column], key=column.value, width=width)
 
         # Skip today (index 0), show tomorrow onwards
-        for display_idx, day in enumerate(self.daily_model.forecast_timeseries[1:]):
+        days = self.daily_model.forecast_timeseries[1 : self._row_count + 1]
+        for display_idx, day in enumerate(days):
             self._add_daily_row(display_idx, day)
+        if days:
+            self.move_cursor(
+                row=min(selected_row, len(days) - 1),
+                animate=False,
+                scroll=False,
+            )
         self.refresh()
 
     def _day_offset(self, display_idx: int) -> int:
@@ -70,24 +105,36 @@ class DailySummaryTable(DataTable):
 
     def _add_daily_row(self, display_idx: int, day: dict) -> None:
         """Add a single daily forecast row with all cells."""
-        show_emoji = self.app.emoji_enabled
         model_idx = self._day_offset(display_idx)
         theme_vars = self.app.theme_variables
 
+        wide = (
+            DailyColumn.WIND_DIRECTION in self._visible_columns
+            and DailyColumn.GUST not in self._visible_columns
+        )
+
         # === Day name cell ===
-        # use a format like Mon 03
-        day_name = day['time'].strftime('%A %d')
+        day_name = day['time'].strftime('%A %d' if wide else '%a %d')
         day_cell = Text(day_name, style='dim', justify='left')
 
         # === Condition cell with optional emoji ===
         day_model = self.daily_model.forecast_timeseries[model_idx]
         cond = get_condition(day_model.get('weather_code'))
-        condition_name = self.daily_model.get_weather_code(model_idx, return_emoji=False)
+        condition_name = (
+            self.daily_model.get_weather_code(model_idx, return_emoji=False)
+            if wide
+            else (cond.abbr if cond else '--')
+        )
         condition_colour = theme_vars.get(cond.color_var) if (cond and cond.color_var) else theme_vars.get('primary')
-        condition_style = f'italic {condition_colour}' if condition_colour else 'italic'
+        emphasis = 'italic' if wide else 'bold'
+        condition_style = f'{emphasis} {condition_colour}' if condition_colour else emphasis
         condition_cell = Text(justify='left')
-        if show_emoji:
-            condition_cell.append(emoji_prefix(self.daily_model.get_weather_code(model_idx, return_emoji=True)))
+        if wide and self.app.emoji_enabled:
+            condition_cell.append(
+                emoji_prefix(
+                    self.daily_model.get_weather_code(model_idx, return_emoji=True)
+                )
+            )
         condition_cell.append(condition_name, style=condition_style)
 
         # === Min/max temperature cell with colour ===
@@ -130,6 +177,10 @@ class DailySummaryTable(DataTable):
         )
         rain_prob_cell = Text(f'{rain_prob:.0f}{rain_prob_unit}', style=f'bold {rain_prob_col}')
         precip_cell = Text(f'{precip:.1f}{precip_unit}', style=f'{rain_prob_col}')
+        combined_rain_cell = Text('', justify='right')
+        combined_rain_cell.append(f'{rain_prob:.0f}{rain_prob_unit}', style=f'bold {rain_prob_col}')
+        combined_rain_cell.append('/')
+        combined_rain_cell.append(f'{precip:.1f}{precip_unit}', style=rain_prob_col)
         rain_prob_cell.justify = 'right'
         precip_cell.justify = 'right'
 
@@ -146,15 +197,16 @@ class DailySummaryTable(DataTable):
             min_colour=theme_vars['foreground'],
             max_colour=wind_max,
         )
-        wind_speed_cell = Text('')
-        wind_speed_cell.append(f'{wind_speed:.0f}', style=f'bold {wind_col}')
-        wind_speed_cell.append(f'{wind_unit}', style=f'bold {wind_col}')
-        wind_speed_cell.append(' (')
-        wind_speed_cell.append(f'{wind_gust:.0f}', style=f'{wind_col}')
-        wind_speed_cell.append(')')
+        wind_speed_cell = Text('', justify='right')
+        wind_speed_cell.append(f'{wind_speed:.0f}{wind_unit}', style=f'bold {wind_col}')
+        if DailyColumn.GUST not in self._visible_columns:
+            wind_speed_cell.append(' (')
+            wind_speed_cell.append(f'{wind_gust:.0f}', style=wind_col)
+            wind_speed_cell.append(')')
+        if DailyColumn.WIND_DIRECTION not in self._visible_columns:
+            wind_speed_cell.append(f' {wind_dir}', style=f'bold {wind_col}')
         wind_speed_cell.justify = 'right'
-
-        # === Wind direction cell with arrow ===
+        gust_cell = Text(f'{wind_gust:.0f}{wind_unit}', style=wind_col, justify='right')
         wind_dir_cell = Text(f'{wind_dir}', style=f'bold {wind_col}', justify='right')
 
         # Sunrise / sunset
@@ -172,18 +224,21 @@ class DailySummaryTable(DataTable):
         else:
             sunset_cell = Text('--:--', justify='right')
 
-        # Assemble row
-        cells = [day_cell]
-        cells.extend(
-            [
-                condition_cell,
-                min_max_cell,
-                rain_prob_cell,
-                precip_cell,
-                wind_speed_cell,
-                wind_dir_cell,
-                sunrise_cell,
-                sunset_cell,
-            ]
-        )
+        cells_by_column = {
+            DailyColumn.DATE: day_cell,
+            DailyColumn.CONDITION: condition_cell,
+            DailyColumn.TEMPERATURE: min_max_cell,
+            DailyColumn.RAIN: (
+                rain_prob_cell
+                if DailyColumn.PRECIPITATION in self._visible_columns
+                else combined_rain_cell
+            ),
+            DailyColumn.WIND: wind_speed_cell,
+            DailyColumn.PRECIPITATION: precip_cell,
+            DailyColumn.GUST: gust_cell,
+            DailyColumn.WIND_DIRECTION: wind_dir_cell,
+            DailyColumn.SUNRISE: sunrise_cell,
+            DailyColumn.SUNSET: sunset_cell,
+        }
+        cells = [cells_by_column[column] for column in self._visible_columns]
         self.add_row(*cells, key=day_name)

@@ -18,7 +18,9 @@
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - Layout not super flexible, requires a terminal size of at least 186x53 for all elements to show fully!
+> - The primary forecast has a compact, non-scrolling 80x24 mode. The country
+>   map/context matrix is the next responsive-layout stage; the tropical
+>   workspace has not yet received the same redesign.
 
 ## Quick Start
 
@@ -89,7 +91,7 @@ uvx wevva --clear-default-location
 
 - Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
-- Alerts appear as compact tabs, with the full provider text shown in the details sidebar.
+- A bordered alert summary opens tabbed warnings and an independently scrolling provider document in a modal; wide layouts retain the existing optional detail/map sidebar.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.

@@ -12,11 +12,14 @@ from typing import Any
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
+from textual.events import Resize
+from textual.message import Message
 from textual.reactive import reactive
-from textual.widgets import DataTable, Tab, Tabs
+from textual.widgets import DataTable, Static, Tab, Tabs
 
 from wevva.conditions import get_condition
 from wevva.constants import HOURS_WINDOW, MAX_TAB_DAYS
+from wevva.layout import DEFAULT_LAYOUT_METRICS, HourlyRow
 from wevva.messages import DaySelected, HourHighlighted, WeatherUpdated
 from wevva.utils import (
     create_rain_blocks,
@@ -27,14 +30,30 @@ from wevva.utils import (
 )
 
 
+class HourlyDataTable(DataTable):
+    """DataTable which reports horizontal movement to its visual indicator."""
+
+    class HorizontalScrollChanged(Message):
+        """Posted whenever the table's horizontal viewport moves."""
+
+    def watch_scroll_x(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_x(old_value, new_value)
+        if self.is_mounted:
+            self.post_message(self.HorizontalScrollChanged())
+
+
 class HourlyForecast(Container):
     """Owns the next-24-hours table and column highlight behavior."""
+
+    HOUR_COLUMN_WIDTH = 4
 
     DEFAULT_CSS = """
     HourlyForecast {
         layout: vertical;
-        height: auto;
-        width: 98;
+        height: 13;
+        width: 100%;
+        max-width: 98;
+        min-width: 0;
         border: round $primary;
         border-title-color: $primary;
         border-title-align: center;
@@ -43,10 +62,24 @@ class HourlyForecast(Container):
     }
 
     #next-24-hours-datatable {
-        width: 98;
+        width: 100%;
+        min-width: 0;
+        scrollbar-size-horizontal: 0;
+        scrollbar-size-vertical: 0;
     }
 
+    #hourly-tabs {
+        width: 100%;
+        height: 2;
+    }
 
+    #hourly-scroll-indicator {
+        width: 100%;
+        height: 1;
+        min-width: 0;
+        text-wrap: nowrap;
+        text-overflow: clip;
+    }
 
     """
 
@@ -54,22 +87,41 @@ class HourlyForecast(Container):
     hourly_model: reactive[Any | None] = reactive(None)
     daily_model: reactive[Any | None] = reactive(None)
 
+    _ROW_KEYS = {
+        HourlyRow.CONDITION: 'emoji',
+        HourlyRow.TEMPERATURE_BAR: 'temp_blocks',
+        HourlyRow.TEMPERATURE: 'temp_values',
+        HourlyRow.RAIN_BAR: 'rain_blocks',
+        HourlyRow.RAIN: 'rain_values',
+        HourlyRow.WIND_BAR: 'wind_blocks',
+        HourlyRow.WIND: 'wind_values',
+        HourlyRow.TIME: 'footer',
+    }
+
     def compose(self) -> ComposeResult:  # type: ignore[override]
         # Compose once: create Tabs and DataTable widgets
         yield Tabs(id='hourly-tabs')
-        table = DataTable(
+        table = HourlyDataTable(
             show_header=False,
             cursor_type='column',
             cell_padding=0,
             id='next-24-hours-datatable',
         )
+        # The application stylesheet deliberately gives general DataTables an
+        # auto width.  This table is a viewport, though: it must fill its
+        # parent so excess hourly columns overflow *inside* it and can scroll.
+        # An inline style keeps that invariant above the application rule.
+        table.styles.width = '100%'
         yield table
+        yield Static('', id='hourly-scroll-indicator')
         # Internal state for tab/column mapping
         self._active_tab_id = None
         self._rebuilding_tabs = False
         self._tab_date_map = {}
         self._col_keys = []
         self._col_indices = []
+        self._column_widths: tuple[int, ...] = ()
+        self._visible_rows = tuple(HourlyRow)
 
     # Properties for widget access (posting pattern)
     @property
@@ -77,8 +129,12 @@ class HourlyForecast(Container):
         return self.query_one(Tabs)
 
     @property
-    def table(self) -> DataTable:
-        return self.query_one(DataTable)
+    def table(self) -> HourlyDataTable:
+        return self.query_one(HourlyDataTable)
+
+    @property
+    def scroll_indicator(self) -> Static:
+        return self.query_one('#hourly-scroll-indicator', Static)
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -89,6 +145,43 @@ class HourlyForecast(Container):
         if self.hourly_model is not None:
             # Re-trigger the watcher now that we're mounted
             self.watch_hourly_model(self.hourly_model)
+
+    def set_layout(self, rows: tuple[HourlyRow, ...]) -> None:
+        """Show complete budgeted rows while retaining tabs and columns."""
+
+        rows = tuple(rows)
+        changed = rows != self._visible_rows
+        self._visible_rows = rows
+        height = DEFAULT_LAYOUT_METRICS.hourly_chrome_rows + len(rows)
+        self.styles.height = height
+        if self.is_mounted:
+            self.table.styles.height = len(rows)
+        if changed and self.hourly_model is not None and self.is_mounted:
+            active_date = self._tab_date_map.get(self._active_tab_id)
+            if active_date is None and self.hourly_model.forecast_timeseries:
+                active_date = self.hourly_model.forecast_timeseries[0]['time'].date()
+            if active_date is not None:
+                self._update_for_date(active_date)
+        elif self.is_mounted:
+            self.call_after_refresh(self._update_scroll_indicator)
+
+    def on_resize(self, event: Resize) -> None:
+        """Refit columns to surplus width without changing represented hours."""
+
+        event.stop()
+        self.call_after_refresh(self._refit_columns)
+
+    def _refit_columns(self) -> None:
+        if not self._col_indices:
+            self._update_scroll_indicator()
+            return
+        desired = self._desired_column_widths(len(self._col_indices))
+        if desired != self._column_widths:
+            active_date = self._tab_date_map.get(self._active_tab_id)
+            if active_date is not None:
+                self._update_for_date(active_date)
+                return
+        self._update_scroll_indicator()
 
     # Reactive watchers
     def watch_hourly_model(self, hourly_model: Any | None) -> None:
@@ -225,6 +318,10 @@ class HourlyForecast(Container):
         """Update columns and rows for the given date."""
         hourly_model = self.hourly_model
         tbl = self.table
+        selected_abs_index = None
+        if self._col_indices:
+            cursor_column = min(tbl.cursor_column, len(self._col_indices) - 1)
+            selected_abs_index = self._col_indices[cursor_column]
         tbl.clear(columns=True)
         self._col_keys = []
         self._col_indices = []
@@ -241,31 +338,39 @@ class HourlyForecast(Container):
         winds = [hourly_model.get_wind_speed(i) for i in self._col_indices]
 
         # Create empty rows
-        row_keys = [
-            'emoji',
-            'temp_blocks',
-            'temp_values',
-            'rain_blocks',
-            'rain_values',
-            'wind_blocks',
-            'wind_values',
-            'footer',
-        ]
+        row_keys = [self._ROW_KEYS[row] for row in self._visible_rows]
         for rk in row_keys:
             tbl.add_row(*['' for _ in self._col_keys], key=rk)
 
         # Populate rows
-        self._update_emoji_row()
-        self._update_temp_rows(temps)
-        self._update_rain_rows(rains)
-        self._update_wind_rows(winds)
-        self._update_footer_row()
+        if HourlyRow.CONDITION in self._visible_rows:
+            self._update_emoji_row()
+        if {
+            HourlyRow.TEMPERATURE_BAR,
+            HourlyRow.TEMPERATURE,
+        }.intersection(self._visible_rows):
+            self._update_temp_rows(temps)
+        if {HourlyRow.RAIN_BAR, HourlyRow.RAIN}.intersection(self._visible_rows):
+            self._update_rain_rows(rains)
+        if {HourlyRow.WIND_BAR, HourlyRow.WIND}.intersection(self._visible_rows):
+            self._update_wind_rows(winds)
+        if HourlyRow.TIME in self._visible_rows:
+            self._update_footer_row()
+
+        if selected_abs_index in self._col_indices:
+            tbl.move_cursor(
+                column=self._col_indices.index(selected_abs_index),
+                animate=False,
+                scroll=True,
+            )
 
         tbl.refresh()
+        self.call_after_refresh(self._update_scroll_indicator)
 
     def _setup_columns(self, day_indices_abs: list[int]) -> None:
         """Add columns for the selected day's hours."""
-        for abs_idx in day_indices_abs:
+        self._column_widths = self._desired_column_widths(len(day_indices_abs))
+        for abs_idx, width in zip(day_indices_abs, self._column_widths, strict=True):
             entry = self.hourly_model.forecast_timeseries[abs_idx]
             col_key = f'h{abs_idx:02}'
             self._col_keys.append(col_key)
@@ -273,8 +378,62 @@ class HourlyForecast(Container):
             self.table.add_column(
                 Text(text=entry['time'].strftime('%H'), style='bold', justify='center'),
                 key=col_key,
-                width=4,
+                width=width,
             )
+
+    def _desired_column_widths(self, count: int) -> tuple[int, ...]:
+        """Keep each hour at its compact four-cell width."""
+
+        if count <= 0:
+            return ()
+        return (self.HOUR_COLUMN_WIDTH,) * count
+
+    def _update_scroll_indicator(self) -> None:
+        """Render an explicit thumb for the table's real scroll position."""
+
+        if not self.is_mounted:
+            return
+        width = self.scroll_indicator.size.width
+        maximum = int(round(self.table.max_scroll_x))
+        if maximum <= 0 or width < 8:
+            self.scroll_indicator.update('')
+            self.border_subtitle = ''
+            return
+
+        track_width = width - 2
+        virtual_width = max(1, self.table.virtual_size.width)
+        viewport_width = max(1, self.table.container_size.width)
+        thumb_width = max(3, round(track_width * viewport_width / virtual_width))
+        thumb_width = min(track_width, thumb_width)
+        travel = track_width - thumb_width
+        position = min(maximum, int(round(self.table.scroll_x)))
+        thumb_start = round(travel * position / maximum) if maximum else 0
+        thumb_end = thumb_start + thumb_width
+
+        theme = self.app.theme_variables
+        primary = theme.get('primary', 'cyan')
+        foreground = theme.get('foreground', 'white')
+        bar = Text()
+        bar.append('◀', style=f'bold {primary}' if position else f'dim {foreground}')
+        bar.append('─' * thumb_start, style='dim')
+        bar.append('━' * thumb_width, style=f'bold {primary}')
+        bar.append('─' * (track_width - thumb_end), style='dim')
+        bar.append(
+            '▶',
+            style=f'bold {primary}' if position < maximum else f'dim {foreground}',
+        )
+        self.scroll_indicator.update(bar)
+        self.scroll_indicator.tooltip = (
+            f'Hourly forecast position {position} of {maximum}; use Left/Right to scroll'
+        )
+        self.border_subtitle = '←/→ scroll'
+
+    def on_hourly_data_table_horizontal_scroll_changed(
+        self,
+        event: HourlyDataTable.HorizontalScrollChanged,
+    ) -> None:
+        event.stop()
+        self._update_scroll_indicator()
 
     def _update_emoji_row(self) -> None:
         """Update condition emoji/abbreviation row."""
@@ -313,16 +472,18 @@ class HourlyForecast(Container):
                 unit=temp_unit,
                 theme_colours=theme_vars,
             )
-            self.table.update_cell(
-                'temp_blocks',
-                col_key,
-                Text(tblocks[i], style=f'bold {colour}', justify='center'),
-            )
-            self.table.update_cell(
-                'temp_values',
-                col_key,
-                Text(f'{t:.0f}{tunit[0]}', style=f'bold {colour}', justify='center'),
-            )
+            if HourlyRow.TEMPERATURE_BAR in self._visible_rows:
+                self.table.update_cell(
+                    'temp_blocks',
+                    col_key,
+                    Text(tblocks[i], style=f'bold {colour}', justify='center'),
+                )
+            if HourlyRow.TEMPERATURE in self._visible_rows:
+                self.table.update_cell(
+                    'temp_values',
+                    col_key,
+                    Text(f'{t:.0f}{tunit[0]}', style=f'bold {colour}', justify='center'),
+                )
 
     def _update_rain_rows(self, rains: list[float]) -> None:
         """Update precipitation blocks and values rows."""
@@ -338,16 +499,18 @@ class HourlyForecast(Container):
             label = f'{r:.0f}{runit}'
             display_label = '· ·' if label == previous_label and label in {'0%', '100%'} else label
             previous_label = label
-            self.table.update_cell(
-                'rain_blocks',
-                col_key,
-                Text(rblocks[i], style=f'bold {colour}', justify='center'),
-            )
-            self.table.update_cell(
-                'rain_values',
-                col_key,
-                Text(display_label, style=f'bold {colour}', justify='center'),
-            )
+            if HourlyRow.RAIN_BAR in self._visible_rows:
+                self.table.update_cell(
+                    'rain_blocks',
+                    col_key,
+                    Text(rblocks[i], style=f'bold {colour}', justify='center'),
+                )
+            if HourlyRow.RAIN in self._visible_rows:
+                self.table.update_cell(
+                    'rain_values',
+                    col_key,
+                    Text(display_label, style=f'bold {colour}', justify='center'),
+                )
 
     def _update_wind_rows(self, winds: list[float]) -> None:
         """Update wind blocks and values rows."""
@@ -359,19 +522,21 @@ class HourlyForecast(Container):
         for i, wv in enumerate(winds):
             col_key = self._col_keys[i]
             colour = wind_colour(wv, hex=True, min_colour=theme_vars['foreground'], max_colour=wind_max)
-            self.table.update_cell(
-                'wind_blocks',
-                col_key,
-                Text(wblocks[i], style=f'bold {colour}', justify='center'),
-            )
+            if HourlyRow.WIND_BAR in self._visible_rows:
+                self.table.update_cell(
+                    'wind_blocks',
+                    col_key,
+                    Text(wblocks[i], style=f'bold {colour}', justify='center'),
+                )
             wdir = self.hourly_model.get_wind_direction(self._col_indices[i])
             suffix = wdir[-1] if isinstance(wdir, str) and wdir else ''
             disp = f'{wv:.0f}{suffix}' if suffix else f'{wv:.0f}{wunit}'
-            self.table.update_cell(
-                'wind_values',
-                col_key,
-                Text(disp, style=f'bold {colour}', justify='center'),
-            )
+            if HourlyRow.WIND in self._visible_rows:
+                self.table.update_cell(
+                    'wind_values',
+                    col_key,
+                    Text(disp, style=f'bold {colour}', justify='center'),
+                )
 
     def _update_footer_row(self) -> None:
         """Update footer row with hour labels."""
