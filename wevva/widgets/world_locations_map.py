@@ -51,6 +51,7 @@ class WorldLocationPlacement:
     column: int
     row: int
     width: int
+    marker_on_right: bool
 
 
 class WorldLocationLabel(Static, can_focus=True):
@@ -82,6 +83,8 @@ class WorldLocationLabel(Static, can_focus=True):
     def __init__(self, location: LocationMetadata) -> None:
         super().__init__('', markup=False)
         self.location = location
+        self._body_text = ''
+        self._marker_on_right = False
         self.label_text = ''
 
     def update_weather(
@@ -110,10 +113,21 @@ class WorldLocationLabel(Static, can_focus=True):
             reading = '--'
             colour = self.app.theme_variables.get('text-secondary')
 
-        self.label_text = f'• {name} {reading}'
-        self.update(self.label_text)
+        self._body_text = f'{name} {reading}'
+        self.set_marker_on_right(self._marker_on_right)
         if colour:
             self.styles.color = colour
+
+    def set_marker_on_right(self, marker_on_right: bool) -> None:
+        """Keep the marker at the geographic end of the callout."""
+
+        self._marker_on_right = marker_on_right
+        self.label_text = (
+            f'{self._body_text} •'
+            if marker_on_right
+            else f'• {self._body_text}'
+        )
+        self.update(self.label_text)
 
     def on_click(self, event: Click) -> None:
         event.stop()
@@ -344,6 +358,7 @@ class WorldLocationsMap(Container):
             if placement is None:
                 label.display = False
                 continue
+            label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
             placements[key] = placement
@@ -371,13 +386,13 @@ def _place_callout(
         row = anchor_row + row_offset
         if not 0 <= row < canvas_height:
             continue
-        starts = (
-            anchor_column,
-            anchor_column - label_width + 1,
-            anchor_column - label_width // 2,
+        candidates = (
+            (anchor_column, False),
+            (anchor_column - label_width + 1, True),
         )
-        for raw_column in starts:
-            column = min(max(0, raw_column), canvas_width - label_width)
+        for column, marker_on_right in candidates:
+            if column < 0 or column + label_width > canvas_width:
+                continue
             cells = {(column + offset, row) for offset in range(label_width)}
             if cells & occupied:
                 continue
@@ -387,6 +402,7 @@ def _place_callout(
                 column=column,
                 row=row,
                 width=label_width,
+                marker_on_right=marker_on_right,
             )
     return None
 

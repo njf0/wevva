@@ -13,6 +13,7 @@
 - Current and upcoming weather alerts (normalized provider data)
 - Global active tropical-system investigation with source-specific tracks and official products
 - Interactive Braille world map for spatial navigation between saved locations
+- Clickable temperature-labelled cities on country and regional weather maps
 - Unit preferences (temperature, wind, precipitation)
 - Theme toggle and optional emoji rendering
 - Interactive setup wizard for defaults
@@ -188,6 +189,8 @@ The Tropical Systems screen has its own contextual `t`/`c` track controls;
 press `h` in the application for the complete shortcut guide.
 On the saved-locations world map, use left/right to move between city labels,
 then Enter or Space to open the focused forecast; mouse selection works too.
+Country-map city labels can likewise be clicked or focused and activated to
+open their ordinary weather forecast.
 
 ## Config
 

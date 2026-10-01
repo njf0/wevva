@@ -6,10 +6,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from rich.cells import cell_len
 from rich.text import Text
-from textual.events import Resize
+from textual.binding import Binding
+from textual.containers import Container
+from textual.events import Click, Resize
 from textual.widgets import Static
 
+from wevva.location_metadata import LocationMetadata
+from wevva.messages import PlaceSelected
 from wevva.geography import (
     GeographicViewport,
     PopulatedPlace,
@@ -59,6 +64,17 @@ class LocationMapPalette:
     place: str | None = None
     location: str | None = None
     location_label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LocationMapPlacement:
+    """One collision-free terminal placement for a map callout."""
+
+    key: str
+    column: int
+    row: int
+    width: int
+    marker_on_right: bool
 
 
 def build_location_map_geometry(
@@ -148,7 +164,7 @@ def render_location_map(
     frame = canvas.frame((('land', palette.land),), solid_braille_layers=('land',))
 
     location_style = palette.location_label or palette.location
-    location_cell = frame.marker(scope.location, '✦', location_style)
+    location_cell = frame.marker(scope.location, '•', location_style)
     occupied = {location_cell}
     frame.label(
         location_cell,
@@ -185,11 +201,95 @@ def render_location_map(
     return frame.to_text()
 
 
-class LocationMap(Static):
+class LocationMapLabel(Static, can_focus=True):
+    """Native Textual callout for the current location or a nearby city."""
+
+    BINDINGS = [
+        Binding('enter', 'select_location', 'Open', show=False),
+        Binding('space', 'select_location', 'Open', show=False),
+    ]
+
+    DEFAULT_CSS = """
+    LocationMapLabel {
+        position: absolute;
+        layer: labels;
+        width: auto;
+        min-width: 1;
+        height: 1;
+        background: $background;
+        text-style: bold;
+        pointer: pointer;
+    }
+
+    LocationMapLabel.current-location,
+    LocationMapLabel:hover,
+    LocationMapLabel:focus {
+        text-style: bold reverse;
+    }
+    """
+
+    def __init__(
+        self,
+        location: LocationMetadata,
+        *,
+        current: bool = False,
+    ) -> None:
+        super().__init__('', markup=False)
+        self.location = location
+        self.current = current
+        self._body_text = ''
+        self._marker_on_right = False
+        self.label_text = ''
+        self.set_class(current, 'current-location')
+
+    def update_label(
+        self,
+        location: LocationMetadata,
+        *,
+        reading: str | None,
+        colour: str | None,
+        current: bool,
+    ) -> None:
+        """Update content without replacing the interactive widget."""
+
+        self.location = location
+        self.current = current
+        self.set_class(current, 'current-location')
+        self._body_text = location.name
+        if reading:
+            self._body_text = f'{self._body_text} {reading}'
+        self.set_marker_on_right(self._marker_on_right)
+        if colour:
+            self.styles.color = colour
+
+    def set_marker_on_right(self, marker_on_right: bool) -> None:
+        """Keep the marker at the geographic end of the callout."""
+
+        self._marker_on_right = marker_on_right
+        self.label_text = (
+            f'{self._body_text} •'
+            if marker_on_right
+            else f'• {self._body_text}'
+        )
+        self.update(self.label_text)
+
+    def on_click(self, event: Click) -> None:
+        event.stop()
+        self.focus()
+        self.action_select_location()
+
+    def action_select_location(self) -> None:
+        """Open the ordinary forecast for this callout."""
+
+        self.post_message(PlaceSelected(location=self.location))
+
+
+class LocationMap(Container):
     """Prominent country map shown with the primary weather instruments."""
 
     DEFAULT_CSS = """
     LocationMap {
+        layers: map labels;
         width: 98;
         height: 20;
         margin: 0 0 1 0;
@@ -198,11 +298,12 @@ class LocationMap(Static):
         border: round $primary;
         border-title-color: $primary;
         border-title-align: left;
+        overflow: hidden hidden;
     }
     """
 
     def __init__(self, *, id: str = 'location-map') -> None:
-        super().__init__('', id=id)
+        super().__init__(id=id)
         self.border_title = 'Location Map'
         self._scope: LocationMapGeometry | None = None
         self._temperatures: dict[PlaceKey, float] = {}
@@ -211,6 +312,12 @@ class LocationMap(Static):
         self._preferred_content_height: int | None = None
         self._layout_height: int | None = None
         self._max_place_labels = _MAX_PLACE_LABELS
+        self._country = ''
+        self._country_code = ''
+        self._current_location: LocationMetadata | None = None
+        self._labels: dict[str, LocationMapLabel] = {}
+        self._placements: dict[str, LocationMapPlacement] = {}
+        self._reflow_pending = False
         self.display = False
 
     @property
@@ -218,6 +325,12 @@ class LocationMap(Static):
         """Whether a country component is available for display."""
 
         return self._scope is not None
+
+    @property
+    def placements(self) -> tuple[LocationMapPlacement, ...]:
+        """Current visible callout placements, primarily for inspection/tests."""
+
+        return tuple(self._placements.values())
 
     def set_layout_height(
         self,
@@ -234,6 +347,7 @@ class LocationMap(Static):
             else max(0, int(max_place_labels))
         )
         self._sync_preferred_height()
+        self._schedule_reflow()
 
     def update_location(
         self,
@@ -250,6 +364,25 @@ class LocationMap(Static):
             country_code=getattr(location, 'country_code', None),
         )
         country = getattr(location, 'country', '') or ''
+        country_code = getattr(location, 'country_code', '') or ''
+        self._country = country
+        self._country_code = country_code
+        self._current_location = (
+            LocationMetadata(
+                latitude=float(getattr(location, 'latitude')),
+                longitude=float(getattr(location, 'longitude')),
+                name=(getattr(location, 'name', '') or '').strip() or 'Current location',
+                admin=getattr(location, 'admin', '') or '',
+                country=country,
+                country_code=country_code,
+                timezone=getattr(location, 'timezone', '') or '',
+                timezone_abbreviation=(
+                    getattr(location, 'timezone_abbreviation', '') or ''
+                ),
+            )
+            if self._scope is not None
+            else None
+        )
         self._temperatures = {}
         self._current_temperature = (
             float(current_temperature)
@@ -260,8 +393,11 @@ class LocationMap(Static):
         self._temperature_unit = temperature_unit
         self.border_title = f'Location Map — {country}' if country else 'Location Map'
         self.display = self._scope is not None
+        if self.is_mounted:
+            self._sync_label_widgets()
         self._sync_preferred_height()
         self.refresh(layout=True)
+        self._schedule_reflow()
 
     @property
     def city_coordinates(self) -> tuple[PlaceKey, ...]:
@@ -283,13 +419,20 @@ class LocationMap(Static):
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
         self._temperature_unit = temperature_unit
+        if self.is_mounted:
+            self._sync_label_widgets()
         self.refresh()
+        self._schedule_reflow()
 
     def clear(self) -> None:
         self._scope = None
         self._temperatures = {}
         self._current_temperature = None
         self._preferred_content_height = None
+        self._current_location = None
+        self._placements = {}
+        if self.is_mounted:
+            self._sync_label_widgets()
         self.display = False
         self.refresh(layout=True)
 
@@ -297,6 +440,11 @@ class LocationMap(Static):
         del event
         self._sync_preferred_height()
         self.refresh()
+        self._schedule_reflow()
+
+    def on_mount(self) -> None:
+        self._sync_label_widgets()
+        self._schedule_reflow()
 
     def _sync_preferred_height(self) -> None:
         if self._scope is None:
@@ -306,6 +454,7 @@ class LocationMap(Static):
             self._preferred_content_height = content_height
             self.styles.height = self._layout_height
             self.refresh(layout=True)
+            self._schedule_reflow()
             return
         available_width = self._render_width()
         content_height = preferred_geographic_height(
@@ -319,55 +468,135 @@ class LocationMap(Static):
         self._preferred_content_height = content_height
         self.styles.height = content_height + _BORDER_ROWS
         self.refresh(layout=True)
+        self._schedule_reflow()
 
     def render(self) -> Text:
         if self._scope is None:
             return Text()
         theme = self.app.theme_variables
         secondary = theme.get('text-secondary')
-        unit_symbol = '°F' if self._temperature_unit == 'fahrenheit' else '°C'
-        location_label_style = None
-        location_label = self._scope.location_name
-        if self._current_temperature is not None:
-            location_colour = temp_colour(
-                self._current_temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=self._temperature_unit,
-                theme_colours=theme,
-            )
-            foreground = theme.get('background') or '#000000'
-            location_label_style = f'bold {foreground} on {location_colour}'
-            location_label = (
-                f'{location_label} {round(self._current_temperature):.0f}{unit_symbol}'
-            )
-        temperature_labels = {}
-        for key, temperature in self._temperatures.items():
-            colour = temp_colour(
-                temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=self._temperature_unit,
-                theme_colours=theme,
-            )
-            temperature_labels[key] = (
-                f'{round(temperature):.0f}{unit_symbol}',
-                f'bold {colour}',
-            )
-        return render_location_map(
-            self._scope,
-            width=self._render_width(),
-            height=max(5, self.content_size.height),
-            palette=LocationMapPalette(
-                land=f'dim {secondary}' if secondary else 'dim',
-                place=theme.get('text-warning') or theme.get('text-primary'),
-                location=theme.get('text-accent') or theme.get('text-success'),
-                location_label=location_label_style,
-            ),
-            temperature_labels=temperature_labels,
-            location_label=location_label,
-            max_place_labels=self._max_place_labels,
+        canvas = GeographicCanvas(
+            self._render_width(),
+            max(5, self.content_size.height),
+            self._scope.viewport,
         )
+        canvas.fill_polygons(self._scope.land, layer='land')
+        return canvas.frame(
+            (('land', f'dim {secondary}' if secondary else 'dim'),),
+            solid_braille_layers=('land',),
+        ).to_text()
+
+    def _schedule_reflow(self) -> None:
+        if not self.is_mounted or self._reflow_pending:
+            return
+        self._reflow_pending = True
+        self.call_after_refresh(self._reflow)
+
+    def _sync_label_widgets(self) -> None:
+        specs = self._label_specs()
+        keys = {key for key, _location, _point, _current in specs}
+        for key in tuple(self._labels):
+            if key not in keys:
+                self._labels.pop(key).remove()
+
+        theme = self.app.theme_variables
+        unit_symbol = '°F' if self._temperature_unit == 'fahrenheit' else '°C'
+        for key, location, _point, current in specs:
+            label = self._labels.get(key)
+            if label is None:
+                label = LocationMapLabel(location, current=current)
+                self._labels[key] = label
+                self.mount(label)
+            temperature = (
+                self._current_temperature
+                if current
+                else self._temperatures.get((location.latitude, location.longitude))
+            )
+            if temperature is not None:
+                reading = f'{round(temperature):.0f}{unit_symbol}'
+                colour = temp_colour(
+                    temperature,
+                    scale='theme_temperature',
+                    hex=True,
+                    unit=self._temperature_unit,
+                    theme_colours=theme,
+                )
+            else:
+                reading = None
+                colour = (
+                    theme.get('text-accent') or theme.get('text-success')
+                    if current
+                    else theme.get('text-warning') or theme.get('text-primary')
+                )
+            label.update_label(
+                location,
+                reading=reading,
+                colour=colour,
+                current=current,
+            )
+
+    def _label_specs(
+        self,
+    ) -> list[tuple[str, LocationMetadata, ProjectedPoint, bool]]:
+        if self._scope is None or self._current_location is None:
+            return []
+        specs = [('current', self._current_location, self._scope.location, True)]
+        for place, point in self._scope.places:
+            key = _label_key(place)
+            specs.append(
+                (
+                    key,
+                    LocationMetadata(
+                        latitude=place.latitude,
+                        longitude=place.longitude,
+                        name=place.name,
+                        country=self._country,
+                        country_code=self._country_code,
+                    ),
+                    point,
+                    False,
+                )
+            )
+        return specs
+
+    def _reflow(self) -> None:
+        self._reflow_pending = False
+        if self._scope is None or not self.is_mounted:
+            return
+        width = self.content_size.width
+        height = self.content_size.height
+        if width < 1 or height < 1:
+            return
+
+        canvas = GeographicCanvas(width, height, self._scope.viewport)
+        occupied: set[tuple[int, int]] = set()
+        placements: dict[str, LocationMapPlacement] = {}
+        city_labels = 0
+        for key, _location, point, current in self._label_specs():
+            label = self._labels.get(key)
+            if label is None:
+                continue
+            if not current and city_labels >= self._max_place_labels:
+                label.display = False
+                continue
+            placement = _place_callout(
+                key,
+                anchor=canvas.cell_position(point),
+                label_width=cell_len(label.label_text),
+                canvas_width=width,
+                canvas_height=height,
+                occupied=occupied,
+            )
+            if placement is None:
+                label.display = False
+                continue
+            label.set_marker_on_right(placement.marker_on_right)
+            label.display = True
+            label.styles.offset = (placement.column, placement.row)
+            placements[key] = placement
+            if not current:
+                city_labels += 1
+        self._placements = placements
 
     def _render_width(self) -> int:
         """Return a useful width even while a responsive parent is hidden.
@@ -395,6 +624,51 @@ def _place_key(place: PopulatedPlace) -> PlaceKey:
     return place.latitude, place.longitude
 
 
+def _label_key(place: PopulatedPlace) -> str:
+    return f'{place.latitude:.6f},{place.longitude:.6f}'
+
+
+def _place_callout(
+    key: str,
+    *,
+    anchor: tuple[int, int],
+    label_width: int,
+    canvas_width: int,
+    canvas_height: int,
+    occupied: set[tuple[int, int]],
+) -> LocationMapPlacement | None:
+    """Place one native callout near its projected city cell."""
+
+    label_width = min(max(1, label_width), canvas_width)
+    anchor_column, anchor_row = anchor
+    row_offsets = [0]
+    for distance in range(1, canvas_height):
+        row_offsets.extend((-distance, distance))
+
+    for row_offset in row_offsets:
+        row = anchor_row + row_offset
+        if not 0 <= row < canvas_height:
+            continue
+        for column, marker_on_right in (
+            (anchor_column, False),
+            (anchor_column - label_width + 1, True),
+        ):
+            if column < 0 or column + label_width > canvas_width:
+                continue
+            cells = {(column + offset, row) for offset in range(label_width)}
+            if cells & occupied:
+                continue
+            occupied.update(cells)
+            return LocationMapPlacement(
+                key=key,
+                column=column,
+                row=row,
+                width=label_width,
+                marker_on_right=marker_on_right,
+            )
+    return None
+
+
 def _normalized_place_name(name: str) -> str:
     return ' '.join(name.split()).casefold()
 
@@ -402,7 +676,9 @@ def _normalized_place_name(name: str) -> str:
 __all__ = [
     'LocationMap',
     'LocationMapGeometry',
+    'LocationMapLabel',
     'LocationMapPalette',
+    'LocationMapPlacement',
     'build_location_map_geometry',
     'render_location_map',
 ]

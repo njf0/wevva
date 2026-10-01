@@ -620,7 +620,8 @@ class Wevva(App, inherit_bindings=False):
         Adopts selected location first so widgets see correct context on WeatherUpdated.
         """
         self.location = message.location
-        self.push_screen(self.weather_screen)
+        if self.screen is not self.weather_screen:
+            self.push_screen(self.weather_screen)
         await self.action_refresh()
 
     async def on_saved_location_selected(self, message: SavedLocationSelected) -> None:

@@ -98,6 +98,8 @@ Braille appearance, and very dense real saved-location collections.
 - The global viewport ends at 78°S: the Antarctic coast remains recognizable,
   while its southern cap no longer consumes rows that can separate inhabited
   locations.
+- Callouts may face either direction: `• City temperature` extends right and
+  `City temperature •` extends left, so the marker stays on its projected point.
 
 ## Outcome
 

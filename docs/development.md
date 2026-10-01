@@ -93,8 +93,11 @@ are covered by deterministic tests.
 The saved-locations world map additionally has deterministic coverage for its
 global Braille raster, collision-free native labels, resize/focus retention,
 mouse and keyboard selection, padded screen integration, and return-to-weather
-refresh path. Live terminal colour inversion, font-dependent Braille geometry,
-mouse behavior, and emoji alignment still require manual checks.
+refresh path. The country map has corresponding checks for its native current
+and nearby-city callouts, temperature updates, inversion, and in-place weather
+selection while retaining the responsive context layouts. Live terminal colour
+inversion, font-dependent Braille geometry, mouse behavior, and emoji alignment
+still require manual checks.
 
 Live behavior needs network access to Open-Meteo forecast, geocoding, and air
 quality APIs. Alert behavior also depends on `wevva-warnings` and its provider

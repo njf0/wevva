@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import AsyncMock
 
-from rich.style import Style
 from textual.app import App, ComposeResult
 
+from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
+from wevva.messages import PlaceSelected
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.location_map import (
     LocationMap,
+    LocationMapLabel,
     LocationMapPalette,
     build_location_map_geometry,
     render_location_map,
@@ -99,7 +102,7 @@ class LocationMapGeometryTests(unittest.TestCase):
             },
         )
 
-        self.assertIn('✦ Munich', rendered.plain)
+        self.assertIn('• Munich', rendered.plain)
         self.assertIn('• Berlin 16°C', rendered.plain)
         self.assertTrue(any(span.style == 'magenta' for span in rendered.spans))
         self.assertTrue(any(span.style == 'bold red' for span in rendered.spans))
@@ -121,15 +124,22 @@ class LocationMapGeometryTests(unittest.TestCase):
             max_place_labels=2,
         )
 
-        self.assertEqual(rendered.plain.count('•'), 2)
+        self.assertEqual(rendered.plain.count('•'), 3)
         self.assertIn('Berlin', rendered.plain)
         self.assertIn('Frankfurt', rendered.plain)
         self.assertNotIn('Hamburg', rendered.plain)
 
 
 class _LocationMapApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.selected: list[LocationMetadata] = []
+
     def compose(self) -> ComposeResult:
         yield LocationMap()
+
+    def on_place_selected(self, event: PlaceSelected) -> None:
+        self.selected.append(event.location)
 
 
 class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
@@ -147,13 +157,17 @@ class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await pilot.pause()
+            await pilot.pause()
 
             self.assertTrue(widget.display)
             self.assertEqual(widget.border_title, 'Location Map — United Kingdom')
             self.assertGreaterEqual(widget.content_size.height, 12)
             self.assertLessEqual(widget.content_size.height, 26)
-            self.assertIn('✦ London', widget.render().plain)
-            self.assertEqual(widget.render().plain.count('London'), 1)
+            labels = list(widget.query(LocationMapLabel))
+            current = next(label for label in labels if label.current)
+            self.assertEqual(current.label_text, '• London')
+            self.assertIn('reverse', str(current.styles.text_style))
+            self.assertTrue(any(0x2801 <= ord(char) <= 0x28FF for char in widget.render().plain))
 
     async def test_widget_adds_temperature_and_uses_requested_unit(self) -> None:
         app = _LocationMapApp()
@@ -182,8 +196,14 @@ class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             )
             widget.update_temperatures({berlin: 61.2}, temperature_unit='fahrenheit')
             await pilot.pause()
+            await pilot.pause()
 
-            self.assertIn('Berlin 61°F', widget.render().plain)
+            berlin_label = next(
+                label
+                for label in widget.query(LocationMapLabel)
+                if label.location.name == 'Berlin'
+            )
+            self.assertEqual(berlin_label.label_text, '• Berlin 61°F')
 
     async def test_current_location_label_uses_temperature_as_background(self) -> None:
         app = _LocationMapApp()
@@ -201,40 +221,101 @@ class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
                 temperature_unit='celsius',
             )
             await pilot.pause()
+            await pilot.pause()
 
-            rendered = widget.render()
-            location_offset = rendered.plain.index('Munich')
-            marker_offset = rendered.plain.index('✦')
-            gap_offset = marker_offset + 1
-            temperature_offset = rendered.plain.index('18°C')
-            location_span = next(
-                span
-                for span in rendered.spans
-                if span.start <= location_offset < span.end
+            current = next(
+                label for label in widget.query(LocationMapLabel) if label.current
             )
-            marker_span = next(
-                span
-                for span in rendered.spans
-                if span.start <= marker_offset < span.end
+            self.assertEqual(current.label_text, '• Munich 18°C')
+            self.assertIn('bold', str(current.styles.text_style))
+            self.assertIn('reverse', str(current.styles.text_style))
+            self.assertIsNotNone(current.styles.color)
+
+    async def test_nearby_city_is_natively_clickable_and_focus_inverts_it(self) -> None:
+        app = _LocationMapApp()
+        async with app.run_test(size=(110, 40)) as pilot:
+            widget = app.query_one(LocationMap)
+            widget.update_location(
+                LocationMetadata(
+                    latitude=48.137,
+                    longitude=11.575,
+                    name='Munich',
+                    country='Germany',
+                    country_code='DE',
+                )
             )
-            gap_span = next(
-                span
-                for span in rendered.spans
-                if span.start <= gap_offset < span.end
+            for _ in range(3):
+                await pilot.pause()
+
+            berlin = next(
+                label
+                for label in widget.query(LocationMapLabel)
+                if label.location.name == 'Berlin'
             )
-            temperature_span = next(
-                span
-                for span in rendered.spans
-                if span.start <= temperature_offset < span.end
+            berlin.focus()
+            await pilot.pause()
+            self.assertIn('reverse', str(berlin.styles.text_style))
+            self.assertTrue(await pilot.click(berlin))
+            await pilot.pause()
+
+            self.assertEqual([location.name for location in app.selected], ['Berlin'])
+            self.assertEqual(app.selected[0].country, 'Germany')
+            self.assertEqual(app.selected[0].country_code, 'DE')
+
+    async def test_narrow_map_can_place_city_text_left_of_its_marker(self) -> None:
+        app = _LocationMapApp()
+        async with app.run_test(size=(40, 30)) as pilot:
+            widget = app.query_one(LocationMap)
+            widget.styles.width = 37
+            widget.update_location(
+                LocationMetadata(
+                    latitude=48.137,
+                    longitude=11.575,
+                    name='Munich',
+                    country='Germany',
+                    country_code='DE',
+                )
             )
-            resolved = Style.parse(str(location_span.style))
-            self.assertTrue(resolved.bold)
-            self.assertIsNotNone(resolved.color)
-            self.assertIsNotNone(resolved.bgcolor)
-            self.assertIn('✦ Munich 18°C', rendered.plain)
-            self.assertEqual(marker_span.style, location_span.style)
-            self.assertEqual(gap_span.style, location_span.style)
-            self.assertEqual(temperature_span.style, location_span.style)
+            for _ in range(3):
+                await pilot.pause()
+
+            dresden = next(
+                label
+                for label in widget.query(LocationMapLabel)
+                if label.location.name == 'Dresden'
+            )
+            self.assertEqual(dresden.label_text, 'Dresden •')
+            self.assertTrue(
+                any(placement.marker_on_right for placement in widget.placements)
+            )
+
+    async def test_map_place_selection_reuses_active_weather_screen(self) -> None:
+        munich = LocationMetadata(
+            latitude=48.137,
+            longitude=11.575,
+            name='Munich',
+            country='Germany',
+            country_code='DE',
+        )
+        berlin = LocationMetadata(
+            latitude=52.52,
+            longitude=13.405,
+            name='Berlin',
+            country='Germany',
+            country_code='DE',
+        )
+        app = Wevva(initial_location=munich)
+        app.action_refresh = AsyncMock()
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            weather_screen = app.screen
+            await app.on_place_selected(PlaceSelected(location=berlin))
+            await pilot.pause()
+
+            self.assertIs(app.screen, weather_screen)
+            self.assertEqual(app.location, berlin)
+            self.assertEqual(app.action_refresh.await_count, 2)
 
 
 class _WeatherMapApp(App):
@@ -279,14 +360,20 @@ class LocationMapLoadingTests(unittest.IsolatedAsyncioTestCase):
             await started.wait()
             await pilot.pause()
 
-            self.assertIn('✦ Munich', screen.location_map.render().plain)
-            self.assertNotIn('°C', screen.location_map.render().plain)
+            labels = list(screen.location_map.query(LocationMapLabel))
+            self.assertIn('• Munich', {label.label_text for label in labels})
+            self.assertFalse(any('°C' in label.label_text for label in labels))
             release.set()
             await pilot.pause()
             await pilot.pause()
 
             self.assertEqual(requested, [screen.location_map.city_coordinates])
-            self.assertIn('16°C', screen.location_map.render().plain)
+            self.assertTrue(
+                any(
+                    '16°C' in label.label_text
+                    for label in screen.location_map.query(LocationMapLabel)
+                )
+            )
 
 
 if __name__ == '__main__':

@@ -23,6 +23,7 @@ from wevva.layout import (
 )
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.daily_forecast import DailyForecast
+from wevva.widgets.location_map import LocationMapLabel
 from wevva.widgets.weather_alerts import (
     WeatherAlertSummary,
     WeatherAlertsModal,
@@ -441,7 +442,12 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 ('aqi', 'pollen'),
             )
             self.assertTrue(screen.context_bar.air_quality.display)
-            self.assertIn('✦ Chicago', screen.location_map.render().plain)
+            self.assertTrue(
+                any(
+                    label.label_text.startswith('• Chicago')
+                    for label in screen.location_map.query(LocationMapLabel)
+                )
+            )
 
             daily = screen.query_one(DailyForecast)
             visible = daily.daily._visible_columns
@@ -478,7 +484,13 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(screen.context_bar.location.display)
             self.assertTrue(screen.context_bar.astronomy.display)
             self.assertFalse(screen.context_bar.air_quality.display)
-            self.assertLessEqual(screen.location_map.render().plain.count('•'), 4)
+            self.assertLessEqual(
+                sum(
+                    not label.current and label.display
+                    for label in screen.location_map.query(LocationMapLabel)
+                ),
+                4,
+            )
             self.assertEqual(screen.query_one(DailyForecast).daily.row_count, 6)
             self.assertFalse(screen.saved_locations_sidebar_visible)
             self.assertFalse(screen.alert_details_sidebar_visible)
@@ -545,7 +557,12 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.context_bar.location.get_cell('date', 'value').plain,
                 r'^\w{3} \d{2} \w{3} \d{4}$',
             )
-            self.assertIn('✦ Chicago', screen.location_map.render().plain)
+            self.assertTrue(
+                any(
+                    label.label_text.startswith('• Chicago')
+                    for label in screen.location_map.query(LocationMapLabel)
+                )
+            )
             self.assertEqual(screen.main_panel.max_scroll_y, 0)
 
     async def test_wide_short_and_narrow_tall_spend_independent_budgets(self) -> None:

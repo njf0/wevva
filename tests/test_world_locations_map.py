@@ -73,7 +73,7 @@ class _WorldMapApp(App):
 class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
     async def test_world_map_uses_native_location_widgets(self) -> None:
         app = _WorldMapApp()
-        async with app.run_test(size=(100, 30)) as pilot:
+        async with app.run_test(size=(80, 24)) as pilot:
             for _ in range(3):
                 await pilot.pause()
 
@@ -81,10 +81,21 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
             labels = list(world_map.query(WorldLocationLabel))
             self.assertEqual(world_map.styles.border_top[0], 'round')
             self.assertEqual(len(labels), 3)
-            self.assertTrue(all(label.label_text.startswith('• ') for label in labels))
+            self.assertTrue(
+                all(
+                    label.label_text.startswith('• ')
+                    or label.label_text.endswith(' •')
+                    for label in labels
+                )
+            )
             self.assertIn('London 16°C', labels[0].label_text)
+            tokyo = next(label for label in labels if label.location.name == 'Tokyo')
+            self.assertEqual(tokyo.label_text, 'Tokyo 28°C •')
             self.assertTrue(all(label.styles.position == 'absolute' for label in labels))
             self.assertEqual(len(world_map.placements), 3)
+            self.assertTrue(
+                any(placement.marker_on_right for placement in world_map.placements)
+            )
 
             occupied = set()
             for placement in world_map.placements:

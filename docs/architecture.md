@@ -152,6 +152,15 @@ Ranked cities are restricted to that selected land and the forecast location is
 drawn and labelled in a distinct semantic colour. Up to eight ranked cities
 receive current temperatures from one lightweight, non-blocking multi-location
 Open-Meteo request; failed or stale enrichment leaves the base map intact.
+The land raster and labels are separate layers. Each current/city callout is a
+native `LocationMapLabel` using the same `•` marker; permanent reverse styling
+identifies the active forecast, while hover/focus reverses other labels. Click,
+Enter, or Space sends the ordinary `PlaceSelected` message and refreshes the
+weather screen in place. Responsive placement still limits the sidecar to four
+cities and the wider bottom map to eight, reflowing collision-free labels after
+temperature updates and resizes. A callout faces right (`• City temperature`)
+or left (`City temperature •`) according to available space, keeping the marker
+on the projected city cell.
 
 The saved-locations world map is a separate global navigation surface opened
 with `m`. It layers native, focusable `WorldLocationLabel` widgets over one

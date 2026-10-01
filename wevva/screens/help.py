@@ -70,6 +70,7 @@ You can launch it directly with `uvx wevva`.
 
 - Use arrow keys/tab to move focus across tables and widgets.
 - On the World Map, use left/right to move between locations and Enter to open one.
+- Country-map city labels can be clicked or focused and activated with Enter.
 - On Tropical Systems, `r` refreshes active systems and their source products.
 - On Tropical Systems, `t` toggles position dots and `c` toggles the official cone.
 - Highlighting rows/columns updates linked weather context.
