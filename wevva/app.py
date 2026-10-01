@@ -129,7 +129,7 @@ class Wevva(App, inherit_bindings=False):
             wind_speed_unit=wind_speed_unit,
             precipitation_unit=precipitation_unit,
         )
-        self.sub_title = 'Weather data from Open-Meteo'  # static subtitle for all screens
+        self.sub_title = 'Powered by Open-Meteo'
         self.forecast_metadata = None  # LocationMetadata after first fetch
         # unified location context (holds geocoded place + last forecast metadata)
         self.location = initial_location or LocationMetadata()  # set from CLI or search
@@ -142,6 +142,7 @@ class Wevva(App, inherit_bindings=False):
         self._forecast_cache: dict[ForecastCacheKey, ForecastCacheEntry] = {}
         self._forecast_cache_clock = time.monotonic
         self._alerts_task: asyncio.Task[None] | None = None
+        self._alert_indicator_generation: int | None = None
         self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
         self._alert_cache_clock = time.monotonic
         self._tropical_system_cache: TropicalCacheEntry | None = None
@@ -675,9 +676,19 @@ class Wevva(App, inherit_bindings=False):
 
     def _cancel_alerts_task(self) -> None:
         """Cancel any in-flight background alert fetch."""
+        if self._alert_indicator_generation is not None:
+            self._set_warning_checking(False)
+            self._alert_indicator_generation = None
         if self._alerts_task is not None and not self._alerts_task.done():
             self._alerts_task.cancel()
         self._alerts_task = None
+
+    def _set_warning_checking(self, checking: bool) -> None:
+        """Update the weather header when that screen supports the indicator."""
+
+        setter = getattr(self.weather_screen, 'set_warning_checking', None)
+        if callable(setter):
+            setter(checking)
 
     def _schedule_alert_refresh(
         self,
@@ -690,12 +701,8 @@ class Wevva(App, inherit_bindings=False):
         lon = self.location.longitude
         if lat is None or lon is None:
             return
-        if not getattr(self.weather_screen, 'saved_locations_sidebar_visible', False):
-            self.notify(
-                'Checking weather warnings…',
-                title='Weather warnings',
-                severity='information',
-            )
+        self._alert_indicator_generation = refresh_generation
+        self._set_warning_checking(True)
         country_code = normalize_country_code(self.location.country_code)
         warning_language = 'en' if self.warning_language == 'en' else 'auto'
         cache_key = (country_code, warning_language)
@@ -740,8 +747,6 @@ class Wevva(App, inherit_bindings=False):
             )
         )
         reusable_completed = cached_candidates is not None
-        native_completed = False
-        matching_completed = True
 
         def report_progress(event: str, payload: dict[str, object]) -> None:
             """Transfer the warning worker's callback safely to the TUI loop."""
@@ -781,12 +786,11 @@ class Wevva(App, inherit_bindings=False):
                 candidates = list(cached_candidates)
 
             try:
-                native_alerts, native_completed = await native_lookup
+                native_alerts, _ = await native_lookup
             except asyncio.CancelledError:
                 raise
             except Exception:
                 native_alerts = []
-                native_completed = False
 
             if (
                 refresh_generation != self._refresh_generation
@@ -807,7 +811,6 @@ class Wevva(App, inherit_bindings=False):
                 raise
             except Exception:
                 alerts = []
-                matching_completed = False
 
             if (
                 refresh_generation != self._refresh_generation
@@ -817,22 +820,12 @@ class Wevva(App, inherit_bindings=False):
                 return
 
             self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
-            if reusable_completed and native_completed and matching_completed:
-                if not alerts:
-                    self.notify(
-                        'No active warnings found.',
-                        title='Weather warnings',
-                        severity='information',
-                    )
-            else:
-                self.notify(
-                    'Unable to fetch weather warnings.',
-                    title='Weather warnings',
-                    severity='error',
-                )
         finally:
             if not native_lookup.done():
                 native_lookup.cancel()
+            if self._alert_indicator_generation == refresh_generation:
+                self._alert_indicator_generation = None
+                self._set_warning_checking(False)
 
     def _get_tropical_system_fetch_task(self) -> asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]:
         """Return the one in-flight global canonical fetch for this session."""

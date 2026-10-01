@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from io import StringIO
 import unittest
 
@@ -223,7 +224,14 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.current_weather.detail.row_count, 1)
             self.assertEqual(
                 screen.current_weather.detail.get_cell_at(Coordinate(0, 0)).plain,
-                'Humid.',
+                'Hum.',
+            )
+            self.assertEqual(
+                tuple(
+                    column.width
+                    for column in screen.current_weather.detail.columns.values()
+                ),
+                (5, 7),
             )
 
             hourly = screen.hourly_forecast
@@ -316,6 +324,22 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(hourly.scroll_indicator.render().plain, '')
             self.assertEqual(hourly.border_subtitle, '')
 
+    async def test_warning_check_uses_header_subtitle_then_restores_credit(self) -> None:
+        app = _ResponsiveWeatherApp(emoji_enabled=True)
+        async with app.run_test(size=(80, 24)) as pilot:
+            screen = await _load_weather(app, pilot, warnings=False)
+            weather_icon = screen.header.icon
+            self.assertTrue(weather_icon)
+            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+
+            screen.set_warning_checking(True)
+            self.assertEqual(app.sub_title, 'Checking warnings…')
+            self.assertEqual(screen.header.icon, weather_icon)
+
+            screen.set_warning_checking(False)
+            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+            self.assertEqual(screen.header.icon, weather_icon)
+
     async def test_very_wide_hourly_columns_stop_at_readable_width(self) -> None:
         app = _ResponsiveWeatherApp()
         async with app.run_test(size=(240, 24)) as pilot:
@@ -353,7 +377,7 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                     column.width
                     for column in screen.current_weather.detail.columns.values()
                 ),
-                (11, 6),
+                (11, 7),
             )
             main_center = screen.main_panel.content_region.x + (
                 screen.main_panel.content_region.width // 2
@@ -728,7 +752,21 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
     async def test_warning_summary_opens_tabbed_scrolling_modal(self) -> None:
         app = _ResponsiveWeatherApp()
         async with app.run_test(size=(80, 24)) as pilot:
-            screen = await _load_weather(app, pilot, warnings=True)
+            update = weather_update(with_warnings=True)
+            update.alerts[0] = replace(
+                update.alerts[0],
+                geometry={
+                    'type': 'Polygon',
+                    'coordinates': [[
+                        [-88.1, 41.5],
+                        [-87.3, 41.5],
+                        [-87.3, 42.2],
+                        [-88.1, 42.2],
+                        [-88.1, 41.5],
+                    ]],
+                },
+            )
+            screen = await _load_update(app, pilot, update)
             summary = screen.query_one(WeatherAlertSummary)
 
             self.assertEqual(summary.region.height, 3)
@@ -744,10 +782,20 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(dialog.styles.border_top[0], 'round')
             self.assertIsNone(details.border_title)
             self.assertEqual(details.styles.border_top[0], '')
+            self.assertTrue(reader.warning_area.display)
+            self.assertEqual(
+                details.region.height,
+                reader.warning_area.region.height,
+            )
             reader.tabs.active = 'alert-item-1'
             reader.tabs.focus()
             await pilot.pause()
 
+            self.assertFalse(reader.warning_area.display)
+            self.assertEqual(
+                details.region.width,
+                reader.presentation.content_region.width,
+            )
             console = Console(width=80, file=StringIO(), record=True)
             console.print(getattr(details.content, '_Static__content'))
             self.assertIn(

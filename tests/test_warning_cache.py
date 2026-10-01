@@ -18,9 +18,13 @@ from wevva.widgets.saved_locations import SavedLocationsSidebar
 class _WeatherScreen:
     def __init__(self) -> None:
         self.messages = []
+        self.warning_checking = []
 
     def post_message(self, message) -> None:
         self.messages.append(message)
+
+    def set_warning_checking(self, checking: bool) -> None:
+        self.warning_checking.append(checking)
 
 
 def _alert_in_box(identifier: str, *, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> Alert:
@@ -251,7 +255,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_warning_notifications_report_start_and_empty_success(self) -> None:
+    async def test_warning_indicator_wraps_empty_success_without_toasts(self) -> None:
         with (
             patch(
                 'wevva.app._get_reusable_alerts_async_with_status',
@@ -264,23 +268,10 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self._schedule_and_wait()
 
-        self.assertEqual(
-            self.app.notify.call_args_list,
-            [
-                call(
-                    'Checking weather warnings…',
-                    title='Weather warnings',
-                    severity='information',
-                ),
-                call(
-                    'No active warnings found.',
-                    title='Weather warnings',
-                    severity='information',
-                ),
-            ],
-        )
+        self.assertEqual(self.app.weather_screen.warning_checking, [True, False])
+        self.app.notify.assert_not_called()
 
-    async def test_warning_notifications_do_not_duplicate_progress_updates(self) -> None:
+    async def test_warning_progress_does_not_create_toasts(self) -> None:
         def report_progress(_country_code, _warning_language, *, progress):
             progress('source_started', {'source': 'dwd'})
             progress('alerts_total', {'total': 2, 'phase': 'documents'})
@@ -302,9 +293,10 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self._schedule_and_wait()
 
-        self.assertEqual(self.app.notify.call_count, 2)
+        self.assertEqual(self.app.weather_screen.warning_checking, [True, False])
+        self.app.notify.assert_not_called()
 
-    async def test_warning_notifications_report_fetch_failure(self) -> None:
+    async def test_warning_failure_stops_indicator_without_toast(self) -> None:
         with (
             patch(
                 'wevva.app._get_reusable_alerts_async_with_status',
@@ -317,11 +309,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self._schedule_and_wait()
 
-        self.app.notify.assert_called_with(
-            'Unable to fetch weather warnings.',
-            title='Weather warnings',
-            severity='error',
-        )
+        self.assertEqual(self.app.weather_screen.warning_checking, [True, False])
+        self.app.notify.assert_not_called()
 
     async def test_active_warning_uses_widget_instead_of_terminal_toast(self) -> None:
         alert = _alert_in_box(
@@ -343,14 +332,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self._schedule_and_wait()
 
-        self.app.notify.assert_called_once_with(
-            'Checking weather warnings…',
-            title='Weather warnings',
-            severity='information',
-        )
+        self.assertEqual(self.app.weather_screen.warning_checking, [True, False])
+        self.app.notify.assert_not_called()
         self.assertEqual(self._alert_updates()[-1].alerts, [alert])
 
-    async def test_visible_progress_sidebar_suppresses_only_the_start_toast(self) -> None:
+    async def test_visible_progress_sidebar_uses_same_header_indicator(self) -> None:
         self.app.weather_screen.saved_locations_sidebar_visible = True
         with (
             patch(
@@ -364,11 +350,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self._schedule_and_wait()
 
-        self.app.notify.assert_called_once_with(
-            'No active warnings found.',
-            title='Weather warnings',
-            severity='information',
-        )
+        self.assertEqual(self.app.weather_screen.warning_checking, [True, False])
+        self.app.notify.assert_not_called()
 
 
 class AlertServiceStatusTests(unittest.TestCase):

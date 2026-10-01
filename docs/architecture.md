@@ -68,10 +68,10 @@ from cached values and accept later results without issuing its own queries.
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
   sidebar shows an indeterminate bar while a provider request is pending and
   switches to measured progress once the provider returns its alert count.
-  When that sidebar is absent, the app emits one informational notification at
-  the start of a warning check. A completed empty check or a failed check emits
-  one terminal notification; provider progress callbacks never emit their own
-  notifications, and active results are communicated by the warning widget.
+  Independently of that rail, the header subtitle reads `Checking warnings…`
+  for the lifetime of the warning task and then restores `Powered by
+  Open-Meteo`. Warning checks do not emit toast notifications; active results
+  are communicated by the warning widget.
   Reusable country alerts and native point alerts start together. Tropical
   retrieval is not part of this weather-location refresh path.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
@@ -179,8 +179,12 @@ heights. Once three additional rows are available after the standard current
 instruments, it upgrades to the classic alert tabs and a two-line preview;
 activating the selected preview opens that warning. Mouse activation, Enter,
 or Space opens a modal where those tabs directly select the complete provider
-document in one independently scrolling, unframed detail body inside the
-modal's single rounded frame. Saved locations and
+document in one independently scrolling, unframed detail body. When the
+selected warning has real polygon geometry, the same selection path adds a
+bounded Warning Area peer beside the document; alerts without geometry return
+the complete width to the prose. The modal's single rounded frame is centred,
+uses the selected severity colour, and carries the bold centred alert-count
+title. Saved locations and
 warning details also have modal access commands. When width and height permit,
 the first 42 surplus columns move existing forecast context beside the full
 102-column central canvas. Auxiliary sidebars use later surplus: one at 186

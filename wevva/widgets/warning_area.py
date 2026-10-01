@@ -109,9 +109,17 @@ def render_warning_area(
         (('land', palette.land), ('warning', palette.warning)),
         solid_braille_layers=('land', 'warning'),
     )
-    location_cell = frame.marker(scope.location, '✦', palette.location)
+    location_style = f'bold {palette.location}' if palette.location else 'bold'
+    location_cell = frame.marker(scope.location, '•', location_style)
     occupied = {location_cell}
-    frame.label(location_cell, scope.location_name, palette.location, occupied, gap=1)
+    frame.label(
+        location_cell,
+        scope.location_name,
+        location_style,
+        occupied,
+        gap=1,
+        gap_style=location_style,
+    )
     return frame.to_text()
 
 
@@ -129,16 +137,35 @@ class WarningAreaScope(Static):
         border-title-color: $secondary;
         border-title-style: bold;
     }
+
+    WarningAreaScope.-fill-height {
+        height: 100%;
+        margin: 0;
+    }
     """
 
-    def __init__(self, *, id: str = 'warning-area-scope') -> None:
+    def __init__(
+        self,
+        *,
+        fill_height: bool = False,
+        id: str = 'warning-area-scope',
+    ) -> None:
         super().__init__('', id=id)
+        self.fill_height = fill_height
+        if fill_height:
+            self.add_class('-fill-height')
         self.border_title = 'Warning Area'
         self.styles.border_title_align = 'left'
         self._scope: WarningAreaGeometry | None = None
         self._warning_color: str | None = None
         self._preferred_content_height: int | None = None
         self.display = False
+
+    @property
+    def has_geometry(self) -> bool:
+        """Whether the selected alert produced a renderable warning scope."""
+
+        return self._scope is not None
 
     def update_alert(
         self,
@@ -175,7 +202,7 @@ class WarningAreaScope(Static):
 
     def _sync_preferred_height(self) -> None:
         """Update explicit height only when width or projected aspect requires it."""
-        if self._scope is None:
+        if self._scope is None or self.fill_height:
             return
         available_width = self.content_size.width
         if available_width <= 0 and self.parent is not None:

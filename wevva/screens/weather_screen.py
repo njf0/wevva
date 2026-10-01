@@ -102,7 +102,6 @@ class WeatherScreen(Screen[None]):
         ('i', 'alert_details', 'Warning details'),
         ('m', 'world_map', 'World Map'),
     ]
-
     def __init__(
         self,
         *args,
@@ -348,8 +347,8 @@ class WeatherScreen(Screen[None]):
 
     def on_mount(self) -> None:
         # Hide content until weather data arrives
-        self.sub_title = 'Weather data from Open-Meteo'
-        self.app.sub_title = 'Weather data from Open-Meteo'
+        self.sub_title = 'Powered by Open-Meteo'
+        self.app.sub_title = 'Powered by Open-Meteo'
         self.query_one('#main-panel').display = False
         self.warnings_row.display = False
         self.weather_warnings.display = False
@@ -359,6 +358,13 @@ class WeatherScreen(Screen[None]):
         if self._location_map_task is not None:
             self._location_map_task.cancel()
             self._location_map_task = None
+
+    def set_warning_checking(self, checking: bool) -> None:
+        """Show transient warning-query activity in the header subtitle."""
+
+        subtitle = 'Checking warnings…' if checking else 'Powered by Open-Meteo'
+        self.sub_title = subtitle
+        self.app.sub_title = subtitle
 
     @property
     def saved_locations_sidebar_visible(self) -> bool:

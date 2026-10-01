@@ -176,10 +176,9 @@ important behavior is:
   activating either warning body opens a dedicated reader whose tabs directly
   select the complete, independently scrolling provider document within one
   rounded modal frame, without a nested detail border;
-- while the saved-locations progress rail is absent, a refresh uses one
-  informational start notification and at most one terminal empty-success or
-  error notification; provider progress does not create notification stacks,
-  and active results use the warning card or tabs instead;
+- warning refresh activity temporarily changes the header subtitle to
+  `Checking warnings…`, then restores `Powered by Open-Meteo`; it creates no
+  toast notifications, while active results use the warning card or tabs;
 - once the higher-priority forecast is complete and 14 rows remain, location,
   astronomy, and air-quality cards stack beside the no-padding country map in
   a centred two-column matrix; all three cards and the map grow together at
@@ -339,6 +338,32 @@ transition:
 - the mounted context tables and map survive transitions between bottom matrix
   and sidecar placement;
 - automatic rails never squeeze the central forecast or trigger data fetches.
+
+## Cross-screen map interaction contract
+
+New geographic screens should extend the interaction language already shared
+by the country and saved-locations maps rather than inventing per-map hit
+testing:
+
+- land, tracks, cones, and polygons form the Braille/raster backdrop, while
+  interactive places and systems are native Textual children;
+- city markers use `•`, with direction-aware `• City value` / `City value •`
+  callouts which keep the marker on the projected coordinate;
+- hover, focus, and persistent selection reverse the complete callout, and
+  click, Enter, and Space follow the same widget message path;
+- temperature, warning severity, or storm classification supplies the semantic
+  base colour; interaction styling is an overlay and must not make that meaning
+  or the selected item ambiguous;
+- the screen owns logical selection and preserves it while collision placement
+  is recomputed after resize; and
+- resize is presentation-only. Rank and cap any enrichment locations before a
+  batched request, cache the result briefly, and retain usable geography and
+  names if enrichment fails.
+
+Each map may intentionally omit interaction for non-navigable geometry, such as
+an alert polygon in a document reader. It should still reuse the shared
+projection, semantic-colour, and failure behavior rather than introducing a
+parallel visual convention.
 
 ## Verification matrix
 

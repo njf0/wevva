@@ -98,7 +98,7 @@ uvx wevva --clear-default-location
 - Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
 - A bordered alert summary upgrades to the classic tabbed preview when height permits. Activating either form opens a modal where those tabs directly select the full, independently scrolling provider document; wide layouts retain the automatic detail/map sidebar.
-- Background warning checks use one start notification and one terminal success or error notification; provider progress never creates a stack of toasts.
+- During a background warning check, the header subtitle briefly reads `Checking warnings…` and then returns to `Powered by Open-Meteo`; warning status does not create toast notifications.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.

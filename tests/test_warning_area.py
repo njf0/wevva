@@ -8,6 +8,8 @@ import unittest
 
 from rich.console import Console
 from textual.app import App, ComposeResult
+from textual.color import Color
+from textual.containers import Container
 
 from wevva.alerts import Alert
 from wevva.location_metadata import LocationMetadata
@@ -24,6 +26,7 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertSummary,
     WeatherAlertsModal,
     WeatherAlertsReader,
+    alert_severity_color,
 )
 from wevva_warnings import TropicalSystem
 from wevva_warnings.registry import get_source
@@ -139,9 +142,16 @@ class WarningAreaGeometryTests(unittest.TestCase):
             palette=WarningAreaPalette(land='#5684a5', warning='yellow', location='green'),
         )
 
-        self.assertIn('✦', rendered.plain)
+        self.assertIn('•', rendered.plain)
         self.assertIn('Accra', rendered.plain)
-        self.assertIn('✦ Accra', rendered.plain)
+        self.assertIn('• Accra', rendered.plain)
+        label_offset = rendered.plain.index('Accra')
+        self.assertTrue(
+            any(
+                span.start <= label_offset < span.end and 'bold' in str(span.style)
+                for span in rendered.spans
+            )
+        )
         self.assertTrue(any(span.style == 'yellow' for span in rendered.spans))
         self.assertTrue(any(span.style == '#5684a5' for span in rendered.spans))
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
@@ -179,6 +189,26 @@ class _WarningWeatherApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(WeatherScreen())
+
+
+class _WarningModalApp(App):
+    def __init__(self, alerts: list[Alert], *, initial_index: int = 0) -> None:
+        super().__init__()
+        self.alerts = alerts
+        self.initial_index = initial_index
+        self.location = LocationMetadata(
+            latitude=5.6037,
+            longitude=-0.1870,
+            name='Accra',
+            country='Ghana',
+            country_code='GH',
+        )
+        self.forecast_metadata = LocationMetadata(latitude=5.6037, longitude=-0.1870)
+
+    def on_mount(self) -> None:
+        self.push_screen(
+            WeatherAlertsModal(self.alerts, initial_index=self.initial_index)
+        )
 
 
 class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
@@ -222,7 +252,7 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
             self.assertIn('⣿', rendered.plain)
-            self.assertIn('✦ Accra', rendered.plain)
+            self.assertIn('• Accra', rendered.plain)
 
     async def test_selected_alert_updates_prose_and_warning_geometry_together(self) -> None:
         app = _WarningSidebarApp()
@@ -357,6 +387,119 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             console = Console(width=80, file=StringIO(), record=True)
             console.print(getattr(details.content, '_Static__content'))
             self.assertIn('second-tab heavy rain warning', console.export_text())
+
+
+class WarningAreaModalTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _details_text(reader: WeatherAlertsReader) -> str:
+        console = Console(width=80, file=StringIO(), record=True)
+        console.print(getattr(reader.details.content, '_Static__content'))
+        return console.export_text()
+
+    async def test_modal_is_geometrically_centred_at_supported_sizes(self) -> None:
+        for size in ((80, 24), (200, 60)):
+            with self.subTest(size=size):
+                app = _WarningModalApp([_ghana_alert()])
+                async with app.run_test(size=size) as pilot:
+                    for _ in range(3):
+                        await pilot.pause()
+
+                    dialog = app.screen.query_one('#weather-alert-modal', Container)
+                    viewport = app.screen.region
+                    left = dialog.region.x - viewport.x
+                    right = viewport.width - left - dialog.region.width
+                    top = dialog.region.y - viewport.y
+                    bottom = viewport.height - top - dialog.region.height
+
+                    self.assertLessEqual(abs(left - right), 1)
+                    self.assertLessEqual(abs(top - bottom), 1)
+                    self.assertEqual(dialog.border_title, '1 Severe Weather Alert')
+
+    async def test_tabs_synchronize_document_map_frame_and_scroll(self) -> None:
+        first = replace(
+            _ghana_alert('first-modal'),
+            severity='severe',
+            description='\n\n'.join(
+                f'Paragraph {index}: detailed warning guidance.'
+                for index in range(30)
+            ),
+        )
+        second = replace(
+            _ghana_alert(
+                'second-modal',
+                geometry={
+                    'type': 'Polygon',
+                    'coordinates': [[
+                        [-0.4, 5.3],
+                        [0.4, 5.3],
+                        [0.4, 6.1],
+                        [-0.4, 6.1],
+                        [-0.4, 5.3],
+                    ]],
+                },
+            ),
+            severity='extreme',
+        )
+        without_geometry = replace(
+            _ghana_alert('plain-modal'),
+            severity='minor',
+            geometry=None,
+        )
+        app = _WarningModalApp([first, second, without_geometry])
+
+        async with app.run_test(size=(80, 24)) as pilot:
+            for _ in range(3):
+                await pilot.pause()
+
+            dialog = app.screen.query_one('#weather-alert-modal', Container)
+            reader = app.screen.query_one(WeatherAlertsReader)
+            warning = reader.warning_area
+            first_geometry = warning._scope.warning if warning._scope else None
+
+            self.assertEqual(dialog.border_title, '3 Severe Weather Alerts')
+            self.assertEqual(dialog.styles.border_title_align, 'center')
+            self.assertTrue(dialog.styles.border_title_style.bold)
+            self.assertTrue(warning.display)
+            self.assertEqual(reader.details.region.height, warning.region.height)
+            self.assertLessEqual(
+                warning.region.x + warning.region.width,
+                reader.presentation.region.x + reader.presentation.region.width,
+            )
+            first_color = alert_severity_color(app.theme_variables, first)
+            assert first_color is not None
+            self.assertEqual(dialog.styles.border_top[1], Color.parse(first_color))
+            self.assertEqual(dialog.styles.border_title_color, Color.parse(first_color))
+
+            reader.details.scroll_end(animate=False)
+            await pilot.pause()
+            self.assertGreater(reader.details.scroll_y, 0)
+
+            reader.tabs.active = 'alert-item-1'
+            await pilot.pause()
+
+            self.assertEqual(reader.selected_index, 1)
+            self.assertEqual(reader.details.scroll_y, 0)
+            self.assertIn('second-modal heavy rain warning', self._details_text(reader))
+            self.assertTrue(warning.display)
+            self.assertNotEqual(
+                warning._scope.warning if warning._scope else None,
+                first_geometry,
+            )
+            second_color = alert_severity_color(app.theme_variables, second)
+            assert second_color is not None
+            self.assertEqual(dialog.styles.border_top[1], Color.parse(second_color))
+            self.assertEqual(dialog.styles.border_title_color, Color.parse(second_color))
+
+            reader.tabs.active = 'alert-item-2'
+            await pilot.pause()
+
+            self.assertEqual(reader.selected_index, 2)
+            self.assertIn('plain-modal heavy rain warning', self._details_text(reader))
+            self.assertFalse(warning.display)
+            self.assertEqual(
+                reader.details.region.width,
+                reader.presentation.content_region.width,
+            )
 
 
 if __name__ == '__main__':

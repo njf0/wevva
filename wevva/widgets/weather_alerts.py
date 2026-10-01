@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from rich.console import Group
 from rich.markup import escape
@@ -13,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
-from textual.events import Click, Key
+from textual.events import Click, Key, Resize
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Static, Tab, Tabs
@@ -117,6 +118,33 @@ def alert_tab_label(theme: dict[str, str], alert: Alert) -> Text:
         )
     return Text.from_markup(
         f'[bold]{escape(severity.title() or "Alert")} [/]{escape(condition)}'
+    )
+
+
+def alert_collection_title(alert_count: int) -> str:
+    """Describe a collection of applicable severe-weather alerts."""
+
+    return f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
+
+
+def _alert_location_context(
+    app: Any,
+) -> tuple[float | None, float | None, str, str | None]:
+    """Resolve the forecast point and selected-location map context."""
+
+    selected_location = getattr(app, 'location', None)
+    forecast_location = getattr(app, 'forecast_metadata', None)
+    latitude = getattr(forecast_location, 'latitude', None)
+    longitude = getattr(forecast_location, 'longitude', None)
+    if latitude is None:
+        latitude = getattr(selected_location, 'latitude', None)
+    if longitude is None:
+        longitude = getattr(selected_location, 'longitude', None)
+    return (
+        latitude,
+        longitude,
+        short_location_name(selected_location),
+        getattr(selected_location, 'country_code', None),
     )
 
 
@@ -233,8 +261,7 @@ class WeatherAlertsPanel(Container):
 
     def panel_title(self) -> str:
         """Describe the weather-alert collection."""
-        alert_count = len(self.alerts)
-        return f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
+        return alert_collection_title(len(self.alerts))
 
     def build_tab_label(self, alert: Alert) -> Text:
         return alert_tab_label(self.app.theme_variables, alert)
@@ -340,6 +367,87 @@ class WeatherAlertDetailsPanel(VerticalScroll):
         return self.query_one('#weather-alert-details', Static)
 
 
+class WeatherAlertPresentation(Container):
+    """Synchronized provider document and optional selected-warning map."""
+
+    DEFAULT_CSS = """
+    WeatherAlertPresentation {
+        layout: horizontal;
+        width: 100%;
+        height: 1fr;
+        min-height: 0;
+    }
+
+    WeatherAlertPresentation WeatherAlertDetailsPanel {
+        width: 1fr;
+        height: 100%;
+        min-width: 0;
+    }
+
+    WeatherAlertPresentation WarningAreaScope {
+        width: 40%;
+        min-width: 24;
+        max-width: 42;
+        height: 100%;
+        margin: 0 0 0 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield WeatherAlertDetailsPanel(
+            framed=False,
+            id='weather-alert-reader-details',
+        )
+        yield WarningAreaScope(
+            fill_height=True,
+            id='weather-alert-reader-warning-area',
+        )
+
+    @property
+    def details(self) -> WeatherAlertDetailsPanel:
+        return self.query_one('#weather-alert-reader-details', WeatherAlertDetailsPanel)
+
+    @property
+    def warning_area(self) -> WarningAreaScope:
+        return self.query_one('#weather-alert-reader-warning-area', WarningAreaScope)
+
+    def update_alert(self, alert: Alert, *, warning_color: str | None) -> None:
+        """Update every selected-alert surface as one presentation change."""
+
+        self.details.content.update(alert_renderable(alert))
+        self.details.scroll_home(animate=False)
+        latitude, longitude, location_name, country_code = _alert_location_context(
+            self.app
+        )
+        self.warning_area.update_alert(
+            alert,
+            location_latitude=latitude,
+            location_longitude=longitude,
+            location_name=location_name,
+            country_code=country_code,
+            warning_color=warning_color,
+        )
+        self._sync_warning_area_visibility()
+
+    def on_resize(self, event: Resize) -> None:
+        self._sync_warning_area_visibility()
+
+    def _sync_warning_area_visibility(self) -> None:
+        """Give compact, unsupported widths entirely to the document."""
+
+        self.warning_area.display = (
+            self.app.size.width >= 80 and self.warning_area.has_geometry
+        )
+
+
+class WeatherAlertReaderSelected(Message):
+    """Report the alert now shown by a complete warning reader."""
+
+    def __init__(self, alert: Alert) -> None:
+        super().__init__()
+        self.alert = alert
+
+
 class WeatherAlertsReader(Container):
     """Tabbed selector whose body is the complete provider warning document."""
 
@@ -356,11 +464,6 @@ class WeatherAlertsReader(Container):
         height: 2;
     }
 
-    #weather-alert-reader-details {
-        width: 100%;
-        height: 1fr;
-        min-height: 3;
-    }
     """
 
     def __init__(
@@ -390,10 +493,7 @@ class WeatherAlertsReader(Container):
             active=(f'alert-item-{self.selected_index}' if tabs else None),
             id='weather-alert-reader-tabs',
         )
-        yield WeatherAlertDetailsPanel(
-            framed=False,
-            id='weather-alert-reader-details',
-        )
+        yield WeatherAlertPresentation(id='weather-alert-reader-presentation')
 
     @property
     def tabs(self) -> Tabs:
@@ -401,7 +501,17 @@ class WeatherAlertsReader(Container):
 
     @property
     def details(self) -> WeatherAlertDetailsPanel:
-        return self.query_one('#weather-alert-reader-details', WeatherAlertDetailsPanel)
+        return self.presentation.details
+
+    @property
+    def presentation(self) -> WeatherAlertPresentation:
+        return self.query_one(
+            '#weather-alert-reader-presentation', WeatherAlertPresentation
+        )
+
+    @property
+    def warning_area(self) -> WarningAreaScope:
+        return self.presentation.warning_area
 
     def on_mount(self) -> None:
         if self.alerts:
@@ -417,8 +527,9 @@ class WeatherAlertsReader(Container):
             return
         self.selected_index = min(max(0, index), len(self.alerts) - 1)
         alert = self.alerts[self.selected_index]
-        self.details.content.update(alert_renderable(alert))
-        self.details.scroll_home(animate=False)
+        severity_color = alert_severity_color(self.app.theme_variables, alert)
+        self.presentation.update_alert(alert, warning_color=severity_color)
+        self.post_message(WeatherAlertReaderSelected(alert))
 
 
 class WeatherAlertsModal(ModalScreen[None]):
@@ -428,6 +539,8 @@ class WeatherAlertsModal(ModalScreen[None]):
 
     DEFAULT_CSS = """
     WeatherAlertsModal {
+        width: 100%;
+        height: 100%;
         align: center middle;
         background: $background 65%;
     }
@@ -437,9 +550,13 @@ class WeatherAlertsModal(ModalScreen[None]):
         width: 92%;
         max-width: 112;
         height: 88%;
+        max-height: 48;
         min-height: 12;
         padding: 1 2;
         border: round $primary;
+        border-title-color: $primary;
+        border-title-style: bold;
+        border-title-align: center;
         background: $background;
     }
 
@@ -456,11 +573,33 @@ class WeatherAlertsModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Container(id='weather-alert-modal') as dialog:
-            dialog.border_title = 'Weather Warnings'
+            dialog.border_title = alert_collection_title(len(self.alerts))
             yield WeatherAlertsReader(
                 self.alerts,
                 initial_index=self.initial_index,
                 id='weather-alert-modal-reader',
+            )
+
+    def on_mount(self) -> None:
+        if self.alerts:
+            selected_index = min(
+                max(0, int(self.initial_index)),
+                len(self.alerts) - 1,
+            )
+            self._apply_selected_alert_frame(self.alerts[selected_index])
+
+    def on_weather_alert_reader_selected(
+        self,
+        event: WeatherAlertReaderSelected,
+    ) -> None:
+        event.stop()
+        self._apply_selected_alert_frame(event.alert)
+
+    def _apply_selected_alert_frame(self, alert: Alert) -> None:
+        color = alert_severity_color(self.app.theme_variables, alert)
+        if color:
+            self.query_one('#weather-alert-modal', Container).set_styles(
+                f'border: round {color}; border-title-color: {color};'
             )
 
 
@@ -563,20 +702,7 @@ class WeatherAlertDetailsSidebar(Container):
         return self.details.content
 
     def _location_context(self) -> tuple[float | None, float | None, str, str | None]:
-        selected_location = getattr(self.app, 'location', None)
-        forecast_location = getattr(self.app, 'forecast_metadata', None)
-        latitude = getattr(forecast_location, 'latitude', None)
-        longitude = getattr(forecast_location, 'longitude', None)
-        if latitude is None:
-            latitude = getattr(selected_location, 'latitude', None)
-        if longitude is None:
-            longitude = getattr(selected_location, 'longitude', None)
-        return (
-            latitude,
-            longitude,
-            short_location_name(selected_location),
-            getattr(selected_location, 'country_code', None),
-        )
+        return _alert_location_context(self.app)
 
     def update_alert(self, alert: Alert) -> None:
         self.details.display = True

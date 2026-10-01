@@ -17,7 +17,7 @@ from wevva.layout import DetailRow
 
 _DETAIL_FIELDS = {
     DetailRow.HUMIDITY: (
-        'Humid.',
+        'Hum.',
         'Humidity',
         'get_humidity',
         'text-secondary',
@@ -25,7 +25,7 @@ _DETAIL_FIELDS = {
         None,
     ),
     DetailRow.VISIBILITY: (
-        'Visib.',
+        'Vis.',
         'Visibility',
         'get_visibility',
         'text-warning',
@@ -33,7 +33,7 @@ _DETAIL_FIELDS = {
         'km',
     ),
     DetailRow.PRESSURE: (
-        'Press.',
+        'Pres.',
         'Pressure',
         'get_surface_pressure',
         'text-error',
@@ -42,7 +42,7 @@ _DETAIL_FIELDS = {
     ),
     DetailRow.UV_INDEX: ('UV', 'UV Index', 'get_uv_index', 'text-accent', 'uv_index', None),
     DetailRow.CLOUD_COVER: (
-        'Cloud',
+        'Cld.',
         'Cloud Cover',
         'get_cloud_cover',
         'text-primary',
@@ -90,9 +90,9 @@ class CurrentDetailTable(DataTable):
         self.add_column(
             'Field',
             key='field',
-            width=11 if self._full_labels else 6,
+            width=11 if self._full_labels else 5,
         )
-        self.add_column('Value', key='value', width=6)
+        self.add_column('Value', key='value', width=7)
         for row in self._visible_rows:
             compact_label, full_label, *_ = _DETAIL_FIELDS[row]
             label = full_label if self._full_labels else compact_label
