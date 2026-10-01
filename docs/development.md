@@ -69,18 +69,32 @@ repository. There is no CI procedure in the repository.
 ## Local verification constraints
 
 Running the TUI needs an interactive, colour-capable terminal. The primary
-forecast instruments have a tested, non-scrolling 80x24 compact mode. The
-country map and context tables are withheld until their atomic matrix slice is
-implemented; the tropical workspace still needs a larger terminal. Emoji
-output depends on the terminal, font, and locale; use `--no-emoji` when
-assessing alignment.
+forecast instruments have a tested, non-scrolling 80x24 compact mode. At tall
+sizes the country map and three context tables grow together through tested
+14-, 17-, 20-, and 23-row matrix tiers without changing the page-scroll
+contract. The matrix remains eligible at the supported 80-column width, using
+compact date/time values in its 37-cell information column. At sufficiently
+wide and tall sizes, those same mounted widgets move into a right-hand sidecar
+before saved locations or warning details become automatic rails. The sidecar
+shows location and astronomy above a larger map with at most four city labels;
+air quality returns in the full bottom matrix. All modes preserve the
+102-column central canvas. The tropical workspace still needs a larger
+terminal. Emoji output depends on the terminal, font, and locale; use
+`--no-emoji` when assessing alignment.
 
 The resize-native design and its manual terminal-size matrix are in
-`docs/responsive-layout.md`. Its weather-screen implementation is in progress;
-its pure budget, rendered 80x24 no-scroll behavior, horizontal hourly
-navigation, resize state, and warning modal are covered by deterministic tests.
-Live terminal colour, font, mouse behavior, and emoji alignment still require
-manual checks.
+`docs/responsive-layout.md`. Its weather-screen implementation is complete.
+The pure budget, rendered terminal matrix, 80x24 no-scroll behavior,
+horizontal hourly navigation, resize state, auxiliary rails/modals, context
+density boundaries, compact-to-tabbed warning density, direct full-document
+warning tabs, warning-notification lifecycle and de-duplication, long warning
+labels, longer display units, emoji variants, and contrasting built-in themes
+are covered by deterministic tests.
+The saved-locations world map additionally has deterministic coverage for its
+global Braille raster, collision-free native labels, resize/focus retention,
+mouse and keyboard selection, padded screen integration, and return-to-weather
+refresh path. Live terminal colour inversion, font-dependent Braille geometry,
+mouse behavior, and emoji alignment still require manual checks.
 
 Live behavior needs network access to Open-Meteo forecast, geocoding, and air
 quality APIs. Alert behavior also depends on `wevva-warnings` and its provider

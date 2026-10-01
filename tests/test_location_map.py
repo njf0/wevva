@@ -105,6 +105,27 @@ class LocationMapGeometryTests(unittest.TestCase):
         self.assertTrue(any(span.style == 'bold red' for span in rendered.spans))
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
 
+    def test_renderer_can_limit_ranked_city_labels(self) -> None:
+        scope = build_location_map_geometry(
+            latitude=48.137,
+            longitude=11.575,
+            location_name='Munich',
+            country_code='DE',
+        )
+        assert scope is not None
+
+        rendered = render_location_map(
+            scope,
+            width=96,
+            height=24,
+            max_place_labels=2,
+        )
+
+        self.assertEqual(rendered.plain.count('•'), 2)
+        self.assertIn('Berlin', rendered.plain)
+        self.assertIn('Frankfurt', rendered.plain)
+        self.assertNotIn('Hamburg', rendered.plain)
+
 
 class _LocationMapApp(App):
     def compose(self) -> ComposeResult:

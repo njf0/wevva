@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
+from textual.screen import ModalScreen
 from textual.widgets import OptionList, ProgressBar
 from textual.widgets.option_list import Option
 
@@ -138,6 +139,12 @@ class SavedLocationsSidebar(Container):
     def weather_summary(self, location: LocationMetadata) -> SavedLocationWeatherSummary | None:
         """Return the cached summary for one saved location, if any."""
         return self._weather_summaries.get(location_key(location))
+
+    def copy_display_state_to(self, target: 'SavedLocationsSidebar') -> None:
+        """Populate another locations surface with this surface's cached state."""
+
+        target._weather_summaries = dict(self._weather_summaries)
+        target.set_locations(list(self._locations))
 
     def update_warning_progress(self, event: str, payload: dict[str, object]) -> None:
         """Show progress for the active ordinary-warning query."""
@@ -301,3 +308,45 @@ class SavedLocationsSidebar(Container):
         option_id = event.option.id
         if isinstance(option_id, str) and option_id in self._location_cache:
             self.post_message(SavedLocationSelected(location=self._location_cache[option_id]))
+
+
+class SavedLocationsModal(ModalScreen[None]):
+    """Modal access to saved locations when an automatic rail does not fit."""
+
+    BINDINGS = [('escape', 'dismiss', 'Close')]
+
+    DEFAULT_CSS = """
+    SavedLocationsModal {
+        align: center middle;
+        background: $background 65%;
+    }
+
+    SavedLocationsModal SavedLocationsSidebar {
+        dock: none;
+        width: 92%;
+        max-width: 50;
+        height: 88%;
+        min-height: 12;
+        margin: 0;
+        padding: 1 2;
+        border: thick $primary;
+        background: $background;
+    }
+    """
+
+    def __init__(self, source: SavedLocationsSidebar) -> None:
+        super().__init__()
+        self.source = source
+
+    def compose(self) -> ComposeResult:
+        yield SavedLocationsSidebar(id='saved-locations-modal-list')
+
+    def on_mount(self) -> None:
+        target = self.query_one(SavedLocationsSidebar)
+        self.source.copy_display_state_to(target)
+        target.locations.focus()
+
+    def selected_location(self) -> LocationMetadata | None:
+        """Return the location highlighted in the modal list."""
+
+        return self.query_one(SavedLocationsSidebar).selected_location()

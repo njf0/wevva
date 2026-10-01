@@ -23,7 +23,7 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsSidebar,
     WeatherAlertSummary,
     WeatherAlertsModal,
-    WeatherAlertsPanel,
+    WeatherAlertsReader,
 )
 from wevva_warnings import TropicalSystem
 from wevva_warnings.registry import get_source
@@ -199,6 +199,8 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(details.parent, sidebar)
             self.assertIs(warning.parent, sidebar)
             self.assertEqual(list(sidebar.children), [details, warning])
+            self.assertEqual(details.border_title, 'Alert Details')
+            self.assertEqual(details.styles.border_top[0], 'round')
 
             sidebar.update_alert(_ghana_alert())
             await pilot.pause()
@@ -346,12 +348,12 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press('enter')
             await pilot.pause()
             self.assertIsInstance(app.screen, WeatherAlertsModal)
-            panel = app.screen.query_one(WeatherAlertsPanel)
+            reader = app.screen.query_one(WeatherAlertsReader)
 
-            panel.tabs.active = 'alert-item-1'
+            reader.tabs.active = 'alert-item-1'
             await pilot.pause()
 
-            details = app.screen.query_one(WeatherAlertDetailsPanel)
+            details = reader.details
             console = Console(width=80, file=StringIO(), record=True)
             console.print(getattr(details.content, '_Static__content'))
             self.assertIn('second-tab heavy rain warning', console.export_text())

@@ -6,13 +6,15 @@ import unittest
 
 from textual.app import App
 
-from tests.weather_fixtures import location_map_geometry, weather_update
+from tests.weather_fixtures import chicago_location, location_map_geometry, weather_update
 from wevva.layout import (
     AuxiliaryPresentation,
+    ContextPresentation,
     CurrentDensity,
     DailyColumn,
     DetailRow,
     HourlyRow,
+    WarningDensity,
     daily_column_widths,
     daily_table_width,
     weather_layout_for,
@@ -42,6 +44,9 @@ class LayoutBudgetTests(unittest.TestCase):
         budget = weather_layout_for(80, 22, has_warnings=True)
 
         self.assertEqual(budget.current_density, CurrentDensity.SMALLEST)
+        self.assertEqual(budget.warning_density, WarningDensity.SUMMARY)
+        self.assertEqual(budget.warning_card_height, 3)
+        self.assertEqual(budget.warning_height, 4)
         self.assertEqual(budget.current_height, 3)
         self.assertEqual(
             budget.detail_rows,
@@ -80,6 +85,7 @@ class LayoutBudgetTests(unittest.TestCase):
 
         self.assertIn(HourlyRow.RAIN, budget.hourly_rows)
         self.assertIn(HourlyRow.WIND, budget.hourly_rows)
+        self.assertEqual(budget.warning_density, WarningDensity.HIDDEN)
         self.assertTrue(budget.show_summary)
         self.assertEqual(budget.current_density, CurrentDensity.SMALL)
         self.assertEqual(budget.daily_row_count, 0)
@@ -93,12 +99,16 @@ class LayoutBudgetTests(unittest.TestCase):
             24: (CurrentDensity.SMALLEST, 3, 5, 0, False),
             26: (CurrentDensity.SMALL, 5, 5, 0, False),
             28: (CurrentDensity.STANDARD, 7, 5, 0, False),
-            33: (CurrentDensity.STANDARD, 7, 5, 2, False),
-            35: (CurrentDensity.STANDARD, 7, 5, 4, False),
-            36: (CurrentDensity.STANDARD, 7, 6, 4, False),
-            38: (CurrentDensity.STANDARD, 7, 8, 4, False),
-            40: (CurrentDensity.STANDARD, 7, 8, 6, False),
-            58: (CurrentDensity.STANDARD, 7, 8, 6, True),
+            31: (CurrentDensity.STANDARD, 7, 5, 0, False),
+            36: (CurrentDensity.STANDARD, 7, 5, 2, False),
+            38: (CurrentDensity.STANDARD, 7, 5, 4, False),
+            39: (CurrentDensity.STANDARD, 7, 6, 4, False),
+            41: (CurrentDensity.STANDARD, 7, 8, 4, False),
+            43: (CurrentDensity.STANDARD, 7, 8, 6, False),
+            58: (CurrentDensity.STANDARD, 7, 8, 6, 2),
+            61: (CurrentDensity.STANDARD, 7, 8, 6, 3),
+            64: (CurrentDensity.STANDARD, 7, 8, 6, 4),
+            67: (CurrentDensity.STANDARD, 7, 8, 6, 5),
         }
         for height, values in expected.items():
             with self.subTest(height=height):
@@ -108,9 +118,18 @@ class LayoutBudgetTests(unittest.TestCase):
                     budget.current_height,
                     len(budget.hourly_rows),
                     budget.daily_row_count,
-                    budget.show_context_matrix,
+                    budget.context_detail_rows,
                 )
                 self.assertEqual(actual, values)
+
+        self.assertEqual(
+            weather_layout_for(100, 30, has_warnings=True).warning_density,
+            WarningDensity.SUMMARY,
+        )
+        self.assertEqual(
+            weather_layout_for(100, 31, has_warnings=True).warning_density,
+            WarningDensity.TABBED,
+        )
 
     def test_intermediate_width_buffers_small_current_conditions(self) -> None:
         six_rows = weather_layout_for(79, 27, has_warnings=True)
@@ -230,27 +249,27 @@ class LayoutBudgetTests(unittest.TestCase):
         )
         self.assertEqual(daily_table_width(columns), 96)
 
-    def test_sidebar_promotion_preserves_an_eighty_column_canvas(self) -> None:
+    def test_sidebar_promotion_preserves_the_full_central_canvas(self) -> None:
         both_fit = weather_layout_for(
-            164,
+            228,
             40,
             locations_requested=True,
             warning_details_requested=True,
         )
         one_fits = weather_layout_for(
-            163,
+            227,
             40,
             locations_requested=True,
             warning_details_requested=True,
         )
         neither_fits = weather_layout_for(
-            121,
+            143,
             40,
             locations_requested=True,
             warning_details_requested=True,
         )
 
-        self.assertEqual(both_fit.usable_width, 80)
+        self.assertEqual(both_fit.usable_width, 102)
         self.assertEqual(
             both_fit.warning_details_presentation,
             AuxiliaryPresentation.SIDEBAR,
@@ -259,7 +278,7 @@ class LayoutBudgetTests(unittest.TestCase):
             both_fit.locations_presentation,
             AuxiliaryPresentation.SIDEBAR,
         )
-        self.assertEqual(one_fits.usable_width, 121)
+        self.assertEqual(one_fits.usable_width, 143)
         self.assertEqual(
             one_fits.warning_details_presentation,
             AuxiliaryPresentation.SIDEBAR,
@@ -268,7 +287,7 @@ class LayoutBudgetTests(unittest.TestCase):
             one_fits.locations_presentation,
             AuxiliaryPresentation.MODAL,
         )
-        self.assertEqual(neither_fits.usable_width, 121)
+        self.assertEqual(neither_fits.usable_width, 143)
         self.assertEqual(
             neither_fits.warning_details_presentation,
             AuxiliaryPresentation.MODAL,
@@ -277,6 +296,40 @@ class LayoutBudgetTests(unittest.TestCase):
             neither_fits.locations_presentation,
             AuxiliaryPresentation.MODAL,
         )
+
+        self.assertEqual(
+            both_fit.context_presentation,
+            ContextPresentation.SIDECAR,
+        )
+        self.assertEqual(
+            one_fits.context_presentation,
+            ContextPresentation.SIDECAR,
+        )
+        self.assertEqual(
+            neither_fits.context_presentation,
+            ContextPresentation.HIDDEN,
+        )
+
+    def test_context_sidecar_precedes_auxiliary_rails_when_width_and_height_fit(
+        self,
+    ) -> None:
+        too_narrow = weather_layout_for(143, 43, has_warnings=True)
+        too_short = weather_layout_for(144, 30, has_warnings=True)
+        exact_fit = weather_layout_for(144, 31, has_warnings=True)
+        roomy = weather_layout_for(160, 43, has_warnings=True)
+
+        self.assertIsNot(too_narrow.context_presentation, ContextPresentation.SIDECAR)
+        self.assertIsNot(too_short.context_presentation, ContextPresentation.SIDECAR)
+        self.assertEqual(exact_fit.context_presentation, ContextPresentation.SIDECAR)
+        self.assertEqual(exact_fit.usable_width, 102)
+        self.assertEqual(exact_fit.context_detail_rows, 4)
+        self.assertEqual(exact_fit.context_table_height, 13)
+        self.assertEqual(exact_fit.context_map_height, 15)
+        self.assertEqual(exact_fit.context_height, 29)
+        self.assertEqual(roomy.context_detail_rows, 5)
+        self.assertEqual(roomy.context_table_height, 15)
+        self.assertEqual(roomy.context_map_height, 25)
+        self.assertEqual(roomy.context_height, 41)
 
     def test_terminal_matrix_never_exceeds_the_content_height(self) -> None:
         for width, terminal_height in TERMINAL_MATRIX:
@@ -313,6 +366,29 @@ class LayoutBudgetTests(unittest.TestCase):
         self.assertIn(HourlyRow.RAIN, rain_and_wind.hourly_rows)
         self.assertIn(HourlyRow.WIND, rain_and_wind.hourly_rows)
 
+    def test_context_matrix_grows_in_complete_three_card_tiers(self) -> None:
+        too_narrow = weather_layout_for(79, 64, has_warnings=True)
+        too_short = weather_layout_for(80, 57, has_warnings=True)
+        exact_fit = weather_layout_for(80, 58, has_warnings=True)
+
+        self.assertFalse(too_narrow.show_context_matrix)
+        self.assertFalse(too_short.show_context_matrix)
+        self.assertTrue(exact_fit.show_context_matrix)
+        self.assertEqual(exact_fit.context_detail_rows, 2)
+        self.assertEqual(exact_fit.context_height, 14)
+        self.assertEqual(exact_fit.remaining_rows, 0)
+
+        for height, rows, context_height in (
+            (61, 3, 17),
+            (64, 4, 20),
+            (67, 5, 23),
+        ):
+            with self.subTest(height=height):
+                budget = weather_layout_for(80, height, has_warnings=True)
+                self.assertEqual(budget.context_detail_rows, rows)
+                self.assertEqual(budget.context_height, context_height)
+                self.assertEqual(budget.remaining_rows, 0)
+
     def test_fixture_set_has_stable_forecast_warning_and_map_shapes(self) -> None:
         update = weather_update()
         geometry = location_map_geometry()
@@ -330,10 +406,15 @@ class LayoutBudgetTests(unittest.TestCase):
 class _GeometryTestApp(App):
     """Minimal host used to measure the real WeatherScreen content region."""
 
+    CSS = 'DataTable { width: auto; }'
+
     def __init__(self) -> None:
         super().__init__()
-        self.location = None
+        self.location = chicago_location()
+        self.forecast_metadata = None
         self.saved_locations = []
+        self.emoji_enabled = False
+        self.temperature_unit = 'celsius'
 
     def on_mount(self) -> None:
         self.push_screen(WeatherScreen())
@@ -341,29 +422,54 @@ class _GeometryTestApp(App):
 
 class RenderedViewportGeometryTests(unittest.IsolatedAsyncioTestCase):
     async def test_weather_screen_viewport_matches_terminal_matrix(self) -> None:
-        for width, terminal_height in TERMINAL_MATRIX:
-            with self.subTest(size=(width, terminal_height)):
-                app = _GeometryTestApp()
-                async with app.run_test(size=(width, terminal_height)) as pilot:
-                    await pilot.pause()
-                    screen = app.screen
-                    self.assertIsInstance(screen, WeatherScreen)
-                    screen.main_panel.display = True
-                    await pilot.pause()
+        app = _GeometryTestApp()
+        async with app.run_test(size=TERMINAL_MATRIX[0]) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            self.assertIsInstance(screen, WeatherScreen)
+            update = weather_update()
+            app.forecast_metadata = update.metadata
+            await screen.on_weather_updated(update)
+            for _ in range(4):
+                await pilot.pause()
 
-                    self.assertEqual(screen.main_panel.region.width, width)
+            for width, terminal_height in TERMINAL_MATRIX:
+                with self.subTest(size=(width, terminal_height)):
+                    await pilot.resize_terminal(width, terminal_height)
+                    for _ in range(3):
+                        await pilot.pause()
+
+                    budget = screen._layout_budget
+                    self.assertIsNotNone(budget)
+                    assert budget is not None
+                    context_width = (
+                        42
+                        if budget.context_presentation
+                        is ContextPresentation.SIDECAR
+                        else 0
+                    )
+                    self.assertEqual(
+                        screen.main_panel.region.width,
+                        budget.usable_width + context_width,
+                    )
                     self.assertEqual(
                         screen.main_panel.region.height,
                         terminal_height - 2,
                     )
-                    budget = weather_layout_for(
-                        screen.main_panel.region.width,
-                        screen.main_panel.region.height,
-                        has_warnings=True,
-                    )
                     self.assertLessEqual(
                         budget.used_rows,
                         screen.main_panel.region.height,
+                    )
+                    self.assertEqual(screen.main_panel.max_scroll_y, 0)
+
+                    last_region = screen.next_24_hours.region
+                    if screen.daily_forecast.display:
+                        last_region = screen.daily_forecast.region
+                    if screen.context_row.display:
+                        last_region = screen.context_row.region
+                    self.assertLessEqual(
+                        last_region.bottom,
+                        screen.main_panel.content_region.bottom,
                     )
 
 

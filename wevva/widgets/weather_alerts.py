@@ -14,6 +14,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.events import Click, Key
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Static, Tab, Tabs
 from wevva.alerts import Alert
@@ -98,19 +99,63 @@ def alert_severity_color(theme: dict[str, str], alert: Alert) -> str | None:
     return theme.get(f'text-{severity_key}', theme.get('text-accent'))
 
 
+def alert_tab_label(theme: dict[str, str], alert: Alert) -> Text:
+    """Build the shared compact label used by warning tab selectors."""
+
+    severity = (alert.severity or '').strip()
+    condition = alert_condition_name(alert)
+    if severity.lower() == 'unknown':
+        return Text.from_markup(escape(condition))
+
+    severity_color = alert_severity_color(theme, alert)
+    # Keep the separating space inside the styled span: Textual's tab-label
+    # conversion trims whitespace which begins a new Rich style segment.
+    if severity_color:
+        severity_text = escape(severity.title() or 'Alert')
+        return Text.from_markup(
+            f'[bold {severity_color}]{severity_text} [/]{escape(condition)}'
+        )
+    return Text.from_markup(
+        f'[bold]{escape(severity.title() or "Alert")} [/]{escape(condition)}'
+    )
+
+
+class WeatherAlertPreviewBody(Static):
+    """Focusable preview body which requests the full warning reader."""
+
+    can_focus = True
+
+    class OpenRequested(Message):
+        """Request the modal reader for the currently selected warning."""
+
+    def on_mount(self) -> None:
+        self.tooltip = 'Open full weather warning'
+
+    def on_click(self, event: Click) -> None:
+        event.stop()
+        self.post_message(self.OpenRequested())
+
+    def on_key(self, event: Key) -> None:
+        if event.key in {'enter', 'space'}:
+            event.stop()
+            self.post_message(self.OpenRequested())
+
+
 class WeatherAlertsPanel(Container):
-    """Tabbed alert panel showing one selected warning at a time."""
+    """Compact tabbed alert preview for a roomy primary forecast."""
 
     DEFAULT_CSS = """
     WeatherAlertsPanel {
         layout: vertical;
-        height: auto;
-        width: 98;
+        height: 6;
+        width: 100%;
+        max-width: 98;
+        min-width: 0;
         border: round $primary;
         border-title-color: $primary;
         border-title-style: bold;
         border-title-align: center;
-        margin-bottom: 1;
+        margin: 0;
         hatch: right $background-lighten-1;
     }
 
@@ -120,8 +165,16 @@ class WeatherAlertsPanel(Container):
 
     #weather-alert-body {
         width: 100%;
+        height: 2;
         padding: 0 1;
         text-align: left;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    #weather-alert-body:focus {
+        background: $boost;
+        text-style: underline;
     }
     """
 
@@ -136,25 +189,31 @@ class WeatherAlertsPanel(Container):
         self.selected_index = 0
 
     def compose(self) -> ComposeResult:
-        yield Tabs(id='weather-alert-tabs')
-        yield Static('', id='weather-alert-body')
+        tabs = [
+            Tab(
+                label=self.build_tab_label(alert),
+                id=f'alert-item-{index}',
+            )
+            for index, alert in enumerate(self.alerts)
+        ]
+        yield Tabs(
+            *tabs,
+            active='alert-item-0' if tabs else None,
+            id='weather-alert-tabs',
+        )
+        yield WeatherAlertPreviewBody('', id='weather-alert-body')
 
     @property
     def tabs(self) -> Tabs:
         return self.query_one(Tabs)
 
     @property
-    def body(self) -> Static:
-        return self.query_one('#weather-alert-body', Static)
+    def body(self) -> WeatherAlertPreviewBody:
+        return self.query_one('#weather-alert-body', WeatherAlertPreviewBody)
 
     def on_mount(self) -> None:
-        self.populate_tabs()
-        self.update_selected_alert()
-
-    def populate_tabs(self) -> None:
-        for index, alert in enumerate(self.alerts):
-            self.tabs.add_tab(Tab(label=self.build_tab_label(alert), id=f'alert-item-{index}'))
-        self.tabs.active = 'alert-item-0'
+        if self.alerts:
+            self.update_selected_alert()
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         if event.tab.id is None:
@@ -178,16 +237,7 @@ class WeatherAlertsPanel(Container):
         return f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
 
     def build_tab_label(self, alert: Alert) -> Text:
-        severity = (alert.severity or '').strip()
-        condition = self.condition_name(alert)
-        if severity.lower() == 'unknown':
-            return Text.from_markup(escape(condition))
-
-        severity_color = alert_severity_color(self.app.theme_variables, alert)
-        if severity_color:
-            severity_text = escape(severity.title() or 'Alert')
-            return Text.from_markup(f'[bold {severity_color}]{severity_text}[/] {escape(condition)}')
-        return Text.from_markup(f'[bold]{escape(severity.title() or "Alert")}[/] {escape(condition)}')
+        return alert_tab_label(self.app.theme_variables, alert)
 
     def build_body(self, alert: Alert, severity_color: str | None) -> str:
         headline = (alert.headline or self.condition_name(alert)).strip()
@@ -233,6 +283,15 @@ class WeatherAlertsPanel(Container):
         if color:
             self.set_styles(f'border: round {color}; border-title-color: {color};')
 
+    def on_weather_alert_preview_body_open_requested(
+        self,
+        event: WeatherAlertPreviewBody.OpenRequested,
+    ) -> None:
+        event.stop()
+        self.app.push_screen(
+            WeatherAlertsModal(self.alerts, initial_index=self.selected_index)
+        )
+
 
 class WeatherAlertDetailsPanel(VerticalScroll):
     """Independently scrolling prose panel for the selected alert."""
@@ -248,6 +307,10 @@ class WeatherAlertDetailsPanel(VerticalScroll):
         scrollbar-size-vertical: 1;
     }
 
+    WeatherAlertDetailsPanel.-unframed {
+        border: none;
+    }
+
     #weather-alert-details {
         width: 100%;
         height: auto;
@@ -255,10 +318,19 @@ class WeatherAlertDetailsPanel(VerticalScroll):
     }
     """
 
-    def __init__(self, *, id: str = 'weather-alert-details-panel') -> None:
+    def __init__(
+        self,
+        *,
+        framed: bool = True,
+        id: str = 'weather-alert-details-panel',
+    ) -> None:
         super().__init__(id=id)
-        self.border_title = 'Alert Details'
-        self.styles.border_title_align = 'left'
+        self.framed = framed
+        if framed:
+            self.border_title = 'Alert Details'
+            self.styles.border_title_align = 'left'
+        else:
+            self.add_class('-unframed')
 
     def compose(self) -> ComposeResult:
         yield Static('', id='weather-alert-details')
@@ -266,6 +338,87 @@ class WeatherAlertDetailsPanel(VerticalScroll):
     @property
     def content(self) -> Static:
         return self.query_one('#weather-alert-details', Static)
+
+
+class WeatherAlertsReader(Container):
+    """Tabbed selector whose body is the complete provider warning document."""
+
+    DEFAULT_CSS = """
+    WeatherAlertsReader {
+        layout: vertical;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+    }
+
+    #weather-alert-reader-tabs {
+        width: 100%;
+        height: 2;
+    }
+
+    #weather-alert-reader-details {
+        width: 100%;
+        height: 1fr;
+        min-height: 3;
+    }
+    """
+
+    def __init__(
+        self,
+        alerts: list[Alert],
+        *,
+        initial_index: int = 0,
+        id: str | None = None,
+    ) -> None:
+        super().__init__(id=id)
+        self.alerts = list(alerts)
+        self.selected_index = min(
+            max(0, int(initial_index)),
+            max(0, len(self.alerts) - 1),
+        )
+
+    def compose(self) -> ComposeResult:
+        tabs = [
+            Tab(
+                label=alert_tab_label(self.app.theme_variables, alert),
+                id=f'alert-item-{index}',
+            )
+            for index, alert in enumerate(self.alerts)
+        ]
+        yield Tabs(
+            *tabs,
+            active=(f'alert-item-{self.selected_index}' if tabs else None),
+            id='weather-alert-reader-tabs',
+        )
+        yield WeatherAlertDetailsPanel(
+            framed=False,
+            id='weather-alert-reader-details',
+        )
+
+    @property
+    def tabs(self) -> Tabs:
+        return self.query_one('#weather-alert-reader-tabs', Tabs)
+
+    @property
+    def details(self) -> WeatherAlertDetailsPanel:
+        return self.query_one('#weather-alert-reader-details', WeatherAlertDetailsPanel)
+
+    def on_mount(self) -> None:
+        if self.alerts:
+            self._show_alert(self.selected_index)
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
+        if event.tab.id is None:
+            return
+        self._show_alert(int(event.tab.id.removeprefix('alert-item-')))
+
+    def _show_alert(self, index: int) -> None:
+        if not self.alerts:
+            return
+        self.selected_index = min(max(0, index), len(self.alerts) - 1)
+        alert = self.alerts[self.selected_index]
+        self.details.content.update(alert_renderable(alert))
+        self.details.scroll_home(animate=False)
 
 
 class WeatherAlertsModal(ModalScreen[None]):
@@ -286,42 +439,29 @@ class WeatherAlertsModal(ModalScreen[None]):
         height: 88%;
         min-height: 12;
         padding: 1 2;
-        border: thick $primary;
+        border: round $primary;
         background: $background;
     }
 
-    #weather-alert-modal WeatherAlertsPanel {
+    #weather-alert-modal WeatherAlertsReader {
         width: 100%;
-        margin-bottom: 1;
+        height: 100%;
     }
     """
 
-    def __init__(self, alerts: list[Alert]) -> None:
+    def __init__(self, alerts: list[Alert], *, initial_index: int = 0) -> None:
         super().__init__()
         self.alerts = list(alerts)
+        self.initial_index = initial_index
 
     def compose(self) -> ComposeResult:
         with Container(id='weather-alert-modal') as dialog:
             dialog.border_title = 'Weather Warnings'
-            yield WeatherAlertsPanel(self.alerts, id='weather-alert-modal-tabs')
-            yield WeatherAlertDetailsPanel(id='weather-alert-modal-details')
-
-    def on_mount(self) -> None:
-        if self.alerts:
-            self._show_alert(self.alerts[0])
-
-    def on_weather_alert_selected(self, event: WeatherAlertSelected) -> None:
-        event.stop()
-        self._show_alert(event.alert)
-
-    def _show_alert(self, alert: Alert) -> None:
-        details = self.query_one('#weather-alert-modal-details', WeatherAlertDetailsPanel)
-        colour = alert_severity_color(self.app.theme_variables, alert)
-        if colour:
-            details.set_styles(
-                f'border: round {colour}; border-title-color: {colour};'
+            yield WeatherAlertsReader(
+                self.alerts,
+                initial_index=self.initial_index,
+                id='weather-alert-modal-reader',
             )
-        details.content.update(alert_renderable(alert))
 
 
 class WeatherAlertSummary(Static):

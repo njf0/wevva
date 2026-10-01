@@ -31,6 +31,7 @@ from wevva.widgets.geographic_scope import (
 _MIN_CONTENT_HEIGHT = 12
 _MAX_CONTENT_HEIGHT = 26
 _BORDER_ROWS = 2
+_DEFAULT_CONTENT_WIDTH = 96
 _VIEWPORT_PADDING = 0.08
 _MAX_PLACE_LABELS = 8
 _MAX_PLACE_CANDIDATES = 8
@@ -139,6 +140,7 @@ def render_location_map(
     palette: LocationMapPalette = LocationMapPalette(),
     temperature_labels: Mapping[PlaceKey, TemperatureLabel] | None = None,
     location_label: str | None = None,
+    max_place_labels: int = _MAX_PLACE_LABELS,
 ) -> Text:
     """Render country land, major-city labels, and the current location."""
     canvas = GeographicCanvas(max(12, width), max(5, height), scope.viewport)
@@ -159,6 +161,8 @@ def render_location_map(
 
     labels_added = 0
     for place, point in scope.places:
+        if labels_added >= max(0, int(max_place_labels)):
+            break
         reading = (temperature_labels or {}).get(_place_key(place))
         place_label = place.name if reading is None else f'{place.name} {reading[0]}'
         place_style = palette.place if reading is None else reading[1]
@@ -178,8 +182,6 @@ def render_location_map(
         frame.marker(point, '•', place_style)
         occupied = candidate_occupied
         labels_added += 1
-        if labels_added == _MAX_PLACE_LABELS:
-            break
     return frame.to_text()
 
 
@@ -191,7 +193,7 @@ class LocationMap(Static):
         width: 98;
         height: 20;
         margin: 0 0 1 0;
-        padding: 0 1;
+        padding: 0;
         background: $background;
         border: round $primary;
         border-title-color: $primary;
@@ -207,7 +209,31 @@ class LocationMap(Static):
         self._temperature_unit = 'celsius'
         self._current_temperature: float | None = None
         self._preferred_content_height: int | None = None
+        self._layout_height: int | None = None
+        self._max_place_labels = _MAX_PLACE_LABELS
         self.display = False
+
+    @property
+    def available(self) -> bool:
+        """Whether a country component is available for display."""
+
+        return self._scope is not None
+
+    def set_layout_height(
+        self,
+        height: int | None,
+        *,
+        max_place_labels: int | None = None,
+    ) -> None:
+        """Set responsive height and the number of city labels to render."""
+
+        self._layout_height = None if height is None else max(5, int(height))
+        self._max_place_labels = (
+            _MAX_PLACE_LABELS
+            if max_place_labels is None
+            else max(0, int(max_place_labels))
+        )
+        self._sync_preferred_height()
 
     def update_location(
         self,
@@ -275,9 +301,13 @@ class LocationMap(Static):
     def _sync_preferred_height(self) -> None:
         if self._scope is None:
             return
-        available_width = self.content_size.width
-        if available_width <= 0:
-            available_width = 96
+        if self._layout_height is not None:
+            content_height = max(5, self._layout_height - _BORDER_ROWS)
+            self._preferred_content_height = content_height
+            self.styles.height = self._layout_height
+            self.refresh(layout=True)
+            return
+        available_width = self._render_width()
         content_height = preferred_geographic_height(
             self._scope.viewport,
             available_width=available_width,
@@ -326,7 +356,7 @@ class LocationMap(Static):
             )
         return render_location_map(
             self._scope,
-            width=max(12, self.content_size.width),
+            width=self._render_width(),
             height=max(5, self.content_size.height),
             palette=LocationMapPalette(
                 land=f'dim {secondary}' if secondary else 'dim',
@@ -336,7 +366,23 @@ class LocationMap(Static):
             ),
             temperature_labels=temperature_labels,
             location_label=location_label,
+            max_place_labels=self._max_place_labels,
         )
+
+    def _render_width(self) -> int:
+        """Return a useful width even while a responsive parent is hidden.
+
+        Textual gives descendants of a hidden container a minimal placeholder
+        region. The map is still rendered while its city temperatures load, so
+        use its normal content width until the parent participates in layout.
+        """
+
+        ancestor = self.parent
+        while ancestor is not None:
+            if getattr(ancestor, 'display', True) is False:
+                return _DEFAULT_CONTENT_WIDTH
+            ancestor = ancestor.parent
+        return max(12, self.content_size.width)
 
 
 def _valid_coordinate(value: Any, *, latitude: bool) -> bool:

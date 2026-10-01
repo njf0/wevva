@@ -18,7 +18,16 @@ from textual.widgets import Footer, Header, Static
 
 from wevva.alerts import Alert
 from wevva.config import location_key
-from wevva.layout import DEFAULT_LAYOUT_METRICS, WeatherLayoutBudget, weather_layout_for
+from wevva.layout import (
+    AuxiliaryPresentation,
+    ContextPresentation,
+    DEFAULT_LAYOUT_METRICS,
+    WarningDensity,
+    WeatherLayoutBudget,
+    auxiliary_presentations_for,
+    context_sidecar_eligible,
+    weather_layout_for,
+)
 from wevva.messages import (
     DaySelected,
     HourHighlighted,
@@ -36,8 +45,13 @@ from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
 from wevva.widgets.location_map import LocationMap
-from wevva.widgets.saved_locations import SavedLocationsSidebar
-from wevva.widgets.weather_alerts import WeatherAlertDetailsSidebar, WeatherAlertSummary
+from wevva.widgets.saved_locations import SavedLocationsModal, SavedLocationsSidebar
+from wevva.widgets.weather_alerts import (
+    WeatherAlertDetailsSidebar,
+    WeatherAlertSummary,
+    WeatherAlertsModal,
+    WeatherAlertsPanel,
+)
 from wevva.widgets.weather_summary import WeatherSummary
 
 ALERT_SEVERITY_RANK = {
@@ -84,17 +98,10 @@ class WeatherScreen(Screen[None]):
         ('t', 'tropical_systems', 'Tropical Systems'),
         ('c', 'open_author', 'Credits'),
         ('?', 'help', 'Help'),  # Context-aware help (AQ or general)
-        ('l', 'show_saved_locations', 'Show locations'),
-        ('l', 'hide_saved_locations', 'Hide locations'),
-        ('i', 'show_alert_details', 'Show details'),
-        ('i', 'hide_alert_details', 'Hide details'),
+        ('l', 'locations', 'Locations'),
+        ('i', 'alert_details', 'Warning details'),
+        ('m', 'world_map', 'World Map'),
     ]
-
-    # The main forecast content is 98 columns wide. At 144 columns the left
-    # sidebar fits comfortably. With both 40-column sidebars, 186 columns
-    # preserves the same two-column gutter around the 98-column main content.
-    LOCATIONS_SIDEBAR_MIN_WIDTH = 144
-    ALERT_DETAILS_SIDEBAR_MIN_WIDTH = 186
 
     def __init__(
         self,
@@ -107,20 +114,16 @@ class WeatherScreen(Screen[None]):
         self._location_map_task: asyncio.Task[None] | None = None
         self._location_map_generation = 0
         self._time_refresh_timer = None  # Track the 1-second update timer
-        self._locations_sidebar_requested = False
-        self._alert_details_sidebar_requested = False
         self._locations_sidebar_has_content = False
         self._alert_details_sidebar_has_content = False
         self._local_alert_details_has_content = False
-        self._locations_sidebar_width_collapsed = False
-        self._alert_details_sidebar_width_collapsed = False
         self._alerts: list[Alert] = []
         self._layout_budget: WeatherLayoutBudget | None = None
 
     DEFAULT_CSS = """
     #main-panel {
         layout: vertical;
-        align-horizontal: left;
+        align-horizontal: center;
         align-vertical: middle;
         content-align: left top;
         width: 100%;
@@ -128,6 +131,27 @@ class WeatherScreen(Screen[None]):
         min-width: 0;
         padding: 1 2;
         overflow: hidden hidden;
+        hatch: right $background-lighten-1;
+    }
+
+    #weather-workspace {
+        layout: vertical;
+        align-horizontal: center;
+        align-vertical: middle;
+        width: 100%;
+        height: auto;
+        min-width: 0;
+        margin: 0;
+        hatch: right $background-lighten-1;
+    }
+
+    #forecast-column {
+        layout: vertical;
+        align-horizontal: center;
+        width: 100%;
+        height: auto;
+        min-width: 0;
+        margin: 0;
         hatch: right $background-lighten-1;
     }
 
@@ -204,14 +228,33 @@ class WeatherScreen(Screen[None]):
     }
 
 
-    #lower-row {
+    #context-row {
         layout: horizontal;
-        grid-gutter: 1 2;
         align-horizontal: center;
-        content-align: center middle;
-        align-vertical: middle;
-        height: auto;
-        width: auto;
+        align-vertical: top;
+        width: 100%;
+        height: 17;
+        margin: 0;
+        hatch: right $background-lighten-1;
+    }
+
+    #lower-row {
+        layout: grid;
+        grid-size: 2 1;
+        grid-columns: 1fr 1fr;
+        grid-gutter: 0 2;
+        width: 98;
+        max-width: 100%;
+        height: 17;
+        margin: 0;
+        hatch: right $background-lighten-1;
+    }
+
+    #lower-row > ContextBar,
+    #lower-row > LocationMap {
+        width: 100%;
+        height: 17;
+        margin: 0;
     }
 
     #weather-warnings {
@@ -255,41 +298,45 @@ class WeatherScreen(Screen[None]):
             self.error_banner.display = False
             yield self.error_banner
 
-            # Summary row: formatted text after top info
-            self.summary_row = Container(id='summary-row')
-            with self.summary_row:
-                self.weather_summary = WeatherSummary()
-                yield self.weather_summary
+            self.weather_workspace = Container(id='weather-workspace')
+            with self.weather_workspace:
+                self.forecast_column = Container(id='forecast-column')
+                with self.forecast_column:
+                    # Summary row: formatted text after top info
+                    self.summary_row = Container(id='summary-row')
+                    with self.summary_row:
+                        self.weather_summary = WeatherSummary()
+                        yield self.weather_summary
 
-            self.warnings_row = Container(id='warnings-row')
-            with self.warnings_row:
-                self.weather_warnings = Container(id='weather-warnings')
-                yield self.weather_warnings
+                    self.warnings_row = Container(id='warnings-row')
+                    with self.warnings_row:
+                        self.weather_warnings = Container(id='weather-warnings')
+                        yield self.weather_warnings
 
-            # Current conditions: tiles + compact tables
-            self.current_weather_row = Container(id='current-conditions-row')
-            with self.current_weather_row:
-                self.current_weather = CurrentConditions(classes='current-weather')
-                yield self.current_weather
+                    # Current conditions: tiles + compact tables
+                    self.current_weather_row = Container(id='current-conditions-row')
+                    with self.current_weather_row:
+                        self.current_weather = CurrentConditions(classes='current-weather')
+                        yield self.current_weather
 
-            # Country-scale context for the selected forecast location.
-            self.location_map = LocationMap()
-            yield self.location_map
+                    # Next 24 hours table (owns HourlyForecast)
+                    self.next_24_hours = Container(id='next-24-hours-table')
+                    with self.next_24_hours:
+                        yield HourlyForecast()
 
-            # Next 24 hours table (owns HourlyForecast)
-            self.next_24_hours = Container(id='next-24-hours-table')
-            with self.next_24_hours:
-                yield HourlyForecast()
+                    # Daily forecast (7-day view)
+                    self.daily_forecast = Container(id='daily-forecast')
+                    with self.daily_forecast:
+                        yield DailyForecast()
 
-            # Daily forecast (7-day view)
-            self.daily_forecast = Container(id='daily-forecast')
-            with self.daily_forecast:
-                yield DailyForecast()
-
-            self.bottom_info_bar = Container(id='lower-row')
-            with self.bottom_info_bar:
-                self.context_bar = ContextBar()
-                yield self.context_bar
+                self.context_row = Container(id='context-row')
+                with self.context_row:
+                    self.bottom_info_bar = Container(id='lower-row')
+                    with self.bottom_info_bar:
+                        self.context_bar = ContextBar()
+                        yield self.context_bar
+                        self.location_map = LocationMap()
+                        yield self.location_map
 
         # Footer (credits moved to a dedicated screen)
         yield Footer()
@@ -306,24 +353,12 @@ class WeatherScreen(Screen[None]):
         self.query_one('#main-panel').display = False
         self.warnings_row.display = False
         self.weather_warnings.display = False
-        (
-            self._locations_sidebar_requested,
-            self._alert_details_sidebar_requested,
-        ) = self._sidebar_defaults_for_width(self.size.width)
         self.update_saved_locations_sidebar()
 
     def on_unmount(self) -> None:
         if self._location_map_task is not None:
             self._location_map_task.cancel()
             self._location_map_task = None
-
-    @classmethod
-    def _sidebar_defaults_for_width(cls, width: int) -> tuple[bool, bool]:
-        """Return initial visibility preferences for the available terminal width."""
-        return (
-            width >= cls.LOCATIONS_SIDEBAR_MIN_WIDTH,
-            width >= cls.ALERT_DETAILS_SIDEBAR_MIN_WIDTH,
-        )
 
     @property
     def saved_locations_sidebar_visible(self) -> bool:
@@ -339,33 +374,39 @@ class WeatherScreen(Screen[None]):
             getattr(getattr(self, 'alert_details_sidebar', None), 'display', False)
         )
 
-    def _sync_sidebar_visibility(self) -> None:
-        """Apply the user's visibility choices when each sidebar has content."""
+    def _sync_sidebar_visibility(self, *, viewport_height: int | None = None) -> None:
+        """Derive rail visibility from available width and available content."""
+        if viewport_height is None:
+            viewport_height = max(1, self.size.height - 2)
+        context_sidecar = context_sidecar_eligible(
+            self.size.width,
+            viewport_height,
+        )
+        (
+            _usable_width,
+            locations_presentation,
+            warning_presentation,
+        ) = auxiliary_presentations_for(
+            self.size.width,
+            locations_available=self._locations_sidebar_has_content,
+            warning_details_available=self._alert_details_sidebar_has_content,
+            context_sidecar=context_sidecar,
+        )
         if hasattr(self, 'saved_locations_sidebar'):
             self.saved_locations_sidebar.display = (
-                self._locations_sidebar_requested
-                and self._locations_sidebar_has_content
-                and not self._locations_sidebar_width_collapsed
+                locations_presentation is AuxiliaryPresentation.SIDEBAR
             )
         if hasattr(self, 'alert_details_sidebar'):
             self.alert_details_sidebar.display = (
-                self._alert_details_sidebar_requested
-                and self._alert_details_sidebar_has_content
-                and not self._alert_details_sidebar_width_collapsed
+                warning_presentation is AuxiliaryPresentation.SIDEBAR
             )
         if self.is_mounted:
             self.refresh_bindings()
             self.call_after_refresh(self._apply_layout)
 
     def on_resize(self, event: Resize) -> None:
-        """Collapse sidebars that no longer fit, restoring them if space returns."""
-        self._locations_sidebar_width_collapsed = (
-            event.size.width < self.LOCATIONS_SIDEBAR_MIN_WIDTH
-        )
-        self._alert_details_sidebar_width_collapsed = (
-            event.size.width < self.ALERT_DETAILS_SIDEBAR_MIN_WIDTH
-        )
-        self._sync_sidebar_visibility()
+        """Reallocate context and automatic rails when geometry changes."""
+        self._sync_sidebar_visibility(viewport_height=max(1, event.size.height - 2))
         if self.is_mounted:
             self.call_after_refresh(self._apply_layout)
 
@@ -379,19 +420,28 @@ class WeatherScreen(Screen[None]):
             return
 
         budget = weather_layout_for(
-            viewport.width,
+            self.size.width,
             viewport.height,
             has_warnings=bool(self._alerts),
+            locations_requested=self._locations_sidebar_has_content,
+            warning_details_requested=self._alert_details_sidebar_has_content,
         )
         self._layout_budget = budget
         self.summary_row.display = budget.show_summary
         self.weather_summary.set_layout(budget.usable_width)
         self.warnings_row.styles.height = (
-            DEFAULT_LAYOUT_METRICS.warning_rows if self._alerts else 0
+            budget.warning_height if self._alerts else 0
         )
         self.weather_warnings.styles.height = (
-            DEFAULT_LAYOUT_METRICS.warning_card_rows if self._alerts else 0
+            budget.warning_card_height if self._alerts else 0
         )
+        if self._alerts:
+            self.weather_alert_summary.display = (
+                budget.warning_density is WarningDensity.SUMMARY
+            )
+            self.weather_alert_panel.display = (
+                budget.warning_density is WarningDensity.TABBED
+            )
         self.current_weather.set_layout(
             budget.current_density,
             budget.current_height,
@@ -417,10 +467,100 @@ class WeatherScreen(Screen[None]):
             else 0
         )
 
-        # Slice D will replace these legacy blocks with the atomic context
-        # matrix represented by budget.show_context_matrix.
-        self.location_map.display = False
-        self.bottom_info_bar.display = False
+        show_context = budget.show_context_matrix and self.location_map.available
+        context_sidecar = (
+            show_context
+            and budget.context_presentation is ContextPresentation.SIDECAR
+        )
+        context_height = budget.context_height if show_context else 0
+        self.context_bar.set_layout(
+            row_count=budget.context_detail_rows,
+            height=budget.context_table_height,
+            narrow=(context_sidecar or budget.usable_width < 96),
+            show_air_quality=not context_sidecar,
+        )
+        self.location_map.set_layout_height(
+            budget.context_map_height if show_context else None,
+            max_place_labels=(
+                DEFAULT_LAYOUT_METRICS.context_sidecar_place_labels
+                if context_sidecar
+                else None
+            ),
+        )
+        self.context_row.display = show_context
+        self.bottom_info_bar.display = show_context
+        self.location_map.display = show_context
+        self.context_row.styles.height = context_height
+        self.bottom_info_bar.styles.height = context_height
+
+        forecast_height = budget.used_rows - DEFAULT_LAYOUT_METRICS.outer_vertical_padding
+        if (
+            show_context
+            and budget.context_presentation is ContextPresentation.BOTTOM
+        ):
+            forecast_height -= (
+                budget.context_height + DEFAULT_LAYOUT_METRICS.instrument_gutter
+            )
+        self.forecast_column.styles.height = forecast_height
+
+        if context_sidecar:
+            self.weather_workspace.styles.layout = 'horizontal'
+            self.weather_workspace.styles.width = 140
+            self.weather_workspace.styles.height = max(
+                forecast_height,
+                budget.context_height,
+            )
+            self.forecast_column.styles.width = 98
+            self.context_row.styles.width = 40
+            self.context_row.styles.margin = (0, 0, 0, 2)
+            self.bottom_info_bar.styles.width = 40
+            self.bottom_info_bar.styles.max_width = 40
+            self.bottom_info_bar.styles.grid_size_columns = 1
+            self.bottom_info_bar.styles.grid_size_rows = 2
+            self.bottom_info_bar.styles.grid_columns = ('1fr',)
+            self.bottom_info_bar.styles.grid_rows = (
+                budget.context_table_height,
+                budget.context_map_height,
+            )
+            # Textual's grid resolver applies the named horizontal gutter to
+            # rows and the named vertical gutter to columns. Keep the one-cell
+            # visual gap on the sidecar's row axis.
+            self.bottom_info_bar.styles.grid_gutter_horizontal = (
+                DEFAULT_LAYOUT_METRICS.context_sidecar_gutter_rows
+            )
+            self.bottom_info_bar.styles.grid_gutter_vertical = 0
+        else:
+            self.weather_workspace.styles.layout = 'vertical'
+            self.weather_workspace.styles.width = '100%'
+            self.weather_workspace.styles.height = (
+                forecast_height
+                + (
+                    budget.context_height
+                    + DEFAULT_LAYOUT_METRICS.instrument_gutter
+                    if show_context
+                    else 0
+                )
+            )
+            self.forecast_column.styles.width = '100%'
+            self.context_row.styles.width = '100%'
+            self.context_row.styles.margin = 0
+            self.bottom_info_bar.styles.width = 98
+            self.bottom_info_bar.styles.max_width = '100%'
+            self.bottom_info_bar.styles.grid_size_columns = 2
+            self.bottom_info_bar.styles.grid_size_rows = 1
+            self.bottom_info_bar.styles.grid_columns = ('1fr', '1fr')
+            self.bottom_info_bar.styles.grid_rows = (budget.context_table_height,)
+            # See the sidecar branch above: this is the visual column gap.
+            self.bottom_info_bar.styles.grid_gutter_horizontal = 0
+            self.bottom_info_bar.styles.grid_gutter_vertical = 2
+        self.daily_forecast.styles.margin = (
+            (0, 0, 1, 0)
+            if (
+                show_context
+                and budget.context_presentation is ContextPresentation.BOTTOM
+            )
+            else (0, 0, 0, 0)
+        )
 
     def update_saved_locations_sidebar(self) -> None:
         """Sync saved-location sidebar from app state."""
@@ -440,26 +580,6 @@ class WeatherScreen(Screen[None]):
         self._locations_sidebar_has_content = bool(locations)
         self._sync_sidebar_visibility()
 
-    def toggle_saved_locations_sidebar(self) -> None:
-        """Show or hide the saved-location sidebar."""
-        self.set_saved_locations_sidebar_visible(
-            not self.saved_locations_sidebar_visible
-        )
-
-    def set_saved_locations_sidebar_visible(self, visible: bool) -> None:
-        """Remember and apply the saved-location sidebar visibility choice."""
-        self._locations_sidebar_requested = visible
-        if visible:
-            self._locations_sidebar_width_collapsed = False
-        self._sync_sidebar_visibility()
-
-    def set_alert_details_sidebar_visible(self, visible: bool) -> None:
-        """Remember and apply the alert-details sidebar visibility choice."""
-        self._alert_details_sidebar_requested = visible
-        if visible:
-            self._alert_details_sidebar_width_collapsed = False
-        self._sync_sidebar_visibility()
-
     def update_saved_location_weather(self, location, summary: str) -> None:
         """Update compact weather text for one saved location."""
         if not hasattr(self, 'saved_locations_sidebar'):
@@ -474,6 +594,9 @@ class WeatherScreen(Screen[None]):
 
     def selected_saved_location(self):
         """Return the highlighted saved location from the sidebar."""
+        active_screen = self.app.screen
+        if isinstance(active_screen, SavedLocationsModal):
+            return active_screen.selected_location()
         if not hasattr(self, 'saved_locations_sidebar'):
             return None
         return self.saved_locations_sidebar.selected_location()
@@ -482,6 +605,11 @@ class WeatherScreen(Screen[None]):
     def action_open_author(self) -> None:
         """Open the Author/Credits screen."""
         self.app.push_screen(AuthorScreen())
+
+    def action_world_map(self) -> None:
+        """Open the spatial overview of sidebar locations."""
+
+        self.app.open_world_locations_screen()
 
     async def action_tropical_systems(self) -> None:
         """Open the dedicated active tropical-system workspace."""
@@ -498,38 +626,26 @@ class WeatherScreen(Screen[None]):
             self.app.push_screen(HelpScreen())
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Expose only the visibility action that matches each sidebar's state."""
-        if action == 'show_saved_locations':
-            return (
-                self._locations_sidebar_has_content
-                and not self.saved_locations_sidebar_visible
-            )
-        if action == 'hide_saved_locations':
-            return self.saved_locations_sidebar_visible
-        if action == 'show_alert_details':
-            return (
-                self._alert_details_sidebar_has_content
-                and not self.alert_details_sidebar_visible
-            )
-        if action == 'hide_alert_details':
-            return self.alert_details_sidebar_visible
+        """Expose auxiliary access actions only when they have content."""
+        if action == 'locations':
+            return self._locations_sidebar_has_content
+        if action == 'alert_details':
+            return self._alert_details_sidebar_has_content
         return super().check_action(action, parameters)
 
-    def action_show_saved_locations(self) -> None:
-        """Show the saved-location sidebar."""
-        self.set_saved_locations_sidebar_visible(True)
+    def action_locations(self) -> None:
+        """Focus the automatic rail or open its modal fallback."""
+        if self.saved_locations_sidebar_visible:
+            self.saved_locations_sidebar.locations.focus()
+        else:
+            self.app.push_screen(SavedLocationsModal(self.saved_locations_sidebar))
 
-    def action_hide_saved_locations(self) -> None:
-        """Hide the saved-location sidebar."""
-        self.set_saved_locations_sidebar_visible(False)
-
-    def action_show_alert_details(self) -> None:
-        """Show selected CAP details."""
-        self.set_alert_details_sidebar_visible(True)
-
-    def action_hide_alert_details(self) -> None:
-        """Hide the CAP details sidebar."""
-        self.set_alert_details_sidebar_visible(False)
+    def action_alert_details(self) -> None:
+        """Focus the automatic rail or open the tabbed warning reader."""
+        if self.alert_details_sidebar_visible:
+            self.alert_details_sidebar.details.focus()
+        elif self._alerts:
+            self.app.push_screen(WeatherAlertsModal(self._alerts))
 
     # --- Messages ---
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
@@ -654,8 +770,12 @@ class WeatherScreen(Screen[None]):
         self._local_alert_details_has_content = True
         self._sync_alert_sidebar_content()
         self._sync_sidebar_visibility()
+        self.weather_alert_summary = WeatherAlertSummary(ordered_alerts)
+        self.weather_alert_panel = WeatherAlertsPanel(ordered_alerts)
+        self.weather_alert_panel.display = False
         await self.weather_warnings.mount(
-            WeatherAlertSummary(ordered_alerts)
+            self.weather_alert_summary,
+            self.weather_alert_panel,
         )
         self.warnings_row.display = True
         self.weather_warnings.display = True

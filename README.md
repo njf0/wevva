@@ -12,15 +12,20 @@
 - Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
 - Current and upcoming weather alerts (normalized provider data)
 - Global active tropical-system investigation with source-specific tracks and official products
+- Interactive Braille world map for spatial navigation between saved locations
 - Unit preferences (temperature, wind, precipitation)
 - Theme toggle and optional emoji rendering
 - Interactive setup wizard for defaults
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - The primary forecast has a compact, non-scrolling 80x24 mode. The country
->   map/context matrix is the next responsive-layout stage; the tropical
->   workspace has not yet received the same redesign.
+> - The primary forecast has a compact, non-scrolling 80x24 mode. When height
+>   permits, its existing location, astronomy, air-quality, and country-map
+>   widgets return as a density-aware context matrix. Once the forecast reaches
+>   its full width, wider layouts move location and astronomy above a larger,
+>   lower-density country map in a right-hand column before admitting
+>   saved-location or warning-detail rails. The tropical workspace has not yet
+>   received the same redesign.
 
 ## Quick Start
 
@@ -91,7 +96,8 @@ uvx wevva --clear-default-location
 
 - Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
-- A bordered alert summary opens tabbed warnings and an independently scrolling provider document in a modal; wide layouts retain the existing optional detail/map sidebar.
+- A bordered alert summary upgrades to the classic tabbed preview when height permits. Activating either form opens a modal where those tabs directly select the full, independently scrolling provider document; wide layouts retain the automatic detail/map sidebar.
+- Background warning checks use one start notification and one terminal success or error notification; provider progress never creates a stack of toasts.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
@@ -169,15 +175,19 @@ for alert in alerts:
 - `r` refresh weather
 - `a` save current location
 - `d` delete highlighted saved location
-- `l` toggle saved locations sidebar
+- `l` focus saved locations when its automatic rail is visible; otherwise open it
+- `m` open the interactive saved-locations world map
+- `i` focus warning details when its automatic rail is visible; otherwise open them
 - `t` investigate active tropical systems
-- `u` open unit settings
+- `u` open settings
 - `h` or `?` open help
 - `c` credits
 - `q` quit
 
 The Tropical Systems screen has its own contextual `t`/`c` track controls;
 press `h` in the application for the complete shortcut guide.
+On the saved-locations world map, use left/right to move between city labels,
+then Enter or Space to open the focused forecast; mouse selection works too.
 
 ## Config
 

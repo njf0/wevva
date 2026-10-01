@@ -16,6 +16,15 @@ from textual.widgets import DataTable
 from zoneinfo import ZoneInfo
 
 
+_LOCATION_ROWS = (
+    ('coords', 'Coords'),
+    ('elev', 'Elev'),
+    ('tz', 'Timezone'),
+    ('date', 'Date'),
+    ('time', 'Time'),
+)
+
+
 class LocationInfo(DataTable):
     """Two-column table with location details (legacy id preserved)."""
 
@@ -38,13 +47,50 @@ class LocationInfo(DataTable):
         """Initialize the two-column location info table."""
         super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
         self.border_title = 'Location Data'
+        self._compact_values = False
+        self._visible_rows = tuple(key for key, _label in _LOCATION_ROWS)
+        self._build_rows()
+
+    def _build_rows(self) -> None:
+        """Build the complete location fields selected by the context layout."""
+
+        self.clear(columns=True)
         self.add_column('Label', key='label', width=8)
         self.add_column('Value', key='value', width=26)
-        self.add_row(Text('', style='dim'), Text('', style='bold'), key='date')
-        self.add_row(Text('', style='dim'), Text('', style='bold'), key='time')
-        self.add_row(Text('', style='dim'), Text('', style='bold'), key='tz')
-        self.add_row(Text('', style='dim'), Text('', style='bold'), key='coords')
-        self.add_row(Text('', style='dim'), Text('', style='bold'), key='elev')
+        for key, label in _LOCATION_ROWS:
+            if key in self._visible_rows:
+                self.add_row(
+                    Text(label, style='dim'),
+                    Text('', style='bold'),
+                    key=key,
+                )
+
+    def set_row_count(self, row_count: int) -> None:
+        """Show the requested number of fields in priority order."""
+
+        rows = tuple(
+            key for key, _label in _LOCATION_ROWS[: max(1, min(5, row_count))]
+        )
+        if rows == self._visible_rows:
+            return
+        self._visible_rows = rows
+        self._build_rows()
+        if self.is_mounted:
+            self._update_display()
+
+    def set_compact(self, compact: bool) -> None:
+        """Retain the legacy compact/full control for standalone callers."""
+
+        self.set_row_count(3 if compact else 5)
+
+    def set_compact_values(self, compact: bool) -> None:
+        """Use date/time strings which fit the narrow context column."""
+
+        if compact == self._compact_values:
+            return
+        self._compact_values = compact
+        if self.is_mounted:
+            self._update_display()
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -139,15 +185,20 @@ class LocationInfo(DataTable):
         now = datetime.datetime.now(tzinfo)
 
         # Build date text
-        date_text = Text.from_markup(
-            f'[bold {theme.get("text-primary")}]{now.strftime("%A ")}[/][{theme.get("text-primary")}]{now.strftime("%d %B %Y")}[/]'
+        date_format = '%a %d %b %Y' if self._compact_values else '%A %d %B %Y'
+        date_text = Text(
+            now.strftime(date_format),
+            style=f'bold {theme.get("text-primary")}',
         )
 
         # Build time text with timezone abbreviation and GMT offset
         tz_abbr = now.tzname() or now.strftime('%Z') or 'UTC'
-        offset_str = self._format_gmt_offset(now.utcoffset())
+        suffix = tz_abbr
+        if not self._compact_values:
+            suffix = f'{suffix} ({self._format_gmt_offset(now.utcoffset())})'
         time_text = Text.from_markup(
-            f'[bold][{theme.get("text-secondary")}]{now.strftime("%H:%M:%S")}[/bold] {tz_abbr} ({offset_str})[/]'
+            f'[bold {theme.get("text-secondary")}]{now.strftime("%H:%M:%S")}[/] '
+            f'[{theme.get("text-secondary")}]{suffix}[/]'
         )
 
         # Build timezone identifier text
@@ -185,5 +236,7 @@ class LocationInfo(DataTable):
 
     def _update_row(self, key: str, label: str, value: Text) -> None:
         """Update a single table row with label and value."""
+        if key not in self._visible_rows:
+            return
         self.update_cell(key, 'label', Text(label, style='dim'))
         self.update_cell(key, 'value', value, update_width=True)

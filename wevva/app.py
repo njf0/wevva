@@ -38,6 +38,7 @@ from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
 from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.services.alerts import (
     _combine_alerts,
     _get_native_alerts_async_with_status,
@@ -303,6 +304,51 @@ class Wevva(App, inherit_bindings=False):
             temperature_unit=temperature_unit,
         )
 
+    def open_world_locations_screen(self) -> None:
+        """Open a world overview using the saved-sidebar location state."""
+
+        locations = self._locations_for_saved_surfaces()
+        summaries = {
+            location_key(location): summary
+            for location in locations
+            if (summary := self.weather_screen.saved_location_weather_summary(location))
+            is not None
+        }
+        self.push_screen(
+            WorldLocationsScreen(
+                locations,
+                summaries=summaries,
+                current_location=self.location,
+                temperature_unit=self.temperature_unit,
+            )
+        )
+
+    def _locations_for_saved_surfaces(self) -> list[LocationMetadata]:
+        """Return saved locations plus a distinct active forecast location."""
+
+        locations = list(self.saved_locations)
+        if self.location.latitude is None or self.location.longitude is None:
+            return locations
+        saved_keys = {location_key(location) for location in locations}
+        if location_key(self.location) not in saved_keys:
+            locations.append(self.location)
+        return locations
+
+    def _update_saved_location_weather(
+        self,
+        location: LocationMetadata,
+        summary: SavedLocationWeatherSummary,
+    ) -> None:
+        """Keep list and world-map saved-location surfaces synchronized."""
+
+        self.weather_screen.update_saved_location_weather(location, summary)
+        if self.is_running and isinstance(self.screen, WorldLocationsScreen):
+            self.screen.update_weather_summary(
+                location,
+                summary,
+                temperature_unit=self.temperature_unit,
+            )
+
     async def load_tropical_systems(self) -> list[CanonicalTropicalSystem]:
         """Return the shared canonical set for a screen opened before discovery."""
         cached = self._cached_tropical_systems()
@@ -565,7 +611,7 @@ class Wevva(App, inherit_bindings=False):
 
         if generation != self._saved_weather_generation:
             return
-        self.weather_screen.update_saved_location_weather(location, summary)
+        self._update_saved_location_weather(location, summary)
 
     # ---------------- Messages ----------------
     async def on_place_selected(self, message: PlaceSelected) -> None:
@@ -580,7 +626,10 @@ class Wevva(App, inherit_bindings=False):
     async def on_saved_location_selected(self, message: SavedLocationSelected) -> None:
         """Switch to a saved location."""
         self.location = message.location
-        self.push_screen(self.weather_screen)
+        if isinstance(self.screen, WorldLocationsScreen):
+            await self.pop_screen()
+        else:
+            self.push_screen(self.weather_screen)
         await self.action_refresh()
 
     async def on_weather_updated(self, event: WeatherUpdated) -> None:
@@ -599,7 +648,7 @@ class Wevva(App, inherit_bindings=False):
         condition_emoji = ''
         if condition is not None:
             condition_emoji = condition.night_emoji if current_point.get('is_day') == 0 else condition.day_emoji
-        self.weather_screen.update_saved_location_weather(
+        self._update_saved_location_weather(
             self.location,
             SavedLocationWeatherSummary(
                 temperature=temp if isinstance(temp, (int, float)) else None,
@@ -640,6 +689,12 @@ class Wevva(App, inherit_bindings=False):
         lon = self.location.longitude
         if lat is None or lon is None:
             return
+        if not getattr(self.weather_screen, 'saved_locations_sidebar_visible', False):
+            self.notify(
+                'Checking weather warnings…',
+                title='Weather warnings',
+                severity='information',
+            )
         country_code = normalize_country_code(self.location.country_code)
         warning_language = 'en' if self.warning_language == 'en' else 'auto'
         cache_key = (country_code, warning_language)
@@ -683,6 +738,10 @@ class Wevva(App, inherit_bindings=False):
                 warning_language,
             )
         )
+        reusable_completed = cached_candidates is not None
+        native_completed = False
+        matching_completed = True
+
         def report_progress(event: str, payload: dict[str, object]) -> None:
             """Transfer the warning worker's callback safely to the TUI loop."""
             payload = dict(payload)
@@ -704,7 +763,7 @@ class Wevva(App, inherit_bindings=False):
         try:
             if cached_candidates is None:
                 try:
-                    candidates, completed = await _get_reusable_alerts_async_with_status(
+                    candidates, reusable_completed = await _get_reusable_alerts_async_with_status(
                         country_code,
                         warning_language,
                         progress=report_progress,
@@ -713,19 +772,20 @@ class Wevva(App, inherit_bindings=False):
                     raise
                 except Exception:
                     candidates = []
-                    completed = False
+                    reusable_completed = False
 
-                if completed:
+                if reusable_completed:
                     self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
             else:
                 candidates = list(cached_candidates)
 
             try:
-                native_alerts, _ = await native_lookup
+                native_alerts, native_completed = await native_lookup
             except asyncio.CancelledError:
                 raise
             except Exception:
                 native_alerts = []
+                native_completed = False
 
             if (
                 refresh_generation != self._refresh_generation
@@ -733,14 +793,20 @@ class Wevva(App, inherit_bindings=False):
                 or self.location.longitude != lon
             ):
                 return
-            alerts = await asyncio.to_thread(
-                _combine_alerts,
-                candidates,
-                native_alerts,
-                lat,
-                lon,
-                progress=report_progress,
-            )
+            try:
+                alerts = await asyncio.to_thread(
+                    _combine_alerts,
+                    candidates,
+                    native_alerts,
+                    lat,
+                    lon,
+                    progress=report_progress,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                alerts = []
+                matching_completed = False
 
             if (
                 refresh_generation != self._refresh_generation
@@ -750,6 +816,19 @@ class Wevva(App, inherit_bindings=False):
                 return
 
             self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
+            if reusable_completed and native_completed and matching_completed:
+                if not alerts:
+                    self.notify(
+                        'No active warnings found.',
+                        title='Weather warnings',
+                        severity='information',
+                    )
+            else:
+                self.notify(
+                    'Unable to fetch weather warnings.',
+                    title='Weather warnings',
+                    severity='error',
+                )
         finally:
             if not native_lookup.done():
                 native_lookup.cancel()

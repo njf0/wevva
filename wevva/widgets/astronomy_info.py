@@ -34,6 +34,14 @@ _MOON_PHASE_NAMES = [
 # Moon phase emoji (corresponding to names above)
 _MOON_PHASE_EMOJI = ['🌚', '🌒', '🌓', '🌔', '🌝', '🌖', '🌗', '🌘']
 
+_ASTRONOMY_ROWS = (
+    ('sunrise', 'Rise'),
+    ('sunset', 'Set'),
+    ('moon_phase', 'Phase'),
+    ('daylight', 'Day'),
+    ('moon_illum', 'Moon'),
+)
+
 
 class AstronomyInfo(DataTable):
     """Two-column astronomy details for the forecast location."""
@@ -71,13 +79,40 @@ class AstronomyInfo(DataTable):
         """
         super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
         self.border_title = 'Sun & Moon'
+        self._visible_rows = tuple(key for key, _label in _ASTRONOMY_ROWS)
+        self._build_rows()
+
+    def _build_rows(self) -> None:
+        """Build the complete astronomy fields selected by the context layout."""
+
+        self.clear(columns=True)
         self.add_column('Field', key='field', width=5)
         self.add_column('Value', key='value', width=19)
-        self.add_row(Text('Rise', style='dim'), Text('', style='bold'), key='sunrise')
-        self.add_row(Text('Day', style='dim'), Text('', style='bold'), key='daylight')
-        self.add_row(Text('Set', style='dim'), Text('', style='bold'), key='sunset')
-        self.add_row(Text('Moon', style='dim'), Text('', style='bold'), key='moon_illum')
-        self.add_row(Text('Phase', style='dim'), Text('', style='bold'), key='moon_phase')
+        for key, label in _ASTRONOMY_ROWS:
+            if key in self._visible_rows:
+                self.add_row(
+                    Text(label, style='dim'),
+                    Text('', style='bold'),
+                    key=key,
+                )
+
+    def set_row_count(self, row_count: int) -> None:
+        """Show the requested number of fields in priority order."""
+
+        rows = tuple(
+            key for key, _label in _ASTRONOMY_ROWS[: max(1, min(5, row_count))]
+        )
+        if rows == self._visible_rows:
+            return
+        self._visible_rows = rows
+        self._build_rows()
+        if self.is_mounted and self._can_update():
+            self._update_display()
+
+    def set_compact(self, compact: bool) -> None:
+        """Retain the legacy compact/full control for standalone callers."""
+
+        self.set_row_count(3 if compact else 5)
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -113,26 +148,29 @@ class AstronomyInfo(DataTable):
         sunset_dt = self._ensure_timezone(self.daily_model.get_sunset(0), tzinfo)
         now = datetime.datetime.now(tzinfo)
 
-        self.update_cell(
-            'sunrise',
-            'value',
-            self._format_sun_time(sunrise_dt, now, theme_vars.get('text-warning')),
-            update_width=True,
-        )
-        self.update_cell('daylight', 'value', self._format_daylight(), update_width=True)
-        self.update_cell(
-            'sunset',
-            'value',
-            self._format_sun_time(sunset_dt, now, theme_vars.get('text-error')),
-            update_width=True,
-        )
+        values = {
+            'sunrise': self._format_sun_time(
+                sunrise_dt,
+                now,
+                theme_vars.get('text-warning'),
+            ),
+            'daylight': self._format_daylight(),
+            'sunset': self._format_sun_time(
+                sunset_dt,
+                now,
+                theme_vars.get('text-error'),
+            ),
+        }
 
         # Moon calculations
         moon_illum = self._calculate_moon_illumination()
         moon_phase = self._format_moon_phase(theme_vars)
 
-        self.update_cell('moon_illum', 'value', Text(moon_illum, style='bold dim'), update_width=True)
-        self.update_cell('moon_phase', 'value', moon_phase, update_width=True)
+        values['moon_illum'] = Text(moon_illum, style='bold dim')
+        values['moon_phase'] = moon_phase
+        for key, value in values.items():
+            if key in self._visible_rows:
+                self.update_cell(key, 'value', value, update_width=True)
         self.refresh()
 
     # Helper methods --------------------------------------------------

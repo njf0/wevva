@@ -47,6 +47,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.location = LocationMetadata(latitude=52.52, longitude=13.405, country_code='DE')
         self.app = Wevva(initial_location=self.location)
         self.app.weather_screen = _WeatherScreen()
+        self.app.notify = Mock()
         self.app._refresh_generation = 1
         self.clock = 1_000.0
         self.app._alert_cache_clock = lambda: self.clock
@@ -248,6 +249,125 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
                 ('alerts_checked', {'completed': 1, 'total': 2, 'phase': 'matching'}),
                 ('alerts_checked', {'completed': 2, 'total': 2, 'phase': 'matching'}),
             ],
+        )
+
+    async def test_warning_notifications_report_start_and_empty_success(self) -> None:
+        with (
+            patch(
+                'wevva.app._get_reusable_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+            patch(
+                'wevva.app._get_native_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        self.assertEqual(
+            self.app.notify.call_args_list,
+            [
+                call(
+                    'Checking weather warnings…',
+                    title='Weather warnings',
+                    severity='information',
+                ),
+                call(
+                    'No active warnings found.',
+                    title='Weather warnings',
+                    severity='information',
+                ),
+            ],
+        )
+
+    async def test_warning_notifications_do_not_duplicate_progress_updates(self) -> None:
+        def report_progress(_country_code, _warning_language, *, progress):
+            progress('source_started', {'source': 'dwd'})
+            progress('alerts_total', {'total': 2, 'phase': 'documents'})
+            progress(
+                'alerts_checked',
+                {'completed': 1, 'total': 2, 'phase': 'documents'},
+            )
+            return [], True
+
+        with (
+            patch(
+                'wevva.app._get_reusable_alerts_async_with_status',
+                new=AsyncMock(side_effect=report_progress),
+            ),
+            patch(
+                'wevva.app._get_native_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        self.assertEqual(self.app.notify.call_count, 2)
+
+    async def test_warning_notifications_report_fetch_failure(self) -> None:
+        with (
+            patch(
+                'wevva.app._get_reusable_alerts_async_with_status',
+                new=AsyncMock(return_value=([], False)),
+            ),
+            patch(
+                'wevva.app._get_native_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        self.app.notify.assert_called_with(
+            'Unable to fetch weather warnings.',
+            title='Weather warnings',
+            severity='error',
+        )
+
+    async def test_active_warning_uses_widget_instead_of_terminal_toast(self) -> None:
+        alert = _alert_in_box(
+            'berlin',
+            min_lat=52.3,
+            max_lat=52.8,
+            min_lon=13.0,
+            max_lon=13.8,
+        )
+        with (
+            patch(
+                'wevva.app._get_reusable_alerts_async_with_status',
+                new=AsyncMock(return_value=([alert], True)),
+            ),
+            patch(
+                'wevva.app._get_native_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        self.app.notify.assert_called_once_with(
+            'Checking weather warnings…',
+            title='Weather warnings',
+            severity='information',
+        )
+        self.assertEqual(self._alert_updates()[-1].alerts, [alert])
+
+    async def test_visible_progress_sidebar_suppresses_only_the_start_toast(self) -> None:
+        self.app.weather_screen.saved_locations_sidebar_visible = True
+        with (
+            patch(
+                'wevva.app._get_reusable_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+            patch(
+                'wevva.app._get_native_alerts_async_with_status',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        self.app.notify.assert_called_once_with(
+            'No active warnings found.',
+            title='Weather warnings',
+            severity='information',
         )
 
 

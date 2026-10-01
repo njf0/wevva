@@ -56,8 +56,9 @@ You can launch it directly with `uvx wevva`.
 - `r` Refresh weather for current location
 - `a` Save the current location
 - `d` Delete the highlighted saved location
-- `l` Show or hide saved locations
-- `i` Show or hide alert details
+- `l` Focus saved locations or open their modal
+- `m` Open the interactive saved-locations world map
+- `i` Focus warning details or open their modal
 - `t` Investigate active tropical systems
 - `w` Return from Tropical Systems to the weather screen
 - `u` Open settings
@@ -68,6 +69,7 @@ You can launch it directly with `uvx wevva`.
 ## Navigation Notes
 
 - Use arrow keys/tab to move focus across tables and widgets.
+- On the World Map, use left/right to move between locations and Enter to open one.
 - On Tropical Systems, `r` refreshes active systems and their source products.
 - On Tropical Systems, `t` toggles position dots and `c` toggles the official cone.
 - Highlighting rows/columns updates linked weather context.

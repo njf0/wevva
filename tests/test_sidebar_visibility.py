@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
 
 from textual.app import App
 
+from wevva.layout import AuxiliaryPresentation, auxiliary_presentations_for
+from wevva.location_metadata import LocationMetadata
 from wevva.screens.weather_screen import WeatherScreen
-from wevva.widgets.saved_locations import SavedLocationsSidebar
+from wevva.widgets.saved_locations import SavedLocationsModal, SavedLocationsSidebar
 
 
 class _SidebarTestApp(App):
@@ -16,74 +17,72 @@ class _SidebarTestApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.location = None
-        self.saved_locations = []
+        self.location = LocationMetadata(
+            latitude=51.5072,
+            longitude=-0.1276,
+            name='London',
+            country='United Kingdom',
+            country_code='GB',
+        )
+        self.saved_locations = [self.location]
 
     def on_mount(self) -> None:
         self.push_screen(WeatherScreen())
 
 
 class SidebarVisibilityTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.screen = WeatherScreen()
-        self.screen.saved_locations_sidebar = SimpleNamespace(display=False)
-        self.screen.alert_details_sidebar = SimpleNamespace(display=False)
+    def test_automatic_rail_allocation_preserves_the_central_canvas(self) -> None:
+        for width, expected in (
+            (143, (143, AuxiliaryPresentation.MODAL, AuxiliaryPresentation.MODAL)),
+            (144, (102, AuxiliaryPresentation.MODAL, AuxiliaryPresentation.SIDEBAR)),
+            (185, (143, AuxiliaryPresentation.MODAL, AuxiliaryPresentation.SIDEBAR)),
+            (186, (102, AuxiliaryPresentation.SIDEBAR, AuxiliaryPresentation.SIDEBAR)),
+        ):
+            with self.subTest(width=width):
+                self.assertEqual(
+                    auxiliary_presentations_for(
+                        width,
+                        locations_available=True,
+                        warning_details_available=True,
+                    ),
+                    expected,
+                )
 
-    def test_initial_visibility_defaults_follow_terminal_width(self) -> None:
+    def test_locations_use_the_first_rail_when_there_is_no_warning(self) -> None:
         self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(143),
-            (False, False),
+            auxiliary_presentations_for(
+                144,
+                locations_available=True,
+                warning_details_available=False,
+            ),
+            (102, AuxiliaryPresentation.SIDEBAR, AuxiliaryPresentation.MODAL),
+        )
+
+    def test_context_sidecar_consumes_surplus_before_auxiliary_rails(self) -> None:
+        self.assertEqual(
+            auxiliary_presentations_for(
+                186,
+                locations_available=True,
+                warning_details_available=True,
+                context_sidecar=True,
+            ),
+            (102, AuxiliaryPresentation.MODAL, AuxiliaryPresentation.SIDEBAR),
         )
         self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(144),
-            (True, False),
-        )
-        self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(185),
-            (True, False),
-        )
-        self.assertEqual(
-            WeatherScreen._sidebar_defaults_for_width(186),
-            (True, True),
+            auxiliary_presentations_for(
+                228,
+                locations_available=True,
+                warning_details_available=True,
+                context_sidecar=True,
+            ),
+            (102, AuxiliaryPresentation.SIDEBAR, AuxiliaryPresentation.SIDEBAR),
         )
 
-    def test_location_binding_reflects_current_visibility(self) -> None:
-        self.screen._locations_sidebar_has_content = True
-
-        self.screen.set_saved_locations_sidebar_visible(True)
-
-        self.assertTrue(self.screen.saved_locations_sidebar_visible)
-        self.assertTrue(self.screen.check_action('hide_saved_locations', ()))
-        self.assertFalse(self.screen.check_action('show_saved_locations', ()))
-
-        self.screen.set_saved_locations_sidebar_visible(False)
-
-        self.assertFalse(self.screen.saved_locations_sidebar_visible)
-        self.assertFalse(self.screen.check_action('hide_saved_locations', ()))
-        self.assertTrue(self.screen.check_action('show_saved_locations', ()))
-
-    def test_details_binding_reflects_current_visibility(self) -> None:
-        self.screen._alert_details_sidebar_has_content = True
-
-        self.screen.set_alert_details_sidebar_visible(True)
-
-        self.assertTrue(self.screen.alert_details_sidebar_visible)
-        self.assertTrue(self.screen.check_action('hide_alert_details', ()))
-        self.assertFalse(self.screen.check_action('show_alert_details', ()))
-
-        self.screen.set_alert_details_sidebar_visible(False)
-
-        self.assertFalse(self.screen.alert_details_sidebar_visible)
-        self.assertFalse(self.screen.check_action('hide_alert_details', ()))
-        self.assertTrue(self.screen.check_action('show_alert_details', ()))
-
-    def test_sidebar_bindings_use_state_specific_labels(self) -> None:
+    def test_sidebar_bindings_are_access_actions_not_visibility_toggles(self) -> None:
         labels = {action: label for _, action, label in WeatherScreen.BINDINGS}
 
-        self.assertEqual(labels['show_saved_locations'], 'Show locations')
-        self.assertEqual(labels['hide_saved_locations'], 'Hide locations')
-        self.assertEqual(labels['show_alert_details'], 'Show details')
-        self.assertEqual(labels['hide_alert_details'], 'Hide details')
+        self.assertEqual(labels['locations'], 'Locations')
+        self.assertEqual(labels['alert_details'], 'Warning details')
 
 
 class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -96,10 +95,10 @@ class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(sidebar.locations.styles.scrollbar_size_vertical, 1)
 
-    async def test_footer_binding_text_changes_after_each_toggle(self) -> None:
+    async def test_access_bindings_focus_automatic_rails(self) -> None:
         app = _SidebarTestApp()
 
-        async with app.run_test(size=(200, 60)) as pilot:
+        async with app.run_test(size=(240, 60)) as pilot:
             await pilot.pause()
             screen = app.screen
             self.assertIsInstance(screen, WeatherScreen)
@@ -109,22 +108,39 @@ class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             screen._sync_sidebar_visibility()
 
             active_bindings = screen.active_bindings
-            self.assertEqual(active_bindings['l'].binding.description, 'Hide locations')
-            self.assertEqual(active_bindings['i'].binding.description, 'Hide details')
+            self.assertEqual(active_bindings['l'].binding.description, 'Locations')
+            self.assertEqual(active_bindings['i'].binding.description, 'Warning details')
 
-            await pilot.press('l', 'i')
+            await pilot.press('l')
+            await pilot.pause()
+            self.assertIs(app.focused, screen.saved_locations_sidebar.locations)
+
+            await pilot.press('i')
+            await pilot.pause()
+            self.assertTrue(screen.saved_locations_sidebar_visible)
+            self.assertTrue(screen.alert_details_sidebar_visible)
+
+    async def test_locations_binding_uses_modal_when_no_rail_fits(self) -> None:
+        app = _SidebarTestApp()
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            self.assertIsInstance(screen, WeatherScreen)
+            screen._locations_sidebar_has_content = True
+            screen._sync_sidebar_visibility()
+
+            await pilot.press('l')
             await pilot.pause()
 
-            active_bindings = screen.active_bindings
-            self.assertFalse(screen.saved_locations_sidebar_visible)
-            self.assertFalse(screen.alert_details_sidebar_visible)
-            self.assertEqual(active_bindings['l'].binding.description, 'Show locations')
-            self.assertEqual(active_bindings['i'].binding.description, 'Show details')
+            self.assertIsInstance(app.screen, SavedLocationsModal)
+            self.assertEqual(app.screen.selected_location(), app.location)
+            self.assertEqual(screen.selected_saved_location(), app.location)
 
     async def test_resize_collapses_and_restores_sidebars_that_no_longer_fit(self) -> None:
         app = _SidebarTestApp()
 
-        async with app.run_test(size=(200, 60)) as pilot:
+        async with app.run_test(size=(240, 60)) as pilot:
             await pilot.pause()
             screen = app.screen
             self.assertIsInstance(screen, WeatherScreen)
@@ -133,23 +149,23 @@ class SidebarBindingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             screen._alert_details_sidebar_has_content = True
             screen._sync_sidebar_visibility()
 
-            await pilot.resize_terminal(185, 60)
+            await pilot.resize_terminal(227, 60)
             await pilot.pause()
-            self.assertTrue(screen.saved_locations_sidebar_visible)
-            self.assertFalse(screen.alert_details_sidebar_visible)
+            self.assertFalse(screen.saved_locations_sidebar_visible)
+            self.assertTrue(screen.alert_details_sidebar_visible)
 
-            await pilot.resize_terminal(186, 60)
+            await pilot.resize_terminal(228, 60)
             await pilot.pause()
             self.assertTrue(screen.saved_locations_sidebar_visible)
             self.assertTrue(screen.alert_details_sidebar_visible)
-            self.assertEqual(screen.main_panel.region.width, 102)
+            self.assertEqual(screen.main_panel.region.width, 144)
 
             await pilot.resize_terminal(143, 60)
             await pilot.pause()
             self.assertFalse(screen.saved_locations_sidebar_visible)
             self.assertFalse(screen.alert_details_sidebar_visible)
 
-            await pilot.resize_terminal(200, 60)
+            await pilot.resize_terminal(240, 60)
             await pilot.pause()
             self.assertTrue(screen.saved_locations_sidebar_visible)
             self.assertTrue(screen.alert_details_sidebar_visible)

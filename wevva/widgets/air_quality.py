@@ -37,6 +37,14 @@ _POLLEN_LEVELS = [
     (199, 'High', 'text-error'),
 ]
 
+_AIR_QUALITY_ROWS = (
+    ('aqi', 'AQI'),
+    ('pollen', 'Pollen'),
+    ('pm25', 'PM2.5'),
+    ('pm10', 'PM10'),
+    ('ozone', 'Ozone'),
+)
+
 
 class AirQualityWidget(DataTable):
     """DataTable showing air quality details for a specific hour."""
@@ -76,13 +84,40 @@ class AirQualityWidget(DataTable):
         """
         super().__init__(show_header=False, cursor_type='none', id=id, classes=classes)
         self.border_title = 'Air Quality'
+        self._visible_rows = tuple(key for key, _label in _AIR_QUALITY_ROWS)
+        self._build_rows()
+
+    def _build_rows(self) -> None:
+        """Build the complete air-quality fields selected by the context layout."""
+
+        self.clear(columns=True)
         self.add_column('Field', key='field', width=6)
         self.add_column('Value', key='value', width=12)
-        self.add_row(Text('AQI', style='dim'), Text('', style='bold'), key='aqi')
-        self.add_row(Text('PM2.5', style='dim'), Text('', style='bold'), key='pm25')
-        self.add_row(Text('PM10', style='dim'), Text('', style='bold'), key='pm10')
-        self.add_row(Text('Ozone', style='dim'), Text('', style='bold'), key='ozone')
-        self.add_row(Text('Pollen', style='dim'), Text('', style='bold'), key='pollen')
+        for key, label in _AIR_QUALITY_ROWS:
+            if key in self._visible_rows:
+                self.add_row(
+                    Text(label, style='dim'),
+                    Text('', style='bold'),
+                    key=key,
+                )
+
+    def set_row_count(self, row_count: int) -> None:
+        """Show the requested number of fields in priority order."""
+
+        rows = tuple(
+            key for key, _label in _AIR_QUALITY_ROWS[: max(1, min(5, row_count))]
+        )
+        if rows == self._visible_rows:
+            return
+        self._visible_rows = rows
+        self._build_rows()
+        if self.is_mounted and self._can_update():
+            self._update_display()
+
+    def set_compact(self, compact: bool) -> None:
+        """Retain the legacy compact/full control for standalone callers."""
+
+        self.set_row_count(3 if compact else 5)
 
     def on_mount(self) -> None:
         """Trigger initial display after mounting."""
@@ -125,7 +160,8 @@ class AirQualityWidget(DataTable):
 
         # Update all cells
         for key, text in values.items():
-            self.update_cell(key, 'value', text, update_width=False)
+            if key in self._visible_rows:
+                self.update_cell(key, 'value', text, update_width=False)
         self.refresh()
 
     def _get_aqi_data(self) -> tuple[bool, Any, str]:

@@ -19,6 +19,10 @@ place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places
              -> WeatherAlertsUpdated
 
 t key -> TropicalSystemsScreen -> global canonical tropical systems + products
+
+m key -> WorldLocationsScreen -> checked-in global map-unit geometry
+                             -> cached saved-location summaries
+                             -> SavedLocationSelected -> WeatherScreen + refresh
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -37,9 +41,11 @@ widgets; `HourHighlighted` and `DaySelected` coordinate the selected hour/day
 between widgets. Alerts are intentionally fetched after the main forecast so a
 slow warning provider does not delay the weather display.
 
-Saved-location sidebar summaries take a separate, staggered weather-only path
-in `Wevva._fetch_saved_weather_summary`; they do not use the controller or
-request air quality and warnings.
+Saved-location summaries take a separate, staggered weather-only path in
+`Wevva._fetch_saved_weather_summary`; they do not use the controller or request
+air quality and warnings. Each result updates both the sidebar cache and an
+open `WorldLocationsScreen`, so the spatial overview can render immediately
+from cached values and accept later results without issuing its own queries.
 
 ## Data and external boundaries
 
@@ -62,6 +68,10 @@ request air quality and warnings.
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
   sidebar shows an indeterminate bar while a provider request is pending and
   switches to measured progress once the provider returns its alert count.
+  When that sidebar is absent, the app emits one informational notification at
+  the start of a warning check. A completed empty check or a failed check emits
+  one terminal notification; provider progress callbacks never emit their own
+  notifications, and active results are communicated by the warning widget.
   Reusable country alerts and native point alerts start together. Tropical
   retrieval is not part of this weather-location refresh path.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
@@ -89,9 +99,9 @@ the TUI controller, although both paths independently merge air quality.
 
 ## Presentation
 
-The responsive layout language is documented in `docs/responsive-layout.md`,
-with its remaining implementation staged in
-`docs/tasks/0015-responsive-layout-redesign.md`.
+The implemented responsive layout language is documented in
+`docs/responsive-layout.md`; its completed delivery record and acceptance
+criteria are in `docs/tasks/0015-responsive-layout-redesign.md`.
 
 `wevva/screens/weather_screen.py` composes the weather screen and owns
 screen-level widget routing. Focused presentation logic is in
@@ -101,12 +111,13 @@ global CSS; several widgets also carry local `DEFAULT_CSS` for their own
 geometry.
 
 `wevva/layout.py` is the pure allocator for the responsive weather screen.
-Given the content viewport, warning presence, and requested auxiliary surfaces,
+Given the content viewport, warning presence, and available auxiliary surfaces,
 it returns current-condition density and height, visible detail/hourly rows,
-daily columns and row count, context-block eligibility, and modal/sidebar
-presentation. Its constants explicitly include borders, tabs, padding, and
-gutters. `WeatherScreen` applies one result to stable widget instances after
-weather updates, warning changes, sidebar changes, and terminal resizes.
+warning density and height, daily columns and row count, context density and
+height, and modal/sidebar presentation. Its constants explicitly include
+borders, tabs, padding, and gutters. `WeatherScreen` applies one result to
+stable widget instances after weather updates, warning changes, sidebar
+changes, and terminal resizes.
 
 The main panel retains `1 2` padding, centres the complete visible forecast
 stack vertically, and does not scroll vertically. Summary,
@@ -142,14 +153,47 @@ drawn and labelled in a distinct semantic colour. Up to eight ranked cities
 receive current temperatures from one lightweight, non-blocking multi-location
 Open-Meteo request; failed or stale enrichment leaves the base map intact.
 
-Weather-warning presence is a bordered focusable summary card. Mouse activation,
-Enter, or Space opens a modal containing the established alert tabs and an
-independently scrolling provider document. The existing optional right sidebar
-continues to contain a CAP detail reader and warning-area scope; making it and
-saved locations modal-first is a later task slice. The legacy map/context
-blocks are withheld from the primary stack until the atomic context matrix is
-implemented, so they cannot reintroduce page scrolling. Tropical systems are
-presented only in the dedicated workspace.
+The saved-locations world map is a separate global navigation surface opened
+with `m`. It layers native, focusable `WorldLocationLabel` widgets over one
+fixed Braille world raster. Absolute offsets express geographic placement, but
+Textual still owns focus, hover, click handling, and activation. Collision
+placement is recomputed on resize without replacing the labels, preserving
+focus. Left/right moves between labels; Enter, Space, or click emits the same
+`SavedLocationSelected` message as the list and returns to the ordinary weather
+screen. The screen keeps the standard header/footer and places the map's single
+rounded frame inside `1 2` stage padding. Its fixed viewport ends at 78°S,
+retaining the Antarctic coast while assigning the southern polar cap's rows to
+the inhabited world.
+
+Weather-warning presence is a bordered focusable summary card at compact
+heights. Once three additional rows are available after the standard current
+instruments, it upgrades to the classic alert tabs and a two-line preview;
+activating the selected preview opens that warning. Mouse activation, Enter,
+or Space opens a modal where those tabs directly select the complete provider
+document in one independently scrolling, unframed detail body inside the
+modal's single rounded frame. Saved locations and
+warning details also have modal access commands. When width and height permit,
+the first 42 surplus columns move existing forecast context beside the full
+102-column central canvas. Auxiliary sidebars use later surplus: one at 186
+columns and both at 228 while the sidecar is active. Warning detail wins the
+single auxiliary rail when both surfaces have content. In a short viewport
+where the context sidecar cannot fit usefully, auxiliary rails retain their
+legacy 144/186 thresholds.
+
+When at least 14 final rows are available, location, astronomy, and air-quality
+cards stack in the left half of a centred 98-cell context matrix while the
+country map fills the right half. The cards grow together through two-, three-,
+four-, and five-field tiers at matrix heights 14, 17, 20, and 23; the map tracks
+the same height. At the supported 80-column width the inner matrix contracts to
+76 cells, leaving two viable 37-cell columns. In a sufficiently tall viewport
+of at least 144 columns, the same mounted widgets instead form a 40-cell
+right-hand sidecar. Location and astronomy remain above a larger bounded map;
+air quality is hidden in this narrow presentation and returns with the bottom
+matrix. The sidecar map limits itself to four ranked city labels. Its table and
+map heights are budgeted independently from the parallel forecast column.
+Fields are admitted only in their documented priority order, and neither
+placement introduces page scrolling.
+Tropical systems are presented only in the dedicated workspace.
 
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
 with `t`. Its severity-ordered, full-classification storm selector is followed
@@ -241,11 +285,12 @@ location marker. This is not a general GIS or plotting framework.
 
 The intentionally direct coupling between widgets, Textual messages, and the
 forecast model objects keeps the project small. Stable widget IDs are part of
-the CSS contract. The README's minimum terminal target is 186x53 for the full
-layout. At launch, the saved-locations sidebar is shown from 144 columns and
-the alert-details sidebar joins it at 186 columns. They collapse below those
-widths on resize and restore if space returns; both can also be toggled from the
-weather screen. Emoji width/rendering depends on the terminal and font.
+the CSS contract. The compact terminal target is 80x24. At useful wide/tall
+sizes, forecast context receives the first surplus-width block; saved-location
+and alert-detail sidebars follow without shrinking the full forecast canvas.
+They collapse on resize and restore if space returns, while their commands open
+modal fallbacks when no rail is present. Emoji width/rendering depends on the
+terminal and font.
 
 ## Constraints worth preserving
 

@@ -181,6 +181,11 @@ class HourlyForecast(Container):
             if active_date is not None:
                 self._update_for_date(active_date)
                 return
+        self.table.move_cursor(
+            column=self.table.cursor_column,
+            animate=False,
+            scroll=True,
+        )
         self._update_scroll_indicator()
 
     # Reactive watchers

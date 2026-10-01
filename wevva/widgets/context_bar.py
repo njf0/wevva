@@ -29,12 +29,24 @@ class ContextBar(Container):
 
     DEFAULT_CSS = """
     ContextBar {
-        layout: horizontal;
-        height: auto;
+        layout: grid;
+        grid-size: 1 3;
+        grid-rows: 5 5 5;
+        grid-gutter: 1 0;
+        width: 100%;
+        height: 17;
         align-vertical: top;
-        align-horizontal: center;
-        content-align: center middle;
         hatch: right $background-lighten-1;
+    }
+
+    ContextBar LocationInfo,
+    ContextBar AstronomyInfo,
+    ContextBar AirQualityWidget {
+        width: 100%;
+        height: 5;
+        margin: 0;
+        scrollbar-size-horizontal: 0;
+        scrollbar-size-vertical: 0;
     }
     """
 
@@ -61,6 +73,33 @@ class ContextBar(Container):
         """Trigger initial display after mounting."""
         if self.forecast_metadata is not None and self.daily_model is not None:
             self._update_display()
+
+    def set_layout(
+        self,
+        *,
+        row_count: int,
+        height: int,
+        narrow: bool = False,
+        show_air_quality: bool = True,
+    ) -> None:
+        """Apply one shared density and choose the visible context cards."""
+
+        self.styles.height = height
+        if row_count <= 0:
+            return
+        card_height = row_count + 2
+        visible_count = 3 if show_air_quality else 2
+        self.styles.grid_size_rows = visible_count
+        self.styles.grid_rows = (card_height,) * visible_count
+        self.location.display = True
+        self.astronomy.display = True
+        self.air_quality.display = show_air_quality
+        self.location.set_compact_values(narrow)
+        for widget in (self.location, self.astronomy, self.air_quality):
+            widget.styles.width = '100%'
+            widget.styles.height = card_height
+            widget.styles.margin = 0
+            widget.set_row_count(row_count)
 
     # Reactive watchers ---------------------------------------------------
     def watch_forecast_metadata(self, metadata: Any | None) -> None:

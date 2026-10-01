@@ -2,12 +2,8 @@
 
 ## Status
 
-Under revision. This document records the broader responsive-design language
-and some earlier exploratory compositions. The current implementation plan is
-the budget-driven, stable-composition approach in
-`docs/tasks/0015-responsive-layout-redesign.md`; where the two differ, that task
-sheet is authoritative until this document is reconciled in its documentation
-slice.
+Implemented for the primary weather screen. The tropical workspace remains a
+separate composition and is not yet driven by this allocator.
 
 ## Intent
 
@@ -69,39 +65,46 @@ not the primary layout mechanism for the current forecast.
 
 ### Preserve operational state
 
-Resizing must retain the selected warning, selected hour and day, tropical
-system and source, product tab, keyboard focus, and meaningful document scroll
-position. User-hidden sidebars stay hidden until the user asks for them again.
+Resizing retains the selected hour and day, hourly scroll anchor, and focus on
+the mounted forecast controls. Warning-modal tab selection survives resizing
+while that reader remains open. Auxiliary sidebars are derived from width and
+available content, so they return automatically when their full central-width
+threshold is restored. Cross-shell focus and document-scroll continuity may be
+refined when real use exposes a concrete need.
 
 ## The resize vocabulary
 
-Profiles are named for their behavior rather than for devices. Thresholds are
-initial hypotheses and must be tuned against rendered fixtures. Width is the
-usable weather workspace after any visible outer sidebar, not necessarily the
-terminal's total width.
+The implementation uses a continuous row-and-column budget rather than named
+device profiles. Width is measured after the context sidecar and automatic
+rails have been allocated; height is the content viewport after the one-row
+header and footer.
 
-| Width profile | Provisional usable width | Behavior |
-| --- | ---: | --- |
-| `compact` | 80–99 columns | One primary column; abbreviated instruments; detail replaces rather than crowds the forecast. |
-| `stacked` | 100–139 columns | One broad column with small peer panels arranged in rows where useful. |
-| `dashboard` | 140–179 columns | Forecast and existing context can share the canvas. |
-| `console` | 180+ columns | More simultaneous context, wider time horizons, and larger maps; no arbitrary central maximum width. |
+| Terminal width | Implemented behavior |
+| ---: | --- |
+| below 80 | Best effort; not a guaranteed product target |
+| 80–101 | Supported compact canvas with abbreviated detail/daily fields |
+| 102–143 | Full 102-column central canvas and original wide daily fields |
+| 144–185 | At sufficient height, the existing context moves beside the full forecast; short windows may instead admit one auxiliary rail |
+| 186–227 | Context sidecar plus one automatic auxiliary rail when height permits |
+| 228+ | Context sidecar plus both automatic auxiliary rails when all contain data |
 
-Terminals narrower than 80 columns are best effort. They must fail softly—no
-tracebacks or irrecoverable navigation—but are not the primary design target.
+The forecast frames themselves stop at 98 cells and remain centred. The first
+useful block of surplus width is therefore spent on location, astronomy,
+air-quality, and map context rather than stretching hourly columns, tables, or
+prose. Saved locations and warning documents receive later surplus blocks.
 
-Height is classified independently, excluding the application header and
-footer:
+Height is allocated row by row. At the 22-row content baseline (an 80x24
+terminal), the screen retains both summary cards when a warning exists, the
+smallest current-condition row, and required hourly condition, temperature,
+and time rows. Additional rows restore hourly rain and wind, richer current
+conditions, the classic tabbed warning preview, complete daily rows, graph
+rows, and finally the bottom context matrix. When sufficient width and height
+exist together, that same context uses an independently budgeted right-hand
+column: its tables gain priority rows first and its map receives the remaining
+bounded height.
 
-| Height profile | Provisional content height | Behavior |
-| --- | ---: | --- |
-| `short` | up to 22 rows | Natural-language current conditions, bounded hourly and daily horizons, secondary detail views. |
-| `regular` | 23–42 rows | Dense current-condition tiles, with compact context where necessary. |
-| `tall` | 43+ rows | Larger maps and documents, more complete existing context. |
-
-An 80x50 terminal and a 160x24 terminal therefore do not receive the same
-layout. CSS breakpoints alone are insufficient; a small central layout state
-should combine width and height into a profile that widgets can consume.
+An 80x50 terminal and a 160x24 terminal therefore receive different density
+decisions without switching to unrelated screen compositions.
 
 ## Information priority
 
@@ -118,7 +121,7 @@ Warnings may temporarily move above the hourly forecast when their severity
 requires attention, but warning prose should not permanently consume the
 primary forecast canvas.
 
-## Profile compositions
+## Implemented compositions
 
 The diagrams describe regions and hierarchy, not exact box drawing.
 
@@ -142,7 +145,7 @@ The diagrams describe regions and hierarchy, not exact box drawing.
 │ Temp °C    9   9   9   8   8   8   7   7                             │
 │ ◀━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━───────────────────────────────▶ │
 │                                                        ←/→ scroll      │
-└ t Tropical  l Locations  d Details  m Map  r Refresh  q Quit ──────────┘
+└ t Tropical  l Locations  i Warning details  r Refresh  q Quit ─────────┘
 ```
 
 The exact fields may vary with configured units and data availability. The
@@ -166,58 +169,67 @@ important behavior is:
   shrink when amount/gust receive their own columns; rain amount sits between
   rain probability and wind speed; at 102 or more usable columns it restores
   the original 96-cell table with full weekday and condition names, combined
-  wind/gust values, and a separate direction field; the complete outlook
-  remains available as a secondary view;
-- active warnings consume one focusable severity/count card; opening it uses a
-  dedicated reader containing the established tabs and independently scrolling
-  provider text;
-- the map and lower-priority context are available through direct actions and
-  do not push the forecast below a mandatory scroll boundary.
+  wind/gust values, and a separate direction field;
+- active warnings consume one focusable severity/count card at compact heights;
+  after the current instruments regain their standard presentation, three
+  surplus rows upgrade that card to the established tabs and two-line preview;
+  activating either warning body opens a dedicated reader whose tabs directly
+  select the complete, independently scrolling provider document within one
+  rounded modal frame, without a nested detail border;
+- while the saved-locations progress rail is absent, a refresh uses one
+  informational start notification and at most one terminal empty-success or
+  error notification; provider progress does not create notification stacks,
+  and active results use the warning card or tabs instead;
+- once the higher-priority forecast is complete and 14 rows remain, location,
+  astronomy, and air-quality cards stack beside the no-padding country map in
+  a centred two-column matrix; all three cards and the map grow together at
+  14-, 17-, 20-, and 23-row tiers before the matrix disappears as one unit;
+  at the supported 80-column width the matrix contracts to two 37-cell columns.
 
 The compact composition is not a separate “lite” product. It is the same
 widgets in compact presentation modes, with the same selections and keyboard
 language.
 
-### Stacked
-
-This is the natural successor to today's central stack. It uses the available
-width, combines compatible current-condition instruments into rows, and keeps
-hourly and daily forecast full-width. Context instruments may occupy a compact
-grid below the forecast when height allows. The location map may be prominent,
-but it must yield height before primary forecast rows do.
-
-### Dashboard and console
+### Wider terminals
 
 ```text
-┌ locations ┐ ┌ current + warnings + hourly + daily ─────┐ ┌ context ──┐
-│ saved     │ │                                           │ │ location   │
-│ places    │ │ primary forecast remains the visual anchor│ │ sun/moon   │
-│           │ │ and gains useful hourly/daily resolution  │ │ air quality│
-│           │ ├ country map ──────────────────────────────┤ │ warning    │
-│           │ │ larger existing map and city temperatures │ │ detail     │
-└───────────┘ └───────────────────────────────────────────┘ └────────────┘
+┌ forecast ─────────────────────────┐ ┌ context ───────┐ ┌ warning ──┐
+│ summary + warnings + current      │ │ location       │ │ detail     │
+├ hourly + daily ───────────────────┤ │ astronomy      │ │ document   │
+│                                   │ ├ country map ───┤ │ + map      │
+│                                   │ │                │ │            │
+└───────────────────────────────────┘ └────────────────┘ └────────────┘
 ```
 
-The centre is not constrained to the width of exactly 24 hourly cells. The
-hourly viewport can reveal more of data already present, while the forecast
-column remains readable rather than stretching prose to the full terminal.
-Additional width becomes an **existing-context rail**—not a new telemetry
-column—and can hold the panels Wevva already owns. At tall dashboard and
-console sizes, the implemented weather grid puts the forecast stack in the
-wider left column and lets the country map span the bounded right column. The
-map therefore uses otherwise idle space without pushing the daily forecast
-below it.
+The forecast retains the same composition and bounded frames. At standard
+aspect ratios the context remains below it as the two-column matrix described
+above. Once the full forecast canvas and a useful minimum context height fit,
+the same mounted location and astronomy widgets move into a 40-cell sidecar
+above a larger country map. Air quality remains part of the complete bottom
+matrix rather than crowding this narrow presentation. The sidecar map renders
+at most four ranked city labels to preserve the country outline. This is
+existing information, not a new telemetry surface, and it no longer pushes the
+daily forecast downward.
 
-Outer sidebars should have bounded proportional widths and sensible minima and
-maxima. When both are visible, the primary forecast still receives its minimum
-usable width. If that is impossible, a sidebar becomes an overlay or explicit
-view instead of compressing the forecast into broken columns.
+Outer sidebars have bounded widths and margins. A rail appears only after the
+full 102-column weather canvas and, when vertically useful, the 42-column
+context allocation have been preserved. Rails therefore use genuine surplus
+width; otherwise they remain modal views instead of pushing the forecast back
+into a compact variant.
+
+Rail visibility is automatic rather than a user preference. After context has
+first claim on suitable surplus space, warning details receive the next block
+when both auxiliary surfaces have content; saved locations use it otherwise,
+and both appear when two further blocks fit. Their bindings focus a visible
+rail or open the modal fallback. In a very short wide terminal, where the
+context sidecar cannot meet its minimum height, the older auxiliary rails may
+use that width instead.
 
 ## Instrument variants
 
-Each compound widget should define its own full and compact semantics. The
-screen selects a profile; it should not reach into dozens of child labels to
-construct a special case.
+Each compound widget defines its own full and compact semantics. The screen
+applies a budget result through narrow `set_layout(...)` methods rather than
+reaching into dozens of child labels to construct a special case.
 
 | Instrument | Full form | Compact form |
 | --- | --- | --- |
@@ -229,10 +241,10 @@ construct a special case.
 | Warnings | Tabs, summary card, selected detail | Focusable severity/condition/count card; tabs and detail open in a dedicated reader |
 | Hourly | Day tabs and broad hourly matrix | Same full horizon in a horizontally scrolling viewport; fewer complete rows |
 | Daily | Full forecast rows | Hidden until two complete rows fit; then fewer complete rows with dense columns |
-| Location data | Framed table | One-line coordinates/time-zone summary or secondary view |
-| Sun and moon | Framed table | Sunrise/sunset and phase inline |
-| Air quality | Framed table | AQI category/value inline |
-| Country map | Large labelled map | Smaller bounded map or direct secondary view |
+| Location data | Five prioritized rows | Two to four prioritized rows |
+| Sun and moon | Five prioritized rows | Two to four prioritized rows |
+| Air quality | Five prioritized rows | Two to four prioritized rows |
+| Country map | Labelled country map | Same map in the matched context height |
 
 Compact does not mean inventing derived scores. It means using typography,
 abbreviations, and layout to express existing values efficiently.
@@ -246,114 +258,106 @@ abbreviations, and layout to express existing values efficiently.
   their own scrolling because their length is not predictable.
 - Hourly forecast may use a keyboard-controlled horizontal window. A resize
   changes its capacity but not the selected hour or day.
-- Daily forecast reduces its visible horizon to complete rows; a dedicated
-  outlook view exposes all available days.
-- Maps scale or move to a secondary view; they do not scroll internally.
+- Daily forecast reduces its visible horizon to complete rows.
+- Maps scale with their bounded context area or disappear atomically; they do
+  not scroll internally.
 - Focused scrollable areas must have visible focus and predictable escape back
   to the parent workspace.
 
 ## Warning behavior
 
-Warnings use a master/detail relationship whose arrangement changes without
-changing state:
+Warnings use a master/detail relationship:
 
-- `compact`: a warning severity/condition/count card stays in the forecast;
-  activating it opens the existing tabs and detail in a full-workspace reader;
-- `stacked`: warning summary can sit above hourly forecast; detail remains an
-  explicit reader unless there is enough width and height;
-- `dashboard` and `console`: selected detail may occupy the existing right
-  rail, preserving the current independent document scrolling.
+- a fixed-height severity/condition/count card is the supported compact
+  baseline;
+- once height permits, the card grows into the classic tabbed warning preview;
+  selecting a tab changes its headline/timing preview and activating the body
+  opens that selected warning;
+- the modal uses the same tab selector over the complete warning body shown in
+  the detail rail, without a duplicate compact preview above it; the document
+  scrolls independently from the tabs;
+- after eligible forecast context takes the first surplus block, warning detail
+  receives the next before saved locations; when two further blocks fit, both
+  auxiliary surfaces appear;
+- the `i` command focuses a visible warning rail or opens the modal fallback.
 
 This keeps warning tabs—one of the interface's strongest interactions—without
 making long CAP prose dictate the height of every forecast screen.
 
 ## Tropical workspace
 
-The tropical screen follows the same vocabulary while preserving its own
-purpose:
-
-- compact terminals expose system/source tabs and three stable views:
-  `Overview`, `Track`, and `Products`; no view is a truncated sliver of another;
-- stacked terminals may place summary and conditions above the track, with the
-  selected product as an explicit view;
-- dashboard terminals retain the current track/product master-detail layout;
-- console terminals expand into the available canvas, giving the track more
-  resolution and the product reader a bounded readable width instead of
-  retaining a small centred island.
-
-System, source, and product selection must survive every profile transition.
-The track remains a primary instrument and is never replaced by fabricated
-storm telemetry.
+The tropical screen retains its existing system/source selector, analysis,
+track, and product-reader composition. It does not yet consume the weather
+screen's row-and-column budget; adapting it is separate follow-up work.
 
 ## Textual implementation strategy
 
-Textual 8 can support this design if the widget tree is built for reflow.
+The implementation uses Textual's stable widget tree and presentation updates.
 
 ### Stable siblings, responsive grids
 
-Major weather instruments should be composed once as stable siblings under a
-small number of grid containers. Profile classes on the screen/container alter
-grid columns, rows, spans, visibility, and instrument variants. Grid layout can
-reflow these siblings without replacing their state.
+Major weather instruments are composed once as stable siblings under a small
+number of containers. The budget alters exact heights, visibility, complete
+table rows/columns, and density variants without replacing widget state.
 
 `Widget.move_child` can reorder children only within one parent. It is useful
 for a small number of sibling-order changes, but it is not a general mechanism
 for moving live instruments between unrelated desktop and compact containers.
-The layout should therefore avoid duplicate target containers that require
+The layout therefore avoids duplicate target containers that require
 cross-parent remounting.
 
 Repeated `recompose()` on resize is specifically undesirable: it removes and
 mounts children again, which makes preservation of focus, cursor, tab, scroll,
-and loading state fragile. Recomposition should be reserved for a true content
+and loading state fragile. Recomposition remains reserved for a true content
 model change, not ordinary geometry changes.
 
-### Central profile calculation
+### Central budget calculation
 
-A small `LayoutProfile` value should be calculated from the actual content
-region. It includes independent width and height classes and exposes explicit
-capabilities such as `show_context_rail`, `use_compact_current`, and the number
-of visible daily rows. Threshold crossings update CSS classes and widget
-variants; every single resize event should not churn the tree.
+`weather_layout_for(...)` calculates an immutable `WeatherLayoutBudget` from
+the actual viewport, warning presence, and available auxiliary surfaces. It
+returns explicit current and warning density, hourly rows, daily columns and
+rows, context placement and table/map heights, and modal/rail choices.
 
-The profile calculation should be pure and table-tested. Width thresholds must
-account for currently visible sidebars. Height calculations must account for
-the header/footer rather than assuming total terminal rows are content rows.
+The calculation is pure and table-tested. Width thresholds account for rails;
+height calculations use the content viewport rather than assuming total
+terminal rows are available.
 
 ### Resize is presentation-only
 
-Resizing must never initiate Open-Meteo, air-quality, alert, or tropical
-requests. Widgets rerender from the latest model. Expensive map rasters may be
-cached by geometry and viewport size, and recalculation should be debounced if
-Textual emits a burst of resize events.
+Resizing does not initiate Open-Meteo, air-quality, alert, or tropical
+requests. Widgets rerender from the latest model and the map reuses its loaded
+geography.
 
 ### State and focus invariants
 
-The screen, not the geometry, owns selection. Before and after a profile
+The screen, not the geometry, owns selection. Before and after a budget
 transition:
 
 - selected hour/day and visible-hour anchoring remain meaningful;
-- selected warning/system/source/product is unchanged if still present;
-- focus remains on the same logical control where possible, otherwise moves to
-  the nearest visible parent action;
-- warning/product scroll offsets are retained while their document exists;
-- user-controlled sidebar visibility remains independent from automatic
-  layout decisions.
+- hourly and daily focus remains on the same mounted logical control;
+- an open warning reader retains its selected tab and focus while resizing;
+- the mounted context tables and map survive transitions between bottom matrix
+  and sidecar placement;
+- automatic rails never squeeze the central forecast or trigger data fetches.
 
 ## Verification matrix
 
-Responsive work is incomplete until it is exercised at representative sizes:
+The deterministic rendered suite exercises these representative sizes:
 
 | Terminal | Purpose |
 | --- | --- |
 | 80x24 | First-class compact target; no primary page scroll |
 | 80x40 | Narrow/tall independence |
-| 100x30 | Compact-to-stacked boundary |
+| 100x30 | Compact width with additional height |
 | 120x40 | Typical medium terminal |
 | 160x24 | Wide/short independence |
-| 160x45 | Dashboard composition |
-| 186x53 | Regression against the previous documented minimum |
-| 220x60 | Console use of added area |
-| 267x75 | Very wide terminal; no centred island |
+| 160x45 | Context sidecar before auxiliary rails |
+| 160x60 | Tall context sidecar with bounded map |
+| 186x53 | Context sidecar plus one auxiliary rail |
+| 220x24 | Two auxiliary rails in a window too short for the sidecar |
+| 220x45 | Context sidecar plus one auxiliary rail |
+| 220x60 | Tall context sidecar plus one auxiliary rail |
+| 267x75 | Context sidecar plus both bounded auxiliary rails |
 
 For each size, verify:
 
@@ -361,20 +365,18 @@ For each size, verify:
 - useful current and hourly information without main-page vertical scrolling
   at 80x24; daily information returns when two complete rows fit;
 - day tabs and warning tabs remain usable;
-- opening and closing sidebars causes a coherent profile transition;
+- automatic rail appearance and removal causes a coherent budget transition;
 - resizing repeatedly preserves selection and focus;
 - warning fixtures cover none, one, and many warnings plus long prose;
-- tropical fixtures cover one and many systems, multiple sources, absent
-  track/cone data, and long products;
-- map content remains legible or is deliberately moved to its secondary view;
+- country-map content remains bounded within each complete context tier;
 - no network request is caused by resize.
 
 Tests should use fixed forecast and warning fixtures so geometry can be
 assessed independently of live services, local time, and provider availability.
 
-## Deliberately deferred details
+## Usage-driven refinements
 
-Exact breakpoint numbers, field abbreviations, border density, and whether a
-particular context instrument spans one or two grid cells should follow render
-measurements. They are tuning decisions, not reasons to weaken the structural
-rules above.
+The implemented thresholds and abbreviations are now regression-tested.
+Further changes should respond to concrete terminal, font, or interaction
+issues observed during use. In particular, cross-shell focus and document
+scroll continuity may be refined without reopening the layout architecture.
