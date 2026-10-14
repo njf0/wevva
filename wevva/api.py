@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from copy import deepcopy
-from typing import Any, Awaitable, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from wevva.alerts import Alert, get_alerts, get_alerts_async
 from wevva.location_metadata import LocationMetadata
@@ -28,6 +29,7 @@ AIR_QUALITY_FIELDS: tuple[str, ...] = (
     'grass_pollen',
 )
 T = TypeVar('T')
+P = ParamSpec('P')
 
 
 class WevvaAPIError(RuntimeError):
@@ -38,12 +40,17 @@ class LocationNotFoundError(WevvaAPIError):
     """Raised when a place query returns no geocoding matches."""
 
 
-def _run_sync(coro: Awaitable[T]) -> T:
-    """Run an async coroutine from synchronous code."""
+def _run_sync(
+    async_callable: Callable[P, Coroutine[Any, Any, T]],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """Call an async function from synchronous code."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(async_callable(*args, **kwargs))
     raise WevvaAPIError('Sync API cannot run inside an active event loop. Use async API functions instead.')
 
 
@@ -161,7 +168,7 @@ def geocode_sync(
     language: str = 'en',
 ) -> list[LocationMetadata]:
     """Synchronous wrapper for :func:`geocode`."""
-    return _run_sync(geocode(query, count=count, language=language))
+    return _run_sync(geocode, query, count=count, language=language)
 
 
 async def alerts_by_coordinates(
@@ -215,14 +222,13 @@ def forecast_by_coordinates_sync(
 ) -> ForecastBundle:
     """Synchronous wrapper for :func:`forecast_by_coordinates`."""
     return _run_sync(
-        forecast_by_coordinates(
-            lat=lat,
-            lon=lon,
-            temperature_unit=temperature_unit,
-            wind_speed_unit=wind_speed_unit,
-            precipitation_unit=precipitation_unit,
-            country_code=country_code,
-        )
+        forecast_by_coordinates,
+        lat=lat,
+        lon=lon,
+        temperature_unit=temperature_unit,
+        wind_speed_unit=wind_speed_unit,
+        precipitation_unit=precipitation_unit,
+        country_code=country_code,
     )
 
 
@@ -269,13 +275,12 @@ def forecast_by_place_sync(
 ) -> ForecastBundle:
     """Synchronous wrapper for :func:`forecast_by_place`."""
     return _run_sync(
-        forecast_by_place(
-            query,
-            language=language,
-            temperature_unit=temperature_unit,
-            wind_speed_unit=wind_speed_unit,
-            precipitation_unit=precipitation_unit,
-        )
+        forecast_by_place,
+        query,
+        language=language,
+        temperature_unit=temperature_unit,
+        wind_speed_unit=wind_speed_unit,
+        precipitation_unit=precipitation_unit,
     )
 
 

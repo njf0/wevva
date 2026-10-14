@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. Sync wrappers now reject an active event loop before
+constructing their coroutine, preventing unawaited-coroutine warnings.
 
 ## Context
 
@@ -62,4 +63,12 @@ This is a small public-API polish task and may be completed independently.
 
 ## Outcome
 
-To be completed when the task is finished.
+`_run_sync()` now receives an async callable and its arguments, checks for an
+active event loop, and invokes the callable only when `asyncio.run()` can be
+used. The three shared sync wrappers retain their existing signatures, return
+values, and `WevvaAPIError` message.
+
+Focused tests verify that all three wrappers avoid calling their async
+counterparts or emitting an unawaited-coroutine warning inside an active loop,
+and that ordinary synchronous calls forward their arguments and results. The
+focused tests, source compilation, and complete 273-test suite pass.
