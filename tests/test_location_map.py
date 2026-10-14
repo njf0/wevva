@@ -12,6 +12,7 @@ from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.widgets.geographic_scope import GeographicCanvas
 from wevva.widgets.location_map import (
     LocationMap,
     LocationMapLabel,
@@ -288,6 +289,70 @@ class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 any(placement.marker_on_right for placement in widget.placements)
             )
+
+    async def test_neighboring_city_labels_preserve_their_projected_rows(self) -> None:
+        app = _LocationMapApp()
+        async with app.run_test(size=(48, 30)) as pilot:
+            widget = app.query_one(LocationMap)
+            widget.styles.width = 46
+            widget.set_layout_height(24)
+            widget.update_location(
+                LocationMetadata(
+                    latitude=50.86,
+                    longitude=-0.71,
+                    name='Boxgrove',
+                    country='United Kingdom',
+                    country_code='GB',
+                ),
+                current_temperature=14.0,
+            )
+            widget.update_temperatures(
+                {coordinates: 15.0 for coordinates in widget.city_coordinates},
+                temperature_unit='celsius',
+            )
+            for _ in range(3):
+                await pilot.pause()
+
+            scope = build_location_map_geometry(
+                latitude=50.86,
+                longitude=-0.71,
+                location_name='Boxgrove',
+                country_code='GB',
+            )
+            assert scope is not None
+            canvas = GeographicCanvas(
+                widget.content_size.width,
+                widget.content_size.height,
+                scope.viewport,
+            )
+            placements = {placement.key: placement for placement in widget.placements}
+            labels = {
+                label.location.name: label
+                for label in widget.query(LocationMapLabel)
+            }
+
+            actual_markers = {}
+            for name in ('Glasgow', 'Edinburgh'):
+                label = labels[name]
+                key = f'{label.location.latitude:.6f},{label.location.longitude:.6f}'
+                placement = placements[key]
+                marker_column = (
+                    placement.column + placement.width - 1
+                    if placement.marker_on_right
+                    else placement.column
+                )
+                actual_markers[name] = (marker_column, placement.row)
+                point = next(
+                    point for place, point in scope.places if place.name == name
+                )
+                self.assertEqual(actual_markers[name], canvas.cell_position(point))
+
+            self.assertEqual(
+                actual_markers['Glasgow'][1],
+                actual_markers['Edinburgh'][1],
+            )
+            self.assertEqual(labels['Glasgow'].label_text, 'Glasgow 15°C •')
+            self.assertEqual(labels['Edinburgh'].label_text, '• Edinburgh 15°C')
 
     async def test_map_place_selection_reuses_active_weather_screen(self) -> None:
         munich = LocationMetadata(

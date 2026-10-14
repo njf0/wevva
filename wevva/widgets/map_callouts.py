@@ -23,16 +23,18 @@ def place_directional_callout(
     canvas_height: int,
     occupied: set[tuple[int, int]],
     preferred_avoidance: set[tuple[int, int]] | None = None,
+    allow_row_shift: bool = True,
 ) -> DirectionalCalloutPlacement | None:
-    """Place a callout, preferring cells outside optional map geometry."""
+    """Place a callout, optionally keeping its marker on the anchor row."""
 
     if canvas_width < 1 or canvas_height < 1:
         return None
     label_width = min(max(1, int(label_width)), canvas_width)
     anchor_column, anchor_row = anchor
     row_offsets = [0]
-    for distance in range(1, canvas_height):
-        row_offsets.extend((-distance, distance))
+    if allow_row_shift:
+        for distance in range(1, canvas_height):
+            row_offsets.extend((-distance, distance))
 
     avoidance_passes = (
         (preferred_avoidance, set())

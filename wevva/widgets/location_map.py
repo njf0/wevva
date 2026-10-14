@@ -572,22 +572,36 @@ class LocationMap(Container):
         canvas = GeographicCanvas(width, height, self._scope.viewport)
         occupied: set[tuple[int, int]] = set()
         placements: dict[str, LocationMapPlacement] = {}
-        city_labels = 0
-        for key, _location, point, current in self._label_specs():
+        specs = self._label_specs()[: 1 + self._max_place_labels]
+        anchors = [
+            canvas.cell_position(point)
+            for _key, _location, point, _current in specs
+        ]
+        for index, (key, _location, _point, _current) in enumerate(specs):
             label = self._labels.get(key)
             if label is None:
                 continue
-            if not current and city_labels >= self._max_place_labels:
-                label.display = False
-                continue
+            anchor = anchors[index]
+            protected_occupied = occupied | set(anchors[index + 1 :])
             placement = _place_callout(
                 key,
-                anchor=canvas.cell_position(point),
+                anchor=anchor,
                 label_width=cell_len(label.label_text),
                 canvas_width=width,
                 canvas_height=height,
-                occupied=occupied,
+                occupied=protected_occupied,
             )
+            if placement is None:
+                # A lower-ranked marker should influence direction where both
+                # labels fit, but must not displace a higher-ranked callout.
+                placement = _place_callout(
+                    key,
+                    anchor=anchor,
+                    label_width=cell_len(label.label_text),
+                    canvas_width=width,
+                    canvas_height=height,
+                    occupied=set(occupied),
+                )
             if placement is None:
                 label.display = False
                 continue
@@ -595,8 +609,15 @@ class LocationMap(Container):
             label.display = True
             label.styles.offset = (placement.column, placement.row)
             placements[key] = placement
-            if not current:
-                city_labels += 1
+            occupied.update(
+                (placement.column + offset, placement.row)
+                for offset in range(placement.width)
+            )
+
+        visible_keys = set(placements)
+        for key, label in self._labels.items():
+            if key not in visible_keys:
+                label.display = False
         self._placements = placements
 
     def _render_width(self) -> int:
@@ -645,6 +666,7 @@ def _place_callout(
         canvas_width=canvas_width,
         canvas_height=canvas_height,
         occupied=occupied,
+        allow_row_shift=False,
     )
     if placement is None:
         return None
