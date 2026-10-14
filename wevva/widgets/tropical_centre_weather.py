@@ -14,17 +14,16 @@ from wevva.widgets.tropical_info_table import TropicalInfoTable
 
 
 class TropicalCentreWeather(Container):
-    """Bordered six-row current-weather region for the selected source centre."""
+    """Bordered, density-aware weather near the selected source centre."""
 
     DEFAULT_CSS = """
     TropicalCentreWeather {
         width: 100%;
         min-width: 100%;
         max-width: 100%;
-        height: 8;
-        min-height: 8;
-        max-height: 8;
-        margin: 0 0 1 0;
+        height: 0;
+        min-height: 0;
+        margin: 0;
         border: round $secondary;
         border-title-color: $secondary;
         border-title-align: left;
@@ -35,9 +34,8 @@ class TropicalCentreWeather(Container):
         width: 100%;
         min-width: 100%;
         max-width: 100%;
-        height: 6;
-        min-height: 6;
-        max-height: 6;
+        height: 1fr;
+        min-height: 0;
         padding: 0;
         border: none;
         overflow-y: hidden;
@@ -50,6 +48,10 @@ class TropicalCentreWeather(Container):
             field_width=16,
             id='tropical-centre-weather-content',
         )
+        self._rows_cache: tuple[tuple[str, Text], ...] = ()
+        self._visible_row_count = 0
+        self._weather_available = False
+        self._state = 'hidden'
         self.border_title = 'Current weather near centre'
         self.display = False
 
@@ -57,23 +59,32 @@ class TropicalCentreWeather(Container):
         yield self.table
 
     def show_loading(self) -> None:
-        """Keep the titled frame visible while its six-row body loads."""
+        """Retain a local loading state without overriding layout visibility."""
+        self._state = 'loading'
+        self._weather_available = True
+        self._rows_cache = ()
         self.table.clear()
-        self.display = True
         self.table.loading = True
+        self._sync_display()
 
     def show_unavailable(self) -> None:
         """Keep a failed independent weather lookup compact and non-fatal."""
-        self.table.loading = False
-        self.table.clear()
-        self.table.add_row(
-            Text('Weather', style='dim'),
-            Text('Temporarily unavailable', style='dim italic'),
-            key='weather',
+        self._state = 'unavailable'
+        self._weather_available = True
+        self._rows_cache = (
+            (
+                'Weather',
+                Text('Temporarily unavailable', style='dim italic'),
+            ),
         )
-        self.display = True
+        self.table.loading = False
+        self._render_rows()
+        self._sync_display()
 
     def hide_weather(self) -> None:
+        self._state = 'hidden'
+        self._weather_available = False
+        self._rows_cache = ()
         self.table.loading = False
         self.table.clear()
         self.display = False
@@ -89,21 +100,58 @@ class TropicalCentreWeather(Container):
             units = {}
 
         rows = self._rows(response, current, units)
+        self._state = 'ready'
+        self._weather_available = True
+        self._rows_cache = tuple(rows)
         self.table.loading = False
+        if not rows:
+            self._rows_cache = (
+                (
+                    'Weather',
+                    Text('No current observations', style='dim italic'),
+                ),
+            )
+        self._render_rows()
+        self._sync_display()
+
+    def set_layout(self, *, row_count: int, height: int) -> None:
+        """Apply a complete-row tier without discarding cached weather data."""
+        self._visible_row_count = max(0, int(row_count))
+        height = max(0, int(height))
+        self.styles.height = height
+        self.table.styles.height = max(0, height - 2)
+        self._render_rows()
+        self._sync_display()
+
+    @property
+    def available_row_count(self) -> int:
+        return len(self._rows_cache)
+
+    @property
+    def visible_row_count(self) -> int:
+        return min(self._visible_row_count, len(self._rows_cache))
+
+    @property
+    def weather_available(self) -> bool:
+        return self._weather_available
+
+    def _sync_display(self) -> None:
+        self.display = bool(
+            self._weather_available
+            and self._visible_row_count
+            and self.styles.height.value
+        )
+
+    def _render_rows(self) -> None:
+        if self._state == 'loading':
+            return
         self.table.clear()
-        for label, value in rows:
+        for label, value in self._rows_cache[: self._visible_row_count]:
             self.table.add_row(
                 Text(label, style='dim'),
                 value,
                 key=label.casefold().replace(' ', '-'),
             )
-        if not rows:
-            self.table.add_row(
-                Text('Weather', style='dim'),
-                Text('No current observations', style='dim italic'),
-                key='weather',
-            )
-        self.display = True
 
     def _rows(
         self,

@@ -2,8 +2,9 @@
 
 ## Status
 
-Implemented for the primary weather screen. The tropical workspace remains a
-separate composition and is not yet driven by this allocator.
+Implemented for the primary weather screen and the tropical detail workspace.
+Each owns a focused pure allocator; only the all-storm overview remains as a
+later task 0018 slice.
 
 ## Intent
 
@@ -145,7 +146,7 @@ The diagrams describe regions and hierarchy, not exact box drawing.
 │ Temp °C    9   9   9   8   8   8   7   7                             │
 │ ◀━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━───────────────────────────────▶ │
 │                                                        ←/→ scroll      │
-└ t Tropical  l Locations  i Warning details  r Refresh  q Quit ─────────┘
+└ g Alerts  t Tropical  l Locations  i Warning details  r Refresh  q Quit ┘
 ```
 
 The exact fields may vary with configured units and data availability. The
@@ -285,9 +286,13 @@ making long CAP prose dictate the height of every forecast screen.
 
 ## Tropical workspace
 
-The tropical screen retains its existing system/source selector, analysis,
-track, and product-reader composition. It does not yet consume the weather
-screen's row-and-column budget; adapting it is separate follow-up work.
+The tropical screen uses its own pure budget over the same actual terminal
+dimensions. At compact sizes it retains storm/source navigation, complete
+priority summary rows, and an internally scrolling information reader. At
+larger sizes it uses two balanced columns: centre weather above the selected
+map on the left, and the source summary above storm information on the right.
+The rounded frame fills the stage inside `1 2` padding, and resizing changes
+only presentation state—mounted widgets and provider selections are retained.
 
 ## Textual implementation strategy
 

@@ -4,8 +4,8 @@ This maintenance script requires ``pyshp`` but the generated runtime resource
 does not. Example:
 
     uv run --with pyshp python tools/build_natural_earth_places.py \
-        /tmp/ne_50m_populated_places/ne_50m_populated_places.shp \
-        wevva/data/natural_earth_50m_populated_places.json.gz
+        /tmp/ne_10m_populated_places/ne_10m_populated_places.shp \
+        wevva/data/natural_earth_10m_populated_places.json.gz
 """
 
 from __future__ import annotations
@@ -44,15 +44,27 @@ def build_resource(shapefile_path: Path) -> dict[str, Any]:
                 _integer(properties, 'SCALERANK', 10),
                 _integer(properties, 'LABELRANK', 50),
                 _integer(properties, 'POP_MAX', 0),
+                str(properties.get('ISO_A2') or '').strip().upper(),
+                str(properties.get('ADM1NAME') or '').strip(),
             ]
         )
 
     places.sort(key=lambda place: (place[3], place[4], -int(place[5]), place[0]))
+    scale = '1:10m' if '_10m_' in shapefile_path.name else '1:50m'
     return {
-        'source': 'Natural Earth 1:50m Populated Places',
+        'source': f'Natural Earth {scale} Populated Places',
         'version': '5.1.2',
         'precision': 4,
-        'fields': ['name', 'longitude', 'latitude', 'scale_rank', 'label_rank', 'population'],
+        'fields': [
+            'name',
+            'longitude',
+            'latitude',
+            'scale_rank',
+            'label_rank',
+            'population',
+            'country_code',
+            'region_name',
+        ],
         'places': places,
     }
 

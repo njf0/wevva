@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from wevva.openmeteo import OpenMeteoForecast
+from wevva.openmeteo import HourlyOpenMeteoForecast, OpenMeteoForecast
 
 
 async def fetch_weather(
@@ -74,3 +74,23 @@ async def fetch_current_weather(
         wind_speed_unit=wind_speed_unit,
         precipitation_unit=precipitation_unit,
     )
+
+
+async def fetch_alert_place_hourly_forecast(
+    *,
+    lat: float,
+    lon: float,
+    temperature_unit: str = 'celsius',
+    wind_speed_unit: str = 'kmh',
+) -> HourlyOpenMeteoForecast:
+    """Fetch and normalize the minimal hourly forecast used by alert maps."""
+
+    response = await OpenMeteoForecast.fetch_hourly_summary(
+        lat=lat,
+        lon=lon,
+        temperature_unit=temperature_unit,
+        wind_speed_unit=wind_speed_unit,
+    )
+    metadata = OpenMeteoForecast.extract_metadata(response)
+    units = OpenMeteoForecast.extract_units(response, key='hourly')
+    return HourlyOpenMeteoForecast(metadata, units, response.get('hourly', {}))

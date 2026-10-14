@@ -32,6 +32,7 @@ from wevva.widgets.geographic_scope import (
     ProjectedPolygon,
     preferred_geographic_height,
 )
+from wevva.widgets.map_callouts import place_directional_callout
 
 _MIN_CONTENT_HEIGHT = 12
 _MAX_CONTENT_HEIGHT = 26
@@ -638,35 +639,22 @@ def _place_callout(
     occupied: set[tuple[int, int]],
 ) -> LocationMapPlacement | None:
     """Place one native callout near its projected city cell."""
-
-    label_width = min(max(1, label_width), canvas_width)
-    anchor_column, anchor_row = anchor
-    row_offsets = [0]
-    for distance in range(1, canvas_height):
-        row_offsets.extend((-distance, distance))
-
-    for row_offset in row_offsets:
-        row = anchor_row + row_offset
-        if not 0 <= row < canvas_height:
-            continue
-        for column, marker_on_right in (
-            (anchor_column, False),
-            (anchor_column - label_width + 1, True),
-        ):
-            if column < 0 or column + label_width > canvas_width:
-                continue
-            cells = {(column + offset, row) for offset in range(label_width)}
-            if cells & occupied:
-                continue
-            occupied.update(cells)
-            return LocationMapPlacement(
-                key=key,
-                column=column,
-                row=row,
-                width=label_width,
-                marker_on_right=marker_on_right,
-            )
-    return None
+    placement = place_directional_callout(
+        anchor=anchor,
+        label_width=label_width,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+        occupied=occupied,
+    )
+    if placement is None:
+        return None
+    return LocationMapPlacement(
+        key=key,
+        column=placement.column,
+        row=placement.row,
+        width=placement.width,
+        marker_on_right=placement.marker_on_right,
+    )
 
 
 def _normalized_place_name(name: str) -> str:

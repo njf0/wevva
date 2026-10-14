@@ -18,15 +18,20 @@ from wevva_warnings.registry import get_source
 from wevva.app import Wevva
 from wevva.screens.tropical_systems_screen import (
     TropicalSystemsScreen,
+    _classification_colour_role,
     _observation_key,
     _product_widgets,
     _structured_product,
 )
 from wevva.screens.weather_screen import WeatherScreen
+from wevva.tropical_layout import TropicalTopology
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_info_table import TropicalInfoTable
 from wevva.widgets.tropical_summary import TropicalStormSummary
-from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
+from wevva.widgets.tropical_track import (
+    LargeTropicalStormTrackScope,
+    TropicalFixLabel,
+)
 
 
 def _observation(
@@ -164,6 +169,34 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.nangka = CanonicalTropicalSystem('NANGKA', [self.jma, self.cma])
         self.lala = CanonicalTropicalSystem('LALA', [self.cphc])
 
+    def test_classification_colours_use_semantic_severity_roles(self) -> None:
+        expected = {
+            'Category 5 Hurricane': 'error',
+            'Intense Tropical Cyclone': 'error',
+            'Severe Tropical Storm': 'warning',
+            'Moderate Tropical Storm': 'accent',
+            'Tropical Cyclone 12': 'accent',
+            'Tropical Depression': 'secondary',
+            'Tropical Low': 'primary',
+            'Unknown': 'primary',
+        }
+        for classification, role in expected.items():
+            with self.subTest(classification=classification):
+                self.assertEqual(
+                    _classification_colour_role(classification),
+                    role,
+                )
+
+    def test_summary_leaves_classification_and_advisory_to_other_surfaces(self) -> None:
+        self.jma.advisory_number = '002'
+        screen = TropicalSystemsScreen([self.nangka])
+
+        rows = dict(screen._summary(self.jma))
+
+        self.assertNotIn('Classification', rows)
+        self.assertNotIn('Advisory', rows)
+        self.assertIn('Centre', rows)
+
     async def test_canonical_storms_are_sorted_and_multi_source_storm_appears_once(self) -> None:
         calls: list[str] = []
 
@@ -194,6 +227,10 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             products = screen.query_one('#tropical-product-tabs', Tabs)
             self.assertEqual(list(products.query('Tab')), [])
             self.assertFalse(products.display)
+            basic_information = screen.query_one(
+                '#tropical-product-body', VerticalScroll
+            ).query_one(Static)
+            self.assertIn('NANGKA provider summary', _rendered(basic_information))
             summary = screen.query_one(TropicalStormSummary)
             product_body = screen.query_one('#tropical-product-body', VerticalScroll)
             root = screen.query_one('#tropical-screen-root')
@@ -211,12 +248,13 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                 root.region.y + root.region.height,
             )
             self.assertGreaterEqual(summary.region.y + summary.region.height, root.region.y)
-            self.assertIn('Typhoon', _data_table_text(summary))
+            self.assertNotIn('Typhoon', _data_table_text(summary))
+            self.assertNotIn('Source', _data_table_text(summary))
             self.assertNotIn('●', _data_table_text(summary))
             self.assertNotIn('Distance', _data_table_text(summary))
             self.assertIn('15 Aug 2026', summary.get_cell('last-update', 'value'))
             screenshot = app.export_screenshot()
-            self.assertIn('Classification', screenshot)
+            self.assertNotIn('Classification', screenshot)
             self.assertIn('Typhoon', screenshot)
 
             await pilot.press('w')
@@ -258,11 +296,14 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             summary = screen.query_one(TropicalStormSummary)
             track = screen.query_one(LargeTropicalStormTrackScope)
+            product_tabs = screen.query_one('#tropical-product-tabs', Tabs)
             first_scope = track._scope
+            self.assertFalse(product_tabs.display)
+            self.assertEqual(product_tabs.active, 'tropical-product-0')
             self.assertIn('970 hPa', _data_table_text(summary))
             self.assertNotIn('990 hPa', _data_table_text(summary))
             assert first_scope is not None
-            self.assertFalse(first_scope.land)
+            self.assertTrue(first_scope.land)
 
             screen.query_one('#tropical-source-tabs', Tabs).active = 'tropical-screen-source-1'
             await pilot.pause()
@@ -275,11 +316,105 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first_scope.places, second_scope.places)
             self.assertNotEqual(first_scope.storm, second_scope.storm)
             self.assertNotEqual(first_scope.land, second_scope.land)
+            self.assertEqual(
+                screen.query_one('#tropical-storm-tabs Tab').label.plain,
+                'Typhoon NANGKA',
+            )
             self.assertEqual(calls, ['jma_tropical', 'cma_tropical'])
 
             screen.query_one('#tropical-source-tabs', Tabs).active = 'tropical-screen-source-0'
             await pilot.pause()
             self.assertEqual(calls, ['jma_tropical', 'cma_tropical'])
+
+    async def test_lazy_products_add_only_explicit_track_lead_labels(self) -> None:
+        calls = 0
+
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            nonlocal calls
+            calls += 1
+            return [
+                TropicalProduct(
+                    kind='forecast',
+                    label='Forecast',
+                    data={
+                        'points': [
+                            {
+                                'latitude': 29.0,
+                                'longitude': 136.0,
+                                'lead_hours': 12,
+                            },
+                            {
+                                'latitude': 30.0,
+                                'longitude': 137.0,
+                                'valid_at': '2026-08-16T12:00:00Z',
+                            },
+                        ]
+                    },
+                )
+            ]
+
+        screen = TropicalSystemsScreen([self.nangka], product_loader=loader)
+        app = _ScreenApp(screen)
+        async with app.run_test(size=(180, 55)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            track = screen.query_one(LargeTropicalStormTrackScope)
+            labels = list(track.query(TropicalFixLabel))
+            self.assertEqual(
+                [label._body_text for label in labels],
+                ['Now', '12h', ''],
+            )
+            label_ids = tuple(map(id, labels))
+
+            await pilot.resize_terminal(200, 60)
+            await pilot.pause()
+
+            self.assertEqual(calls, 1)
+            self.assertEqual(
+                tuple(map(id, track.query(TropicalFixLabel))),
+                label_ids,
+            )
+
+    async def test_coordinate_only_forecast_product_does_not_duplicate_information_tab(self) -> None:
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return [
+                TropicalProduct(
+                    kind='forecast',
+                    label='Forecast',
+                    url='https://example.test/track.kmz',
+                    data={
+                        'points': [
+                            {
+                                'latitude': 17.0,
+                                'longitude': -150.0,
+                                'lead_hours': 12,
+                            }
+                        ]
+                    },
+                ),
+                TropicalProduct(
+                    kind='advisory',
+                    label='Public Advisory',
+                    content='Official advisory text',
+                ),
+            ]
+
+        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        app = _ScreenApp(screen)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+
+            tabs = screen.query_one('#tropical-product-tabs', Tabs)
+            self.assertEqual(
+                [tab.label.plain for tab in tabs.query('Tab')],
+                ['Forecast', 'Public Advisory'],
+            )
+            track = screen.query_one(LargeTropicalStormTrackScope)
+            self.assertEqual(
+                [label._body_text for label in track.query(TropicalFixLabel)],
+                ['Now', '12h', ''],
+            )
 
     async def test_current_weather_loads_by_source_centre_and_reuses_cached_response(self) -> None:
         started = asyncio.Event()
@@ -339,21 +474,21 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(weather_content.loading)
             self.assertFalse(track.loading)
             self.assertEqual(weather.border_title, 'Current weather near centre')
-            self.assertEqual(weather.content_size.height, 6)
-            self.assertEqual(weather_content.styles.height.value, 6)
+            self.assertEqual(weather.content_size.height, 5)
+            self.assertEqual(weather_content.styles.height.value, 5)
 
             release.set()
             await pilot.pause()
             await pilot.pause()
             self.assertFalse(weather_content.loading)
-            self.assertEqual(weather_content.region.height, 6)
-            self.assertEqual(weather_content.row_count, 6)
+            self.assertEqual(weather_content.region.height, 5)
+            self.assertEqual(weather_content.row_count, 5)
             self.assertEqual(weather_content.get_cell('condition', 'value').plain, '⛈️ Thunderstorm')
             self.assertEqual(weather_content.get_cell('temperature', 'value').plain, '29°C · feels 34°C')
             self.assertEqual(weather_content.get_cell('wind', 'value').plain, '55 km/h NW ↘ · gusts 78 km/h')
             self.assertEqual(weather_content.get_cell('precipitation', 'value').plain, '80% · 3.2 mm/hr')
             self.assertEqual(weather_content.get_cell('surface-pressure', 'value').plain, '986 hPa')
-            self.assertEqual(weather_content.get_cell('forecast-coords', 'value').plain, '28.12°N 134.88°E')
+            self.assertNotIn('forecast-coords', weather_content.rows)
             temperature_cell = weather_content.get_cell('temperature', 'value')
             number_span = next(span for span in temperature_cell.spans if temperature_cell.plain[span.start : span.end] == '29')
             unit_span = next(span for span in temperature_cell.spans if temperature_cell.plain[span.start : span.end] == '°C')
@@ -442,6 +577,10 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             sources = screen.query_one('#tropical-source-tabs', Tabs)
             track = screen.query_one(LargeTropicalStormTrackScope)
             self.assertFalse(sources.display)
+            self.assertIn(
+                'Source',
+                _data_table_text(screen.query_one(TropicalStormSummary)),
+            )
             assert track._scope is not None
             self.assertTrue(track._scope.places)
             self.assertTrue(track._scope.land)
@@ -624,15 +763,12 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(screen.query_one('#tropical-product-tabs', Tabs).display)
             body_text = _rendered(screen.query_one('#tropical-product-body', VerticalScroll).query_one(Static))
             self.assertIn('Supplementary products are temporarily unavailable', body_text)
-            self.assertEqual(
-                app.notified,
-                [('Forecast track and cone are not available from JMA.', 'information')],
-            )
+            self.assertEqual(app.notified, [])
 
             await screen._show_observation()
-            self.assertEqual(len(app.notified), 1)
+            self.assertEqual(app.notified, [])
 
-    async def test_track_without_cone_notifies_once(self) -> None:
+    async def test_track_without_cone_stays_local_and_does_not_notify(self) -> None:
         async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
             return []
 
@@ -642,12 +778,9 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await pilot.pause()
 
-            self.assertEqual(
-                app.notified,
-                [('Forecast cone is not available from CPHC.', 'information')],
-            )
+            self.assertEqual(app.notified, [])
             await screen._show_observation()
-            self.assertEqual(len(app.notified), 1)
+            self.assertEqual(app.notified, [])
 
     async def test_track_with_cone_does_not_notify(self) -> None:
         self.cphc.geometries['cone'] = {
@@ -675,32 +808,64 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.notified, [])
 
     async def test_layout_protects_document_width_and_switches_topology(self) -> None:
-        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
-            return []
+        product_calls: list[str] = []
+        weather_calls: list[tuple[float, float]] = []
 
-        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            product_calls.append(_system.source)
+            return [
+                TropicalProduct(kind='advisory', label='Advisory', content='One'),
+                TropicalProduct(kind='discussion', label='Discussion', content='Two'),
+            ]
+
+        async def weather_loader(latitude: float, longitude: float) -> dict:
+            weather_calls.append((latitude, longitude))
+            return {
+                'latitude': latitude,
+                'longitude': longitude,
+                'current': {
+                    'weather_code': 1,
+                    'temperature_2m': 25,
+                    'wind_speed_10m': 20,
+                },
+                'current_units': {},
+            }
+
+        screen = TropicalSystemsScreen(
+            [self.nangka],
+            product_loader=loader,
+            centre_weather_loader=weather_loader,
+        )
         app = _ScreenApp(screen)
         async with app.run_test(size=(240, 80)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            source_tabs = screen.query_one('#tropical-source-tabs', Tabs)
+            product_tabs = screen.query_one('#tropical-product-tabs', Tabs)
+            source_tabs.active = 'tropical-screen-source-1'
+            await pilot.pause()
+            await pilot.pause()
+            product_tabs.active = 'tropical-product-1'
             await pilot.pause()
             stage = screen.query_one('#tropical-screen-stage')
             root = screen.query_one('#tropical-screen-root')
             workspace = screen.query_one('#tropical-workspace')
             product = screen.query_one('#tropical-product-pane')
             left = screen.query_one('#tropical-left-pane')
+            right = screen.query_one('#tropical-right-pane')
             track_pane = screen.query_one('#tropical-track-pane')
             track = screen.query_one(LargeTropicalStormTrackScope)
+            summary = screen.query_one(TropicalStormSummary)
             centre_weather = screen.query_one(TropicalCentreWeather)
             product_body = screen.query_one('#tropical-product-body')
-            self.assertFalse(workspace.has_class('compact'))
-            self.assertGreaterEqual(product.region.width, 72)
-            self.assertGreaterEqual(left.region.width, 54)
-            self.assertLess(root.region.width, 240)
-            self.assertAlmostEqual(root.region.x, (240 - root.region.width) / 2, delta=2)
-            self.assertAlmostEqual(
-                root.region.y - stage.region.y,
-                (stage.region.height - root.region.height) / 2,
-                delta=2,
-            )
+            widget_ids = tuple(map(id, (root, workspace, product, left, right, track)))
+            self.assertEqual(screen._layout_budget.topology, TropicalTopology.SPLIT)
+            self.assertGreaterEqual(product.region.width, 100)
+            self.assertEqual(left.region.width, right.region.width)
+            self.assertEqual(root.region.width, stage.content_size.width)
+            self.assertEqual(root.region.height, stage.content_size.height)
+            self.assertEqual(root.region.x - stage.region.x, 2)
+            self.assertEqual(root.region.y - stage.region.y, 1)
             self.assertEqual(track_pane.border_title, 'Storm Track')
             self.assertEqual(track_pane.styles.border_title_align, 'left')
             self.assertEqual(track_pane.styles.border_top[0], 'round')
@@ -708,46 +873,82 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                 product.region.x - (left.region.x + left.region.width),
                 2,
             )
+            self.assertEqual(centre_weather.region.y, summary.region.y)
+            self.assertEqual(centre_weather.region.height, summary.region.height)
+            self.assertEqual(track_pane.region.y, product.region.y)
+            self.assertEqual(track_pane.region.height, product.region.height)
+            self.assertEqual(track.region.width, track_pane.content_size.width)
+            self.assertEqual(track.region.height, track_pane.content_size.height)
+            self.assertEqual(summary.region.x, product.region.x)
             self.assertEqual(stage.styles.hatch[0], '╱')
             self.assertEqual(workspace.styles.hatch[0], '╱')
-            self.assertEqual(root.styles.padding.top, 1)
+            self.assertEqual(root.styles.padding.top, 0)
             self.assertEqual(screen.query_one(TropicalStormSummary).styles.padding.top, 0)
             self.assertEqual(screen.query_one(TropicalStormSummary).styles.padding.bottom, 0)
             self.assertEqual(product_body.styles.padding.top, 1)
             self.assertEqual(product_body.styles.padding.right, 2)
             self.assertIsNone(product_body.styles.hatch)
-            self.assertEqual(track.styles.padding.left, 1)
-            self.assertEqual(track.styles.padding.right, 1)
+            self.assertEqual(track.styles.padding.left, 0)
+            self.assertEqual(track.styles.padding.right, 0)
             self.assertEqual(centre_weather.styles.margin.bottom, 1)
+            self.assertEqual(product_calls, ['jma_tropical', 'cma_tropical'])
+            self.assertEqual(weather_calls, [(28.0, 135.0), (20.0, 120.0)])
 
-            await pilot.resize_terminal(90, 40)
+            await pilot.resize_terminal(80, 24)
             await pilot.pause()
             await pilot.pause()
-            self.assertTrue(stage.has_class('compact'))
-            self.assertTrue(root.has_class('compact'))
-            self.assertTrue(workspace.has_class('compact'))
+            budget = screen._layout_budget
+            self.assertEqual(budget.topology, TropicalTopology.COMPACT_STACK)
             self.assertEqual(stage.styles.padding.top, 1)
             self.assertEqual(stage.styles.padding.right, 2)
             self.assertEqual(stage.styles.padding.bottom, 1)
             self.assertEqual(stage.styles.padding.left, 2)
             self.assertEqual(root.region.width, stage.content_size.width)
             self.assertEqual(root.region.height, stage.content_size.height)
-            self.assertLess(left.region.width, workspace.region.width)
-            self.assertGreater(product.region.width, 0)
-            self.assertEqual(left.region.y, product.region.y)
+            self.assertFalse(left.display)
+            self.assertEqual(right.region.width, workspace.region.width)
+            self.assertEqual(product.region.width, workspace.region.width)
+            self.assertGreater(product.region.y, summary.region.y)
+            self.assertFalse(track_pane.display)
+            self.assertFalse(centre_weather.display)
+            self.assertTrue(screen.query_one('#tropical-source-tabs', Tabs).display)
+            self.assertTrue(screen.query_one('#tropical-product-tabs', Tabs).display)
+            self.assertGreaterEqual(product_body.region.height, 3)
+            self.assertEqual(screen.max_scroll_y, 0)
             self.assertEqual(
-                product.region.x - (left.region.x + left.region.width),
-                2,
+                tuple(map(id, (root, workspace, product, left, right, track))),
+                widget_ids,
             )
-            self.assertEqual(track_pane.styles.height.unit.name, 'FRACTION')
-            self.assertEqual(centre_weather.styles.margin.bottom, 1)
+            self.assertEqual(source_tabs.active, 'tropical-screen-source-1')
+            self.assertEqual(product_tabs.active, 'tropical-product-1')
+            self.assertEqual(product_calls, ['jma_tropical', 'cma_tropical'])
+            self.assertEqual(weather_calls, [(28.0, 135.0), (20.0, 120.0)])
+
+            await pilot.resize_terminal(100, 30)
+            await pilot.pause()
+            self.assertEqual(
+                screen._layout_budget.topology,
+                TropicalTopology.COMPACT_STACK,
+            )
+            self.assertEqual(screen.max_scroll_y, 0)
+
+            await pilot.resize_terminal(140, 45)
+            await pilot.pause()
+            self.assertEqual(screen._layout_budget.topology, TropicalTopology.SPLIT)
+            self.assertEqual(screen.max_scroll_y, 0)
 
             await pilot.resize_terminal(240, 80)
             await pilot.pause()
             await pilot.pause()
-            self.assertFalse(stage.has_class('compact'))
-            self.assertFalse(root.has_class('compact'))
-            self.assertFalse(workspace.has_class('compact'))
+            self.assertEqual(screen._layout_budget.topology, TropicalTopology.SPLIT)
+            self.assertEqual(
+                tuple(map(id, (root, workspace, product, left, right, track))),
+                widget_ids,
+            )
+            self.assertEqual(source_tabs.active, 'tropical-screen-source-1')
+            self.assertEqual(product_tabs.active, 'tropical-product-1')
+            self.assertEqual(product_calls, ['jma_tropical', 'cma_tropical'])
+            self.assertEqual(weather_calls, [(28.0, 135.0), (20.0, 120.0)])
 
     async def test_native_loading_states_cover_discovery_and_products(self) -> None:
         systems_started = asyncio.Event()
@@ -776,6 +977,8 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             root = screen.query_one('#tropical-screen-root')
             content = screen.query_one('#tropical-screen-content')
             self.assertFalse(root.loading)
+            self.assertGreater(root.region.width, 0)
+            self.assertGreater(root.region.height, 0)
             self.assertTrue(content.loading)
             self.assertEqual(root.border_title, 'Active Tropical Systems')
 
@@ -805,8 +1008,8 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             keys = {binding.key for binding in screen.BINDINGS}
             self.assertIn('w', keys)
-            self.assertIn('t', keys)
-            self.assertIn('c', keys)
+            self.assertNotIn('t', keys)
+            self.assertNotIn('c', keys)
             self.assertNotIn('escape', keys)
             self.assertNotIn('left_square_bracket', keys)
             self.assertNotIn('right_square_bracket', keys)
@@ -819,18 +1022,6 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(app.app_actions, [])
             self.assertIs(app.screen, screen)
-
-            track = screen.query_one(LargeTropicalStormTrackScope)
-            self.assertTrue(track.track_visible)
-            self.assertTrue(track.cone_visible)
-            await pilot.press('t', 'c')
-            await pilot.pause()
-            self.assertFalse(track.track_visible)
-            self.assertFalse(track.cone_visible)
-            await pilot.press('t', 'c')
-            await pilot.pause()
-            self.assertTrue(track.track_visible)
-            self.assertTrue(track.cone_visible)
 
             await pilot.press('w')
             await pilot.pause()

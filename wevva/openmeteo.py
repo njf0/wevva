@@ -243,6 +243,41 @@ class OpenMeteoForecast:
         return temperatures
 
     @classmethod
+    async def fetch_hourly_summary(
+        cls,
+        lat: float,
+        lon: float,
+        temperature_unit: str = 'celsius',
+        wind_speed_unit: str = 'kmh',
+    ) -> dict:
+        """Fetch only the hourly fields used by an alert-place forecast."""
+
+        temperature_unit, wind_speed_unit, _precipitation_unit = cls.normalize_units(
+            temperature_unit,
+            wind_speed_unit,
+            DEFAULT_PRECIPITATION_UNIT,
+        )
+        params: dict[str, Any] = {
+            'latitude': lat,
+            'longitude': lon,
+            'timezone': 'auto',
+            'hourly': [
+                'temperature_2m',
+                'precipitation_probability',
+                'wind_speed_10m',
+                'wind_direction_10m',
+            ],
+        }
+        if temperature_unit != DEFAULT_TEMPERATURE_UNIT:
+            params['temperature_unit'] = temperature_unit
+        if wind_speed_unit != DEFAULT_WIND_SPEED_UNIT:
+            params['wind_speed_unit'] = wind_speed_unit
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+            response = await client.get(cls.BASE_URL, params=params)
+            response.raise_for_status()
+            return response.json()
+
+    @classmethod
     async def fetch_current_conditions(
         cls,
         lat: float,

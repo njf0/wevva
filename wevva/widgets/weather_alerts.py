@@ -742,12 +742,14 @@ def alert_markdown(alert: Alert) -> str:
     return content
 
 
-def alert_renderable(alert: Alert):
+def alert_renderable(alert: Alert, *, include_timing: bool = False):
     """Render authoritative provider prose without interpreting it as Markdown."""
     headline = (alert.headline or alert.event or 'Weather alert').strip()
     heading = Text(headline)
     heading.stylize('markdown.h3')
     renderables: list[object] = [heading]
+    if include_timing:
+        renderables.append(_alert_timing_renderable(alert))
     if alert.description and alert.description.strip():
         renderables.extend((Text(''), *_alert_text_renderables(alert.description)))
     if alert.instruction and alert.instruction.strip():
@@ -756,6 +758,39 @@ def alert_renderable(alert: Alert):
     if official_link is not None:
         renderables.extend((Text(''), official_link))
     return Group(*renderables)
+
+
+def _alert_timing_renderable(alert: Alert) -> Text:
+    """Render the same concise local timing used by the weather alert panel."""
+
+    def local_time(value: datetime | None) -> datetime | None:
+        if value is None or value.tzinfo is None:
+            return value
+        return value.astimezone()
+
+    def clock(value: datetime) -> str:
+        return value.strftime('%H:%M %A')
+
+    onset = local_time(alert.onset)
+    end = local_time(alert.expires)
+    line = Text()
+    if onset is not None and end is not None:
+        line.append('Active from ', style='dim italic')
+        line.append(clock(onset), style='italic')
+        line.append(' until ', style='dim italic')
+        line.append(clock(end), style='italic')
+    elif onset is not None:
+        line.append('Active from ', style='dim italic')
+        line.append(clock(onset), style='italic')
+    elif end is not None:
+        line.append('Active until ', style='dim italic')
+        line.append(clock(end), style='italic')
+    else:
+        line.append(
+            f'{alert_condition_name(alert)} timing not published',
+            style='dim italic',
+        )
+    return line
 
 
 def _official_warning_link(alert: Alert) -> Text | None:

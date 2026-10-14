@@ -6,12 +6,22 @@ import math
 import unittest
 from types import SimpleNamespace
 
+from textual.app import App, ComposeResult
+from textual.color import Color
+from textual.widgets import Static
+from wevva_warnings import TropicalProduct
+
 from wevva.geography import GeographicViewport, ProjectedPoint
+from wevva.messages import PlaceSelected
 from wevva.widgets.geographic_scope import preferred_geographic_height
+from wevva.widgets.map_callouts import place_directional_callout
 from wevva.widgets.tropical_track import (
     GeoTrackPoint,
+    LargeTropicalStormTrackScope,
     ScopePalette,
     StormScopeGeometry,
+    TropicalCityLabel,
+    TropicalFixLabel,
     build_storm_scope_geometry,
     extract_storm_track,
     project_track_locally,
@@ -65,23 +75,110 @@ def _cphc_system():
 
 
 class TropicalTrackGeometryTests(unittest.TestCase):
-    def test_extracts_current_and_ordered_daily_forecast_points(self) -> None:
+    def test_generic_track_retains_geometry_without_inventing_forecast_leads(self) -> None:
         points = extract_storm_track(_system())
 
-        self.assertEqual(points[0].label, '')
+        self.assertEqual(points[0].label, 'Now')
         self.assertEqual([point.label for point in points[1:]], ['', '', ''])
-        self.assertEqual([point.forecast_marker for point in points], [False, True, True, True])
+        self.assertEqual(
+            [point.forecast_marker for point in points],
+            [False, True, True, True],
+        )
         self.assertEqual((points[0].latitude, points[0].longitude), (19.7, -151.2))
         self.assertEqual((points[-1].latitude, points[-1].longitude), (21.9, -154.4))
 
-    def test_cphc_intermediate_fixes_smooth_the_line_but_only_full_days_get_markers(self) -> None:
+    def test_cphc_track_uses_only_supplied_fixes_without_inferring_leads(self) -> None:
         points = extract_storm_track(_cphc_system())
 
         self.assertEqual(
             [point.forecast_marker for point in points],
-            [False, False, True, False, True, False, True, True, True],
+            [False, True, True, True, True, True, True, True, True],
         )
-        self.assertTrue(all(not point.label for point in points[1:]))
+        self.assertEqual(
+            [point.label for point in points],
+            ['Now', '', '', '', '', '', '', '', ''],
+        )
+
+    def test_structured_provider_lead_hours_label_matching_track_fixes(self) -> None:
+        product = TropicalProduct(
+            kind='forecast',
+            label='Forecast',
+            data={
+                'points': [
+                    {'latitude': 20.4, 'longitude': -152.0, 'lead_hours': 12},
+                    {'latitude': 21.9, 'longitude': -154.4, 'lead_hours': 36},
+                    # A valid time alone must not be reverse-engineered into a lead.
+                    {'latitude': 21.2, 'longitude': -153.1, 'valid_at': '2026-08-17T00:00:00Z'},
+                ]
+            },
+        )
+
+        points = extract_storm_track(_system(), (product,))
+
+        self.assertEqual(
+            [point.label for point in points],
+            ['Now', '12h', '', '36h'],
+        )
+        self.assertEqual(
+            [point.forecast_marker for point in points],
+            [False, True, True, True],
+        )
+
+    def test_dense_explicit_forecast_fixes_show_only_daily_markers(self) -> None:
+        coordinates = [
+            [-151.2, 19.7],
+            [-152.0, 20.4],
+            [-153.1, 21.2],
+            [-154.4, 21.9],
+            [-155.8, 22.7],
+            [-157.3, 23.6],
+            [-159.0, 24.5],
+        ]
+        product = TropicalProduct(
+            kind='forecast',
+            label='Forecast',
+            data={
+                'points': [
+                    {
+                        'latitude': latitude,
+                        'longitude': longitude,
+                        'lead_hours': lead,
+                    }
+                    for (longitude, latitude), lead in zip(
+                        coordinates[1:],
+                        (12, 24, 36, 48, 60, 72),
+                        strict=True,
+                    )
+                ]
+            },
+        )
+        system = _system(
+            geometries={
+                'forecast_track': {
+                    'type': 'LineString',
+                    'coordinates': coordinates,
+                }
+            }
+        )
+
+        points = extract_storm_track(system, (product,))
+        scope = build_storm_scope_geometry(system, products=(product,))
+
+        self.assertEqual(len(points), 7)
+        self.assertEqual(
+            [point.label for point in points],
+            ['Now', '', '24h', '', '48h', '', '72h'],
+        )
+        self.assertEqual(
+            [point.forecast_marker for point in points],
+            [False, False, True, False, True, False, True],
+        )
+        assert scope is not None
+        self.assertEqual(scope.forecast_marker_indices, (2, 4, 6))
+        self.assertEqual(
+            scope.fix_labels,
+            ((0, 'Now'), (2, '24h'), (4, '48h'), (6, '72h')),
+        )
 
     def test_reverses_a_forecast_line_whose_nearest_fix_is_last(self) -> None:
         system = _system(
@@ -156,6 +253,35 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(high_latitude.x, math.cos(math.radians(60.0)))
         self.assertAlmostEqual(high_latitude.y, 0.0)
 
+    def test_context_floor_preserves_a_complete_dateline_crossing_track(self) -> None:
+        scope = build_storm_scope_geometry(
+            _system(
+                center_lat=12.0,
+                center_lon=179.0,
+                geometries={
+                    'forecast_track': {
+                        'type': 'LineString',
+                        'coordinates': [
+                            [179.0, 12.0],
+                            [-179.0, 13.0],
+                            [-175.0, 14.0],
+                        ],
+                    }
+                },
+            )
+        )
+
+        assert scope is not None
+        self.assertGreaterEqual(scope.viewport.width, 14.39)
+        self.assertGreaterEqual(scope.viewport.height, 14.39)
+        self.assertTrue(
+            all(
+                scope.viewport.min_x <= point.x <= scope.viewport.max_x
+                and scope.viewport.min_y <= point.y <= scope.viewport.max_y
+                for point in scope.storm
+            )
+        )
+
     def test_viewport_contains_global_land_and_complete_storm_track(self) -> None:
         scope = build_storm_scope_geometry(
             _cphc_system(),
@@ -179,11 +305,11 @@ class TropicalTrackGeometryTests(unittest.TestCase):
             )
         )
         self.assertTrue(scope.places)
-        self.assertEqual(scope.forecast_marker_indices, (2, 4, 6, 7, 8))
+        self.assertEqual(scope.forecast_marker_indices, tuple(range(1, 9)))
         storm_width = max(point.x for point in scope.storm) - min(point.x for point in scope.storm)
         self.assertAlmostEqual(scope.viewport.width / storm_width, 1.2)
 
-    def test_wide_hawaii_track_prefers_a_shallow_content_height(self) -> None:
+    def test_hawaii_track_context_floor_reserves_useful_land_height(self) -> None:
         scope = build_storm_scope_geometry(
             _cphc_system(),
             location_latitude=19.7297,
@@ -193,6 +319,8 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         )
         assert scope is not None
 
+        self.assertGreaterEqual(scope.viewport.width, 14.39)
+        self.assertGreaterEqual(scope.viewport.height, 14.39)
         self.assertEqual(
             preferred_geographic_height(
                 scope.viewport,
@@ -200,8 +328,30 @@ class TropicalTrackGeometryTests(unittest.TestCase):
                 minimum=7,
                 maximum=16,
             ),
-            7,
+            11,
         )
+
+    def test_short_atlantic_track_context_floor_reveals_bermuda(self) -> None:
+        scope = build_storm_scope_geometry(
+            _system(
+                source='nhc_gis_atlantic',
+                center_lat=32.3,
+                center_lon=-64.8,
+                geometries={
+                    'forecast_track': {
+                        'type': 'LineString',
+                        'coordinates': [[-64.8, 32.3], [-65.8, 33.3]],
+                    }
+                },
+            )
+        )
+
+        assert scope is not None
+        self.assertGreaterEqual(scope.viewport.width, 14.39)
+        self.assertGreaterEqual(scope.viewport.height, 14.39)
+        self.assertTrue(scope.land)
+        rendered = render_braille_scope(scope, width=60, height=16)
+        self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
 
     def test_authoritative_cone_expands_scope_and_is_projected(self) -> None:
         system = _system(
@@ -250,7 +400,63 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         self.assertEqual(scope.cone, ())
 
 
+class TropicalTrackCalloutPlacementTests(unittest.TestCase):
+    def test_callout_prefers_clear_cells_over_forecast_geometry(self) -> None:
+        occupied: set[tuple[int, int]] = set()
+
+        placement = place_directional_callout(
+            anchor=(5, 2),
+            label_width=4,
+            canvas_width=12,
+            canvas_height=5,
+            occupied=occupied,
+            preferred_avoidance={(column, 2) for column in range(2, 9)} - {(5, 2)},
+        )
+
+        assert placement is not None
+        self.assertEqual(placement.row, 1)
+        self.assertFalse(
+            {
+                (placement.column + offset, placement.row)
+                for offset in range(placement.width)
+            }
+            & {(column, 2) for column in range(2, 9)}
+        )
+
+    def test_callout_can_fall_back_to_forecast_geometry_when_necessary(self) -> None:
+        placement = place_directional_callout(
+            anchor=(2, 0),
+            label_width=3,
+            canvas_width=5,
+            canvas_height=1,
+            occupied=set(),
+            preferred_avoidance={(column, 0) for column in range(5)} - {(2, 0)},
+        )
+
+        assert placement is not None
+        self.assertEqual((placement.column, placement.row), (2, 0))
+
+
 class TropicalTrackRenderingTests(unittest.TestCase):
+    def test_supplied_fixes_render_as_dots_without_an_interpolated_path(self) -> None:
+        scope = StormScopeGeometry(
+            viewport=GeographicViewport(0.0, -140.0, -5.0, -5.0, 5.0, 5.0),
+            land=(),
+            storm=(
+                ProjectedPoint(-3.0, 0.0),
+                ProjectedPoint(0.0, 2.0),
+                ProjectedPoint(3.0, 0.0),
+            ),
+            forecast_marker_indices=(1, 2),
+        )
+
+        rendered = render_braille_scope(scope, width=40, height=10)
+
+        self.assertEqual(rendered.plain.count('◆'), 3)
+        self.assertFalse(
+            any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain)
+        )
+
     def test_cone_uses_its_own_braille_palette_layer(self) -> None:
         scope = StormScopeGeometry(
             viewport=GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0),
@@ -328,14 +534,14 @@ class TropicalTrackRenderingTests(unittest.TestCase):
             (column, row)
             for row, line in enumerate(text.plain.splitlines())
             for column, character in enumerate(line)
-            if character == '●'
+            if character == '◆'
         }
         self.assertEqual(marker_positions(visible), marker_positions(hidden))
         self.assertEqual(len(marker_positions(hidden)), 3)
         self.assertTrue(any(span.style == 'bright_magenta' for span in visible.spans))
         self.assertFalse(any(span.style == 'bright_magenta' for span in hidden.spans))
 
-    def test_scope_renders_global_land_and_every_daily_forecast_dot(self) -> None:
+    def test_scope_renders_global_land_and_every_supplied_forecast_dot(self) -> None:
         scope = build_storm_scope_geometry(
             _cphc_system(),
             location_latitude=19.7297,
@@ -357,16 +563,16 @@ class TropicalTrackRenderingTests(unittest.TestCase):
         self.assertNotIn('NOW', rendered.plain)
         self.assertIn('Honolulu', rendered.plain)
         self.assertIn('Hilo', rendered.plain)
-        self.assertIn('✦', rendered.plain)
+        self.assertIn('•', rendered.plain)
         self.assertNotIn('+24', rendered.plain)
         self.assertNotIn('LOCATION', rendered.plain)
-        self.assertEqual(rendered.plain.count('●'), 6)
+        self.assertEqual(rendered.plain.count('◆'), 9)
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
         self.assertFalse(any(0x1CD00 <= ord(character) <= 0x1CDE5 for character in rendered.plain))
 
         compact = render_braille_scope(scope, width=68, height=7)
         self.assertEqual(len(compact.plain.splitlines()), 7)
-        self.assertEqual(compact.plain.count('●'), 6)
+        self.assertEqual(compact.plain.count('◆'), 9)
 
     def test_discrete_positions_have_balanced_frame_margins(self) -> None:
         scope = StormScopeGeometry(
@@ -394,6 +600,140 @@ class TropicalTrackRenderingTests(unittest.TestCase):
 
         self.assertLessEqual(abs(left - right), 1)
         self.assertLessEqual(abs(top - bottom), 1)
+
+
+class _TropicalTrackApp(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.selected = []
+
+    def compose(self) -> ComposeResult:
+        yield LargeTropicalStormTrackScope()
+
+    def on_place_selected(self, event: PlaceSelected) -> None:
+        self.selected.append(event.location)
+
+
+class TropicalTrackWidgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cone_uses_subdued_theme_warning_colour(self) -> None:
+        system = _cphc_system()
+        system.geometries['cone'] = {
+            'type': 'Polygon',
+            'coordinates': [
+                [
+                    [-145.0, 14.0],
+                    [-170.0, 14.0],
+                    [-170.0, 24.0],
+                    [-145.0, 24.0],
+                    [-145.0, 14.0],
+                ]
+            ],
+        }
+        app = _TropicalTrackApp()
+        async with app.run_test(size=(70, 24)) as pilot:
+            widget = app.query_one(LargeTropicalStormTrackScope)
+            widget.styles.width = 66
+            widget.set_layout(visible=True, height=18)
+            widget.update_system(system)
+            for _ in range(3):
+                await pilot.pause()
+
+            warning = app.theme_variables['text-warning']
+            backdrop = widget.query_one('.tropical-track-backdrop', Static).render()
+            expected = Color.parse(warning)
+            self.assertTrue(
+                any(
+                    getattr(span.style, 'foreground', None) == expected
+                    and getattr(span.style, 'dim', False) is True
+                    for span in backdrop.spans
+                )
+            )
+
+    async def test_native_fix_and_city_callouts_layer_over_track_raster(self) -> None:
+        app = _TropicalTrackApp()
+        async with app.run_test(size=(70, 24)) as pilot:
+            widget = app.query_one(LargeTropicalStormTrackScope)
+            widget.styles.width = 66
+            widget.set_layout(visible=True, height=18)
+            widget.update_system(_cphc_system())
+            for _ in range(3):
+                await pilot.pause()
+
+            fixes = list(widget.query(TropicalFixLabel))
+            cities = list(widget.query(TropicalCityLabel))
+            self.assertEqual(
+                [fix._body_text for fix in fixes],
+                ['Now', '', '', '', '', '', '', '', ''],
+            )
+            self.assertTrue(all(not fix.can_focus for fix in fixes))
+            self.assertTrue(cities)
+            self.assertTrue(all(city.can_focus for city in cities))
+            self.assertTrue(
+                all(
+                    city.label_text.startswith('• ')
+                    or city.label_text.endswith(' •')
+                    for city in cities
+                )
+            )
+            self.assertTrue(any(item.kind == 'fix' for item in widget.placements))
+            self.assertTrue(any(item.kind == 'city' for item in widget.placements))
+
+            backdrop = widget.query_one('.tropical-track-backdrop', Static).render()
+            self.assertNotIn('Now', backdrop.plain)
+            self.assertNotIn('Honolulu', backdrop.plain)
+            self.assertTrue(
+                any(0x2801 <= ord(character) <= 0x28FF for character in backdrop.plain)
+            )
+
+            visible_city_keys = {
+                placement.key
+                for placement in widget.placements
+                if placement.kind == 'city'
+            }
+            city = next(
+                label
+                for label in cities
+                if f'city-{label.place.latitude:.6f},{label.place.longitude:.6f}'
+                in visible_city_keys
+            )
+            city.focus()
+            await pilot.press('enter')
+            await pilot.press('space')
+            self.assertTrue(await pilot.click(city))
+            await pilot.pause()
+            self.assertEqual([place.name for place in app.selected], [city.place.name] * 3)
+            self.assertTrue(city.has_focus)
+
+    async def test_resize_reflows_without_replacing_native_labels(self) -> None:
+        app = _TropicalTrackApp()
+        async with app.run_test(size=(70, 24)) as pilot:
+            widget = app.query_one(LargeTropicalStormTrackScope)
+            widget.set_layout(visible=True, height=18)
+            widget.update_system(_cphc_system())
+            for _ in range(3):
+                await pilot.pause()
+            labels = {
+                **{f'fix:{label._body_text}': id(label) for label in widget.query(TropicalFixLabel)},
+                **{f'city:{label.place.name}': id(label) for label in widget.query(TropicalCityLabel)},
+            }
+
+            await pilot.resize_terminal(100, 30)
+            await pilot.pause()
+            await pilot.pause()
+
+            self.assertEqual(
+                {
+                    **{
+                        f'fix:{label._body_text}': id(label)
+                        for label in widget.query(TropicalFixLabel)
+                    },
+                    **{
+                        f'city:{label.place.name}': id(label)
+                        for label in widget.query(TropicalCityLabel)
+                    },
+                },
+                labels,
+            )
 
 
 if __name__ == '__main__':

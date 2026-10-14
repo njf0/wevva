@@ -45,13 +45,33 @@ The focused regression suite uses the standard library:
 uv run python -m unittest discover -s tests
 ```
 
+The country Alerts Centre has deterministic service, screen, interactive-map,
+selected-settlement hourly-lifecycle, and responsive-budget coverage, including
+cache expiry, stale hourly results, and country-switch races:
+
+```bash
+uv run python -m unittest tests.test_alerts_centre_service tests.test_alerts_centre_screen
+uv run python -m unittest tests.test_alerts_centre_map tests.test_alerts_centre_layout
+uv run python -m unittest tests.test_alert_place_hourly_forecast
+uv run python -m unittest tests.test_alerts_centre_integration
+```
+
+The tropical workspace has separate pure-budget, screen-lifecycle, track
+geometry, and native-callout coverage:
+
+```bash
+uv run python -m unittest tests.test_tropical_layout
+uv run python -m unittest tests.test_tropical_systems_screen tests.test_tropical_track
+```
+
 There is no configured linter, formatter, or type checker. `compileall` is the
 available basic source-compilation check; choose focused manual TUI checks for
 UI behavior.
 
 The checked-in geographic resources are generated from Natural Earth's 1:50m
-Admin-0 Map Units and Populated Places datasets. Runtime code uses only the
-compact gzip JSON resources; `pyshp` is an optional preprocessing tool.
+Admin-0 Map Units and 1:50m/1:10m Populated Places datasets. General maps use
+the compact place set; focused alert maps use the denser set. Runtime code uses
+only gzip JSON resources; `pyshp` is an optional preprocessing tool.
 Regeneration instructions and attribution are in `wevva/data/README.md`.
 
 The package uses Hatchling (`pyproject.toml`) and declares the `wevva` console
@@ -78,9 +98,11 @@ wide and tall sizes, those same mounted widgets move into a right-hand sidecar
 before saved locations or warning details become automatic rails. The sidecar
 shows location and astronomy above a larger map with at most four city labels;
 air quality returns in the full bottom matrix. All modes preserve the
-102-column central canvas. The tropical workspace still needs a larger
-terminal. Emoji output depends on the terminal, font, and locale; use
-`--no-emoji` when assessing alignment.
+102-column central canvas. The tropical workspace has its own tested 80x24
+stack with storm/source navigation, complete priority summary rows, and an
+internally scrolling information body; maps and centre weather return only
+when their complete minimum presentations fit. Emoji output depends on the
+terminal, font, and locale; use `--no-emoji` when assessing alignment.
 
 The resize-native design and its manual terminal-size matrix are in
 `docs/responsive-layout.md`. Its weather-screen implementation is complete.

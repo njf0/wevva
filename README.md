@@ -103,6 +103,14 @@ uvx wevva --clear-default-location
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
 
+Press `g` from the weather screen to open the country Alerts Centre. It keeps
+country discovery separate from alerts applicable to the current forecast
+point, and combines a searchable active-alert list, complete provider
+documents, issued warning polygons, and locally selectable settlement labels.
+Settlement selection retrieves a compact hourly forecast without replacing the
+main weather location. Use `r` to refresh its independent data and `w` to
+return to weather.
+
 ## Tropical Systems
 
 Press `t` from the weather screen to open the global Active Tropical Systems
@@ -179,6 +187,7 @@ for alert in alerts:
 - `l` focus saved locations when its automatic rail is visible; otherwise open it
 - `m` open the interactive saved-locations world map
 - `i` focus warning details when its automatic rail is visible; otherwise open them
+- `g` open the country Alerts Centre
 - `t` investigate active tropical systems
 - `u` open settings
 - `h` or `?` open help
@@ -189,8 +198,10 @@ The Tropical Systems screen has its own contextual `t`/`c` track controls;
 press `h` in the application for the complete shortcut guide.
 On the saved-locations world map, use left/right to move between city labels,
 then Enter or Space to open the focused forecast; mouse selection works too.
-Country-map city labels can likewise be clicked or focused and activated to
-open their ordinary weather forecast.
+Location-map city labels can likewise be clicked or focused and activated to
+open their ordinary weather forecast. Activating an Alerts Centre settlement
+instead opens its compact hourly forecast below the warning map without
+changing the primary weather location.
 
 ## Config
 

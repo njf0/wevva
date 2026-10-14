@@ -380,6 +380,20 @@ def canonical_tropical_severity_rank(system: CanonicalTropicalSystem) -> int:
     )
 
 
+def canonical_tropical_classification(system: CanonicalTropicalSystem) -> str:
+    """Return the strongest declared class without synthesising an observation."""
+    strongest = max(
+        system.observations,
+        key=lambda observation: _tropical_classification_rank(
+            observation.classification
+        ),
+        default=None,
+    )
+    if strongest is None or not isinstance(strongest.classification, str):
+        return ''
+    return strongest.classification.strip()
+
+
 def sort_canonical_tropical_systems_by_severity(
     systems: Iterable[CanonicalTropicalSystem],
 ) -> list[CanonicalTropicalSystem]:
@@ -433,6 +447,7 @@ __all__ = [
     'NearbyTropicalSystem',
     'TROPICAL_SYSTEMS_RADIUS_KM',
     'canonical_sort_distance_km',
+    'canonical_tropical_classification',
     'canonical_tropical_severity_rank',
     'center_distance_km',
     'flatten_canonical_tropical_systems',

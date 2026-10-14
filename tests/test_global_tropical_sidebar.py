@@ -229,7 +229,7 @@ class DisplayGeographyTests(unittest.TestCase):
         rendered = render_braille_scope(edinburgh_scope, width=68, height=13)
         self.assertNotIn('Hawaii', rendered.plain)
 
-    def test_global_backdrop_draws_only_land_visible_to_each_track(self) -> None:
+    def test_context_floor_reveals_nearby_land_and_major_cities(self) -> None:
         jma = _observation(
             'nangka-jma',
             'jma_tropical',
@@ -251,12 +251,12 @@ class DisplayGeographyTests(unittest.TestCase):
         cma_scope = build_storm_scope_geometry(cma)
 
         assert jma_scope is not None and cma_scope is not None
-        self.assertFalse(jma_scope.land)
+        self.assertTrue(jma_scope.land)
         self.assertTrue(cma_scope.land)
         self.assertNotEqual(jma_scope.viewport, cma_scope.viewport)
         self.assertNotEqual(jma_scope.land, cma_scope.land)
-        self.assertNotIn('Japan', render_braille_scope(jma_scope, width=60, height=16).plain)
-        self.assertNotIn('China', render_braille_scope(cma_scope, width=60, height=16).plain)
+        self.assertIn('Tokyo', render_braille_scope(jma_scope, width=60, height=16).plain)
+        self.assertIn('Hong Kong', render_braille_scope(cma_scope, width=60, height=16).plain)
 
     def test_inland_china_track_is_labelled_with_nearby_cities_not_issuer(self) -> None:
         saudel = _observation(
@@ -272,7 +272,7 @@ class DisplayGeographyTests(unittest.TestCase):
 
         assert scope is not None
         rendered = render_braille_scope(scope, width=60, height=20)
-        self.assertIn('Hengyang', rendered.plain)
+        self.assertIn('Hong Kong', rendered.plain)
         self.assertNotIn('China', rendered.plain)
 
     def test_reunion_track_uses_all_global_land_visible_in_its_viewport(self) -> None:
@@ -288,8 +288,9 @@ class DisplayGeographyTests(unittest.TestCase):
         scope = build_storm_scope_geometry(reunion)
 
         assert scope is not None
-        self.assertFalse(scope.land)
-        self.assertNotIn('Réunion', render_braille_scope(scope, width=60, height=16).plain)
+        self.assertTrue(scope.land)
+        rendered = render_braille_scope(scope, width=60, height=16)
+        self.assertIn('Port Louis', rendered.plain)
 
     def test_open_ocean_track_does_not_force_remote_mexico_into_view(self) -> None:
         eastern_pacific = _observation(

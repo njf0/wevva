@@ -59,6 +59,8 @@ class PopulatedPlace:
     scale_rank: int
     label_rank: int
     population: int
+    country_code: str = ''
+    region_name: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,8 +163,19 @@ def world_map_unit_polygons() -> MultiPolygon:
 
 @lru_cache(maxsize=1)
 def world_populated_places() -> tuple[PopulatedPlace, ...]:
-    """Return the checked-in Natural Earth populated-place label points."""
-    resource = files('wevva.data').joinpath('natural_earth_50m_populated_places.json.gz')
+    """Return the compact Natural Earth place set used by general maps."""
+    return _populated_places_resource('natural_earth_50m_populated_places.json.gz')
+
+
+@lru_cache(maxsize=1)
+def detailed_world_populated_places() -> tuple[PopulatedPlace, ...]:
+    """Return the dense Natural Earth place set used by focused alert maps."""
+    return _populated_places_resource('natural_earth_10m_populated_places.json.gz')
+
+
+@lru_cache(maxsize=2)
+def _populated_places_resource(filename: str) -> tuple[PopulatedPlace, ...]:
+    resource = files('wevva.data').joinpath(filename)
     try:
         with resource.open('rb') as raw_file, gzip.GzipFile(fileobj=raw_file) as archive:
             payload = json.load(archive)
@@ -174,9 +187,18 @@ def world_populated_places() -> tuple[PopulatedPlace, ...]:
 
     places = []
     for raw_place in raw_places:
-        if not isinstance(raw_place, list) or len(raw_place) != 6:
+        if not isinstance(raw_place, list) or len(raw_place) != 8:
             continue
-        name, longitude, latitude, scale_rank, label_rank, population = raw_place
+        (
+            name,
+            longitude,
+            latitude,
+            scale_rank,
+            label_rank,
+            population,
+            country_code,
+            region_name,
+        ) = raw_place
         if (
             not isinstance(name, str)
             or not name.strip()
@@ -195,6 +217,12 @@ def world_populated_places() -> tuple[PopulatedPlace, ...]:
                 scale_rank=scale_rank,
                 label_rank=label_rank,
                 population=population,
+                country_code=(
+                    country_code.strip().upper()
+                    if isinstance(country_code, str)
+                    else ''
+                ),
+                region_name=(region_name.strip() if isinstance(region_name, str) else ''),
             )
         )
     return tuple(places)
@@ -544,6 +572,7 @@ __all__ = [
     'ProjectedPoint',
     'geojson_polygons',
     'geojson_polylines',
+    'detailed_world_populated_places',
     'map_unit',
     'point_in_polygon',
     'polygon_points',

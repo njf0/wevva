@@ -146,6 +146,16 @@ class GeographicCanvas:
     def point(self, point: ProjectedPoint, *, layer: str) -> None:
         self._layers.setdefault(layer, set()).add(self.pixel_position(point))
 
+    def layer_cells(self, layers: Iterable[str]) -> set[tuple[int, int]]:
+        """Return visible terminal cells touched by the requested raster layers."""
+        return {
+            (x // 2, y // 4)
+            for layer in layers
+            for raw_x, raw_y in self._layers.get(layer, ())
+            for x, y in ((raw_x + self._offset_x, raw_y + self._offset_y),)
+            if 0 <= x < self.pixel_width and 0 <= y < self.pixel_height
+        }
+
     def frame(
         self,
         layers: Iterable[tuple[str, str | None]],

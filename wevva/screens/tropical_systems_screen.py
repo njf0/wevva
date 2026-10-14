@@ -21,8 +21,14 @@ from textual.widgets import Footer, Header, Markdown, Static, Tab, Tabs
 from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from wevva.services.tropical import (
+    canonical_tropical_classification,
     get_tropical_products_async,
     sort_canonical_tropical_systems_by_severity,
+)
+from wevva.tropical_layout import (
+    TropicalLayoutBudget,
+    TropicalTopology,
+    tropical_layout_for,
 )
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_summary import TropicalStormSummary
@@ -44,40 +50,32 @@ class TropicalSystemsScreen(Screen[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('w', 'back', 'Weather'),
         Binding('r', 'refresh_systems', 'Refresh'),
-        Binding('t', 'toggle_track', 'Track'),
-        Binding('c', 'toggle_cone', 'Cone'),
         Binding('s', 'block_app_binding', '', show=False),
         Binding('a', 'block_app_binding', '', show=False),
         Binding('d', 'block_app_binding', '', show=False),
     ]
-    COMPACT_SCREEN_WIDTH = 217
-
     DEFAULT_CSS = """
     TropicalSystemsScreen {
         background: $background;
         align: center middle;
+        overflow: hidden;
     }
 
     #tropical-screen-stage {
         width: 100%;
         height: 1fr;
         align: center middle;
+        padding: 1 2;
         background: $background;
         hatch: right $background-lighten-1;
     }
 
-    #tropical-screen-stage.compact {
-        padding: 1 2;
-    }
-
     #tropical-screen-root {
-        width: 60%;
-        min-width: 76;
-        max-width: 144;
-        height: 84%;
-        max-height: 48;
-        min-height: 22;
-        padding: 1 2;
+        width: 0;
+        min-width: 0;
+        height: 0;
+        min-height: 0;
+        padding: 0;
         layout: vertical;
         border: round $primary;
         align: center middle;
@@ -85,15 +83,6 @@ class TropicalSystemsScreen(Screen[None]):
         border-title-align: center;
         background: $background;
         hatch: right $background-lighten-1;
-    }
-
-    #tropical-screen-root.compact {
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
-        height: 100%;
-        min-height: 0;
-        max-height: 100%;
     }
 
     #tropical-screen-content {
@@ -112,24 +101,35 @@ class TropicalSystemsScreen(Screen[None]):
         width: 100%;
         height: 1fr;
         layout: horizontal;
+        overflow: hidden;
         background: $background;
         hatch: right $background-lighten-1;
     }
 
     #tropical-left-pane {
-        width: 57;
-        min-width: 51;
-        max-width: 61;
-        height: 1fr;
+        width: 0;
+        min-width: 0;
+        height: 0;
         layout: vertical;
-        margin: 0 2 0 0;
+        margin: 0;
+        overflow: hidden;
+        hatch: right $background-lighten-1;
+    }
+
+    #tropical-right-pane {
+        width: 1fr;
+        min-width: 0;
+        height: 0;
+        layout: vertical;
+        margin: 0;
+        overflow: hidden;
         hatch: right $background-lighten-1;
     }
 
     #tropical-track-pane {
         width: 100%;
-        height: 1fr;
-        min-height: 8;
+        height: 0;
+        min-height: 0;
         layout: vertical;
         border: round $secondary;
         border-title-color: $secondary;
@@ -146,8 +146,8 @@ class TropicalSystemsScreen(Screen[None]):
 
     #tropical-product-pane {
         width: 1fr;
-        min-width: 72;
-        height: 1fr;
+        min-width: 0;
+        height: 0;
         layout: vertical;
         border: round $secondary;
         border-title-color: $secondary;
@@ -162,7 +162,7 @@ class TropicalSystemsScreen(Screen[None]):
     #tropical-product-body {
         width: 100%;
         height: 1fr;
-        padding: 1 2;
+        padding: 0 1;
         background: $background;
         scrollbar-size-vertical: 1;
     }
@@ -180,31 +180,6 @@ class TropicalSystemsScreen(Screen[None]):
         color: $text-muted;
     }
 
-    #tropical-workspace.compact {
-        layout: horizontal;
-        overflow-y: hidden;
-    }
-
-    #tropical-workspace.compact #tropical-left-pane {
-        width: 42%;
-        min-width: 34;
-        max-width: 57;
-        height: 1fr;
-        margin: 0 2 0 0;
-    }
-
-    #tropical-workspace.compact #tropical-track-pane {
-        height: 1fr;
-        min-height: 7;
-    }
-
-    #tropical-workspace.compact #tropical-product-pane {
-        width: 1fr;
-        min-width: 0;
-        height: 1fr;
-        min-height: 0;
-        padding: 0;
-    }
     """
 
     def __init__(
@@ -239,7 +214,7 @@ class TropicalSystemsScreen(Screen[None]):
         self._centre_weather: dict[tuple[float, float], dict[str, Any]] = {}
         self._centre_weather_errors: set[tuple[float, float]] = set()
         self._centre_weather_tasks: dict[tuple[float, float], asyncio.Task[None]] = {}
-        self._availability_notifications: set[tuple[str, bool, bool]] = set()
+        self._layout_budget: TropicalLayoutBudget | None = None
         self._selection_generation = 0
         self._tasks: set[asyncio.Task[None]] = set()
         self._updating_tabs = 0
@@ -270,7 +245,6 @@ class TropicalSystemsScreen(Screen[None]):
                 with Container(id='tropical-workspace') as workspace:
                     workspace.display = bool(self.systems)
                     with Container(id='tropical-left-pane'):
-                        yield TropicalStormSummary()
                         yield TropicalCentreWeather()
                         with Container(id='tropical-track-pane') as track_pane:
                             track_pane.border_title = 'Storm Track'
@@ -281,13 +255,15 @@ class TropicalSystemsScreen(Screen[None]):
                             )
                             unavailable.display = False
                             yield unavailable
-                    with Container(id='tropical-product-pane') as product_pane:
-                        product_pane.border_title = 'Storm Information'
-                        with Container(id='tropical-product-content'):
-                            product_tabs = Tabs(id='tropical-product-tabs')
-                            product_tabs.display = False
-                            yield product_tabs
-                            yield VerticalScroll(id='tropical-product-body')
+                    with Container(id='tropical-right-pane'):
+                        yield TropicalStormSummary()
+                        with Container(id='tropical-product-pane') as product_pane:
+                            product_pane.border_title = 'Storm Information'
+                            with Container(id='tropical-product-content'):
+                                product_tabs = Tabs(id='tropical-product-tabs')
+                                product_tabs.display = False
+                                yield product_tabs
+                                yield VerticalScroll(id='tropical-product-body')
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -307,7 +283,7 @@ class TropicalSystemsScreen(Screen[None]):
             task = asyncio.create_task(self._load_systems())
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
-        self.call_after_refresh(self._sync_topology)
+        self.call_after_refresh(self._apply_layout)
 
     def on_unmount(self) -> None:
         for task in self._tasks:
@@ -317,15 +293,115 @@ class TropicalSystemsScreen(Screen[None]):
 
     def on_resize(self, event: Resize) -> None:
         del event
-        self.call_after_refresh(self._sync_topology)
+        self.call_after_refresh(self._apply_layout)
 
-    def _sync_topology(self) -> None:
-        self._set_compact(self.size.width < self.COMPACT_SCREEN_WIDTH)
+    def _apply_layout(self) -> None:
+        """Apply one pure budget result to the persistent mounted widgets."""
+        if not self.is_mounted:
+            return
+        if not self.systems:
+            budget = tropical_layout_for(
+                self.size.width,
+                self.size.height,
+                multiple_sources=False,
+                track_available=False,
+                centre_weather_available=False,
+                information_choice_count=0,
+                rich_information=False,
+                summary_available_rows=0,
+                centre_weather_available_rows=0,
+            )
+            self._layout_budget = budget
+            root = self.query_one('#tropical-screen-root', Container)
+            root.styles.width = budget.frame_width
+            root.styles.height = budget.frame_height
+            return
+        observation = self.selected_observation
+        if observation is None:
+            return
 
-    def _set_compact(self, compact: bool) -> None:
-        self.query_one('#tropical-screen-stage', Container).set_class(compact, 'compact')
-        self.query_one('#tropical-screen-root', Container).set_class(compact, 'compact')
-        self.query_one('#tropical-workspace', Container).set_class(compact, 'compact')
+        storm = self.systems[self.selected_storm_index]
+        track = self.query_one(LargeTropicalStormTrackScope)
+        summary = self.query_one(TropicalStormSummary)
+        weather = self.query_one(TropicalCentreWeather)
+        key = _observation_key(observation)
+        product_choices = self._product_tab_specs(observation)
+        budget = tropical_layout_for(
+            self.size.width,
+            self.size.height,
+            multiple_sources=len(storm.observations) > 1,
+            track_available=track.available,
+            centre_weather_available=(
+                self._centre_weather_loader is not None
+                and _centre_weather_key(observation) is not None
+            ),
+            information_choice_count=len(product_choices),
+            rich_information=(key in self._loading_keys or bool(self._products.get(key))),
+            summary_available_rows=summary.available_row_count,
+            centre_weather_available_rows=max(6, weather.available_row_count),
+        )
+        self._layout_budget = budget
+
+        root = self.query_one('#tropical-screen-root', Container)
+        workspace = self.query_one('#tropical-workspace', Container)
+        left = self.query_one('#tropical-left-pane', Container)
+        right = self.query_one('#tropical-right-pane', Container)
+        track_pane = self.query_one('#tropical-track-pane', Container)
+        product_pane = self.query_one('#tropical-product-pane', Container)
+        product_tabs = self.query_one('#tropical-product-tabs', Tabs)
+        product_body = self.query_one('#tropical-product-body', VerticalScroll)
+        source_tabs = self.query_one('#tropical-source-tabs', Tabs)
+
+        root.styles.width = budget.frame_width
+        root.styles.height = budget.frame_height
+        source_tabs.display = budget.source_tabs_visible
+        summary.set_layout(
+            row_count=budget.summary_rows,
+            height=budget.summary_height,
+        )
+        weather.set_layout(
+            row_count=budget.centre_weather_rows,
+            height=budget.centre_weather_height,
+        )
+        track_pane.display = budget.track_visible
+        track_pane.styles.height = budget.track_height
+        track.set_layout(
+            visible=budget.track_visible,
+            height=max(0, budget.track_height - 2),
+        )
+        self.query_one('#tropical-track-unavailable', Static).display = (
+            budget.track_visible and not track.available
+        )
+        product_tabs.display = budget.information_tabs_visible
+        product_pane.styles.height = budget.information_height
+
+        summary.styles.margin = (
+            (0, 0, 1, 0) if budget.information_height else 0
+        )
+        weather.styles.margin = (
+            (0, 0, 1, 0) if budget.track_visible else 0
+        )
+        left.styles.width = budget.left_pane_width
+        left.styles.height = budget.left_pane_height
+
+        if budget.topology is TropicalTopology.SPLIT:
+            workspace.styles.layout = 'horizontal'
+            left.display = True
+            left.styles.margin = (0, 2, 0, 0)
+            right.styles.width = '1fr'
+            right.styles.height = budget.workspace_height
+            product_pane.styles.width = '100%'
+            product_body.styles.padding = (1, 2)
+        else:
+            workspace.styles.layout = 'vertical'
+            left.display = False
+            left.styles.margin = 0
+            right.styles.width = '100%'
+            right.styles.height = budget.summary_height + (
+                1 if budget.summary_height and budget.information_height else 0
+            ) + budget.information_height
+            product_pane.styles.width = '100%'
+            product_body.styles.padding = (0, 1)
 
     async def _load_systems(self) -> None:
         """Populate the screen from the shared canonical fetch with native loading UI."""
@@ -384,7 +460,7 @@ class TropicalSystemsScreen(Screen[None]):
         self.query_one('#tropical-workspace', Container).display = bool(self.systems)
         if self.systems:
             await self._select_storm(selected_index)
-        self.call_after_refresh(self._sync_topology)
+        self.call_after_refresh(self._apply_layout)
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -399,14 +475,6 @@ class TropicalSystemsScreen(Screen[None]):
         task = asyncio.create_task(self._refresh_systems(information))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-
-    def action_toggle_track(self) -> None:
-        """Show or hide current and forecast centre positions."""
-        self.query_one(LargeTropicalStormTrackScope).toggle_track()
-
-    def action_toggle_cone(self) -> None:
-        """Show or hide the selected source's official forecast cone."""
-        self.query_one(LargeTropicalStormTrackScope).toggle_cone()
 
     async def _refresh_systems(self, information: Container) -> None:
         """Refresh canonical systems while leaving summary and track visible."""
@@ -498,20 +566,17 @@ class TropicalSystemsScreen(Screen[None]):
         self._selection_generation += 1
         generation = self._selection_generation
         summary = self.query_one(TropicalStormSummary)
-        summary.update_rows(self._summary(observation))
+        storm = self.systems[self.selected_storm_index]
+        summary.update_rows(
+            self._summary(
+                observation,
+                include_source=len(storm.observations) == 1,
+            )
+        )
         storm_tabs = list(self.query('#tropical-storm-tabs Tab'))
         if self.selected_storm_index < len(storm_tabs):
             storm_tabs[self.selected_storm_index].label = self._storm_tab_label(self.systems[self.selected_storm_index])
-        track = self.query_one(LargeTropicalStormTrackScope)
-        try:
-            track.update_system(observation)
-        except Exception as error:
-            # Supplementary geography is optional. A bad or newly introduced
-            # provider shape must not suppress the source summary and products.
-            self.log.error(f'Unable to render tropical track: {error!r}')
-            track.clear()
-        self.query_one('#tropical-track-unavailable', Static).display = not track.display
-        self._notify_track_availability(observation, track)
+        self._show_track(observation)
         self._show_centre_weather(observation)
 
         key = _observation_key(observation)
@@ -523,35 +588,24 @@ class TropicalSystemsScreen(Screen[None]):
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
         product_body.loading = key in self._loading_keys
+        self._apply_layout()
         await self._populate_product_tabs(observation, generation)
         if generation != self._selection_generation:
             return
 
-    def _notify_track_availability(
-        self,
-        observation: TropicalSystem,
-        track: LargeTropicalStormTrackScope,
-    ) -> None:
-        """Notify once per observation when a forecast map layer is absent."""
-        track_available = track.display
-        cone_available = track.cone_available
-        if track_available and cone_available:
-            return
-        key = (_observation_key(observation), track_available, cone_available)
-        if key in self._availability_notifications:
-            return
-        self._availability_notifications.add(key)
-        source = source_tab_label(observation)
-        if not track_available and not cone_available:
-            missing = 'Forecast track and cone are'
-        elif not track_available:
-            missing = 'Forecast track is'
-        else:
-            missing = 'Forecast cone is'
-        self.app.notify(
-            f'{missing} not available from {source}.',
-            severity='information',
-        )
+    def _show_track(self, observation: TropicalSystem) -> None:
+        """Render cached geometry/products without making a provider request."""
+        track = self.query_one(LargeTropicalStormTrackScope)
+        try:
+            track.update_system(
+                observation,
+                products=self._products.get(_observation_key(observation), ()),
+            )
+        except Exception as error:
+            # Supplementary geography is optional. A bad or newly introduced
+            # provider shape must not suppress the source summary and products.
+            self.log.error(f'Unable to render tropical track: {error!r}')
+            track.clear()
 
     def _show_centre_weather(self, observation: TropicalSystem) -> None:
         """Show cached centre conditions or start one independent current request."""
@@ -599,6 +653,7 @@ class TropicalSystemsScreen(Screen[None]):
             weather.update_weather(self._centre_weather[key])
         else:
             weather.show_unavailable()
+        self.call_after_refresh(self._apply_layout)
 
     def _centre_weather_task_done(
         self,
@@ -622,6 +677,7 @@ class TropicalSystemsScreen(Screen[None]):
             self._loading_keys.discard(key)
         selected = self.selected_observation
         if selected is not None and _observation_key(selected) == key:
+            self._show_track(selected)
             await self._populate_product_tabs(selected, self._selection_generation)
 
     async def _populate_product_tabs(self, observation: TropicalSystem, generation: int) -> None:
@@ -636,13 +692,7 @@ class TropicalSystemsScreen(Screen[None]):
             tabs = self.query_one('#tropical-product-tabs', Tabs)
             key = _observation_key(observation)
             products = self._products.get(key, ())
-            tab_specs: list[tuple[str, str]] = []
-            if _has_us_forecast_summary(observation):
-                tab_specs.append(('tropical-product-forecast', 'Forecast'))
-            tab_specs.extend(
-                (f'tropical-product-{index}', product.label)
-                for index, product in enumerate(products)
-            )
+            tab_specs = self._product_tab_specs(observation)
             valid_ids = {tab_id for tab_id, _label in tab_specs}
             desired = self._product_by_observation.get(key)
             if desired not in valid_ids:
@@ -652,7 +702,7 @@ class TropicalSystemsScreen(Screen[None]):
                 await tabs.clear()
                 for tab_id, label in tab_specs:
                     await tabs.add_tab(Tab(label, id=tab_id))
-                tabs.display = bool(tab_specs)
+                tabs.display = len(tab_specs) > 1
                 tabs.active = desired
                 if desired is None:
                     self._product_by_observation.pop(key, None)
@@ -661,9 +711,33 @@ class TropicalSystemsScreen(Screen[None]):
             finally:
                 self._updating_tabs -= 1
             if generation == self._selection_generation:
-                self.query_one(TropicalStormSummary).update_rows(self._summary(observation))
+                storm = self.systems[self.selected_storm_index]
+                self.query_one(TropicalStormSummary).update_rows(
+                    self._summary(
+                        observation,
+                        include_source=len(storm.observations) == 1,
+                    )
+                )
                 self.query_one('#tropical-product-body', VerticalScroll).loading = key in self._loading_keys
                 await self._render_selected_product()
+                self.call_after_refresh(self._apply_layout)
+
+    def _product_tab_specs(
+        self,
+        observation: TropicalSystem,
+    ) -> list[tuple[str, str]]:
+        """Return stable choices independently of whether their tab row is useful."""
+        tab_specs: list[tuple[str, str]] = []
+        if _has_us_forecast_summary(observation):
+            tab_specs.append(('tropical-product-forecast', 'Forecast'))
+        tab_specs.extend(
+            (f'tropical-product-{index}', product.label)
+            for index, product in enumerate(
+                self._products.get(_observation_key(observation), ())
+            )
+            if not _is_map_annotation_product(product)
+        )
+        return tab_specs
 
     async def _render_selected_product(self) -> None:
         observation = self.selected_observation
@@ -680,12 +754,29 @@ class TropicalSystemsScreen(Screen[None]):
         if active is None:
             if key in self._loading_keys:
                 return
-            message = (
-                'Supplementary products are temporarily unavailable.'
-                if key in self._product_errors
-                else 'No supplementary products are available.'
+            if key in self._product_errors:
+                await body.mount(
+                    Static(
+                        Text(
+                            'Supplementary products are temporarily unavailable.',
+                            style='dim italic',
+                        )
+                    )
+                )
+                if _has_basic_information(observation):
+                    await body.mount(Static(self._forecast_summary(observation)))
+                return
+            if _has_basic_information(observation):
+                await body.mount(Static(self._forecast_summary(observation)))
+                return
+            await body.mount(
+                Static(
+                    Text(
+                        'No supplementary products are available.',
+                        style='dim italic',
+                    )
+                )
             )
-            await body.mount(Static(Text(message, style='dim italic')))
             return
         try:
             index = int(active.rsplit('-', 1)[-1])
@@ -695,14 +786,20 @@ class TropicalSystemsScreen(Screen[None]):
             return
         await body.mount(*_product_widgets(product))
 
-    def _summary(self, observation: TropicalSystem) -> list[tuple[str, Any]]:
+    def _summary(
+        self,
+        observation: TropicalSystem,
+        *,
+        include_source: bool = True,
+    ) -> list[tuple[str, Any]]:
         rows: list[tuple[str, Any]] = []
-        for label, value in (
-            ('Classification', observation.classification),
-            ('Source', getattr(observation.source_info, 'name', None) or source_tab_label(observation)),
-        ):
-            if cleaned := _clean(value):
-                rows.append((label, cleaned))
+        if include_source:
+            source = (
+                getattr(observation.source_info, 'name', None)
+                or source_tab_label(observation)
+            )
+            if cleaned := _clean(source):
+                rows.append(('Source', cleaned))
         if observation.center_lat is not None and observation.center_lon is not None:
             rows.append(
                 (
@@ -711,10 +808,9 @@ class TropicalSystemsScreen(Screen[None]):
                 )
             )
         for label, value in (
-            ('Movement', observation.movement),
             ('Maximum wind', observation.max_wind),
             ('Minimum pressure', observation.min_pressure),
-            ('Advisory', observation.advisory_number),
+            ('Movement', observation.movement),
         ):
             if cleaned := _clean(value):
                 rows.append((label, cleaned))
@@ -735,7 +831,7 @@ class TropicalSystemsScreen(Screen[None]):
         return rows
 
     def _forecast_summary(self, observation: TropicalSystem) -> Group:
-        """Render the useful NHC/CPHC discovery headline and summary."""
+        """Render a provider's useful discovery headline, summary, and link."""
         parts: list[Any] = []
         heading = _clean(observation.headline) or _clean(observation.name) or 'Forecast'
         parts.append(Text(heading, style='bold'))
@@ -750,14 +846,16 @@ class TropicalSystemsScreen(Screen[None]):
     def _storm_tab_label(self, storm: CanonicalTropicalSystem) -> Text:
         name = _clean(storm.name) or 'Tropical System'
         label = Text()
-        if storm.observations:
-            selected = self._source_by_storm.get(canonical_storm_key(storm), 0)
-            classification = _clean(storm.observations[selected].classification)
-            if classification:
-                theme = getattr(self.app, 'theme_variables', {})
-                accent = theme.get('text-accent')
-                label.append(classification, style=f'bold {accent}' if accent else 'bold')
-                label.append(' ')
+        classification = canonical_tropical_classification(storm)
+        if classification:
+            theme = getattr(self.app, 'theme_variables', {})
+            role = _classification_colour_role(classification)
+            colour = theme.get(role) or theme.get(f'text-{role}')
+            label.append(
+                classification,
+                style=f'bold {colour}' if colour else 'bold',
+            )
+            label.append(' ')
         label.append(name)
         return label
 
@@ -916,6 +1014,33 @@ def _has_us_forecast_summary(system: TropicalSystem) -> bool:
     )
 
 
+def _is_map_annotation_product(product: TropicalProduct) -> bool:
+    """Keep coordinate-only forecast metadata out of the information tabs."""
+    if (
+        product.content
+        or not isinstance(product.data, dict)
+        or set(product.data) != {'points'}
+    ):
+        return False
+    points = product.data.get('points')
+    annotation_fields = {'latitude', 'longitude', 'lead_hours'}
+    return bool(points) and isinstance(points, list) and all(
+        isinstance(point, dict)
+        and {'latitude', 'longitude'} <= set(point)
+        and set(point) <= annotation_fields
+        for point in points
+    )
+
+
+def _has_basic_information(system: TropicalSystem) -> bool:
+    """Return whether useful provider prose can fill the tab-free basic mode."""
+    return bool(
+        _clean(system.headline)
+        or _clean(system.summary)
+        or _clean(system.url)
+    )
+
+
 def _last_update_key(system: TropicalSystem) -> str:
     """Return a refresh-stable key for presentation-only freshness state."""
     return f'{system.source}\0{system.id}'
@@ -970,6 +1095,30 @@ def _comparable_datetime(value: datetime) -> datetime:
 
 def _clean(value: object) -> str:
     return value.strip() if isinstance(value, str) else ''
+
+
+def _classification_colour_role(classification: str) -> str:
+    """Map issuing-centre wording to a stable Textual semantic colour role."""
+    value = classification.casefold().replace('-', ' ')
+    if (
+        'hurricane' in value
+        or 'typhoon' in value
+        or 'category' in value
+        or 'intense tropical cyclone' in value
+        or 'severe tropical cyclone' in value
+    ):
+        return 'error'
+    if 'severe tropical storm' in value or 'strong tropical storm' in value:
+        return 'warning'
+    if (
+        'tropical storm' in value
+        or 'moderate tropical storm' in value
+        or 'tropical cyclone' in value
+    ):
+        return 'accent'
+    if 'tropical depression' in value:
+        return 'secondary'
+    return 'primary'
 
 
 __all__ = ['TropicalSystemsScreen']

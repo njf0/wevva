@@ -33,6 +33,7 @@ from wevva.messages import (
     WeatherFetchFailed,
     WeatherUpdated,
 )
+from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
@@ -45,12 +46,14 @@ from wevva.services.alerts import (
     _get_reusable_alerts_async_with_status,
     normalize_country_code,
 )
+from wevva.services.country_alerts import CountryAlertsService
 from wevva.services.tropical import (
     get_tropical_products_async,
     get_tropical_system_candidates_async,
 )
 from wevva.geography import short_location_name
 from wevva.services.weather import (
+    fetch_alert_place_hourly_forecast,
     fetch_city_temperatures,
     fetch_current_weather,
     fetch_weather_summary,
@@ -145,6 +148,8 @@ class Wevva(App, inherit_bindings=False):
         self._alert_indicator_generation: int | None = None
         self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
         self._alert_cache_clock = time.monotonic
+        self.country_alerts_service = CountryAlertsService()
+        self._alerts_centre_screen: AlertsCentreScreen | None = None
         self._tropical_system_cache: TropicalCacheEntry | None = None
         self._tropical_system_cache_clock = time.monotonic
         self._tropical_system_fetch_task: asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]] | None = None
@@ -260,6 +265,28 @@ class Wevva(App, inherit_bindings=False):
         """Open help screen."""
         self.push_screen(HelpScreen())
 
+    def open_alerts_centre_screen(self) -> None:
+        """Open the installed country-alert workspace and its isolated cache."""
+
+        if self._alerts_centre_screen is None:
+            self._alerts_centre_screen = AlertsCentreScreen(
+                service=self.country_alerts_service,
+                initial_country_code=self.location.country_code,
+                warning_language=self.warning_language,
+                place_hourly_loader=self.load_alert_place_hourly_forecast,
+            )
+            self.install_screen(self._alerts_centre_screen, 'alerts-centre')
+        else:
+            self._alerts_centre_screen.initial_country_code = normalize_country_code(
+                self.location.country_code
+            )
+            self._alerts_centre_screen.apply_preferences(
+                warning_language=self.warning_language,
+                units_changed=False,
+                appearance_changed=False,
+            )
+        self.push_screen('alerts-centre')
+
     async def open_tropical_systems_screen(self) -> None:
         """Open the dedicated global storm workspace from its own cache."""
         cached = self._cached_tropical_systems()
@@ -303,6 +330,22 @@ class Wevva(App, inherit_bindings=False):
         return await fetch_city_temperatures(
             coordinates,
             temperature_unit=temperature_unit,
+        )
+
+    async def load_alert_place_hourly_forecast(
+        self,
+        latitude: float,
+        longitude: float,
+        temperature_unit: str,
+        wind_speed_unit: str,
+    ):
+        """Fetch the small hourly model for one Alerts Centre settlement."""
+
+        return await fetch_alert_place_hourly_forecast(
+            lat=latitude,
+            lon=longitude,
+            temperature_unit=temperature_unit,
+            wind_speed_unit=wind_speed_unit,
         )
 
     def open_world_locations_screen(self) -> None:
@@ -475,6 +518,10 @@ class Wevva(App, inherit_bindings=False):
         )
         temperature_unit_changed = new_temp != self.temperature_unit
         warning_language_changed = new_warning_language != self.warning_language
+        appearance_changed = (
+            new_theme != self.theme
+            or new_emoji_enabled != self.emoji_enabled
+        )
 
         self.temperature_unit = new_temp
         self.wind_speed_unit = new_wind
@@ -482,6 +529,13 @@ class Wevva(App, inherit_bindings=False):
         self.theme = new_theme
         self.emoji_enabled = new_emoji_enabled
         self.warning_language = new_warning_language
+
+        if self._alerts_centre_screen is not None:
+            self._alerts_centre_screen.apply_preferences(
+                warning_language=self.warning_language,
+                units_changed=units_changed,
+                appearance_changed=appearance_changed,
+            )
 
         if units_changed:
             self.controller = WeatherController(

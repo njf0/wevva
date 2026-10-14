@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — design recorded; implementation not started
+In progress — Slices A–C implemented; Slice D remains
 
 ## Context
 
@@ -43,7 +43,7 @@ task's provider, cache, or two-repository handoff boundaries.
 - The fitted track viewport can be so tight that an ocean track has little
   geographic context even when nearby land could fit.
 - Forecast dots do not explain whether they are the current centre or an
-  official forecast lead such as `+12 h` or `+24 h`.
+  official forecast lead such as `12h` or `24h`.
 - The `t` and `c` bindings expose track/cone layer controls which are not useful
   enough to justify footer space or UI state.
 - There is no spatial overview of all active systems.
@@ -83,10 +83,13 @@ At wide sizes the familiar split composition remains:
 Canonical storm tabs
 Source/provider tabs, when needed
 
-Summary             | Product tabs
-Centre weather      | Storm information body
-Selected storm map  |
+Centre weather      | Summary
+Selected storm map  | Product tabs / storm information body
 ```
+
+The two columns are balanced rather than capping the map column. The frame
+fills the stage inside its `1 2` padding instead of imposing an additional
+maximum width or height.
 
 At compact sizes the same mounted widgets use a single-column budget:
 
@@ -152,11 +155,9 @@ may extend behind the footer and the main screen must report no vertical scroll.
 After that baseline, spend rows deterministically:
 
 1. add complete summary rows;
-2. admit a minimum selected-track map;
-3. admit centre weather with condition, temperature, and wind;
-4. grow the map and information body;
-5. add precipitation and pressure to centre weather; and
-6. restore all optional summary/weather rows.
+2. when both column and row minima fit, admit the paired two-column layout;
+3. show complete centre-weather and summary rows in its top row; and
+4. give all remaining rows to the aligned map and information panes.
 
 Exact crossover dimensions are fixture-driven rather than part of the public
 contract. Removing space reverses the same order.
@@ -165,17 +166,16 @@ contract. Removing space reverses the same order.
 
 ### Observation summary
 
-`TropicalStormSummary` should accept an ordered subset of complete rows. The
-initial priority is:
+`TropicalStormSummary` should accept an ordered subset of complete rows. It
+does not repeat classification, which is already present in the canonical
+storm tab, or advisory number. The priority is:
 
-1. classification;
-2. source, when no source-tab row is visible;
-3. centre;
-4. maximum wind;
-5. minimum pressure;
-6. movement;
-7. last update; and
-8. advisory number.
+1. source, when no source-tab row is visible;
+2. centre;
+3. maximum wind;
+4. minimum pressure;
+5. movement; and
+6. last update.
 
 When source tabs are visible, their label already communicates the issuing
 centre and the table can spend that row elsewhere. Compact field labels may be
@@ -225,12 +225,16 @@ selection mechanism.
 
 Refactor the map into the established layered pattern:
 
-- land, cone fill, and connecting track geometry remain a Braille/raster
-  background;
+- land and cone fill remain a Braille/raster background, with the cone using a
+  subdued `$text-warning` tint to distinguish uncertainty from land;
+- render provider-supplied track positions as discrete fix dots rather than
+  joining them into a continuous or interpolated path;
 - current/forecast fixes, lead labels, and city callouts are native children
   positioned over it;
 - shared directional placement may render `• City` or `City •`, always keeping
   the bullet on the projected city cell;
+- city names prefer clear map cells outside the forecast cone, with ordinary
+  collision-safe placement as a constrained-layout fallback;
 - city hover/focus reverses the complete callout; click, Enter, and Space emit
   the ordinary `PlaceSelected` message and open that city's weather; and
 - use normal Textual focus traversal only—do not add a bespoke spatial keyboard
@@ -243,11 +247,12 @@ presentation-only and must not refresh tropical or centre-weather data.
 
 Use `•` for city markers and retain a visually distinct storm-fix marker. Label
 the current fix `Now`; label official forecast fixes with lead times such as
-`+12 h` and `+24 h` when that timing is explicitly supplied or already
-deterministically encoded by a supported provider. Never infer time from
-arbitrary smooth-line vertices. At small map sizes preserve `Now`, then the
-nearest official leads, hiding lower-priority labels when collisions cannot be
-resolved.
+`12h` and `24h` only when that timing is explicitly supplied at matching
+coordinates. When explicit daily boundaries are available, keep the complete
+track in the viewport but show markers and labels only at `24h`, `48h`, and
+later 24-hour intervals. Never infer time from vertex order or timestamps. At
+small map sizes preserve `Now`, then the nearest official leads, hiding
+lower-priority labels when collisions cannot be resolved.
 
 The viewport still contains the complete selected track and cone, including
 dateline wrapping, but gains a context floor: minimum latitudinal/longitudinal
@@ -419,3 +424,8 @@ no suitable live system is available.
 - Any required provider-model enrichment for explicit lead hours belongs in
   `wevva-warnings` and must be recorded as a sibling task rather than inferred
   in this renderer.
+- Slice C renders only discrete provider-supplied forecast positions and uses
+  structured product `lead_hours` where supplied. NHC/CPHC cadence and HKO/JMA
+  valid times are not converted into leads; sources without explicit lead
+  hours remain unlabeled pending the sibling provider work recorded in task
+  0022.

@@ -59,8 +59,9 @@ You can launch it directly with `uvx wevva`.
 - `l` Focus saved locations or open their modal
 - `m` Open the interactive saved-locations world map
 - `i` Focus warning details or open their modal
+- `g` Open the country Alerts Centre
 - `t` Investigate active tropical systems
-- `w` Return from Tropical Systems to the weather screen
+- `w` Return from Alerts Centre or Tropical Systems to weather
 - `u` Open settings
 - `h` Open this help screen
 - `q` Quit
@@ -72,7 +73,6 @@ You can launch it directly with `uvx wevva`.
 - On the World Map, use left/right to move between locations and Enter to open one.
 - Country-map city labels can be clicked or focused and activated with Enter.
 - On Tropical Systems, `r` refreshes active systems and their source products.
-- On Tropical Systems, `t` toggles position dots and `c` toggles the official cone.
 - Highlighting rows/columns updates linked weather context.
 - If a fetch fails, use `r` to retry or `s` to choose another place.
 
@@ -81,6 +81,7 @@ You can launch it directly with `uvx wevva`.
 - Current and upcoming weather alerts appear as a one-line summary on the main weather screen.
 - Alerts load separately from the main forecast, so slower warning providers do not hold up the rest of the UI.
 - Activate the summary with the mouse, Enter, or Space to open the tabbed warning reader; its provider document scrolls independently.
+- Press `g` for country-level discovery, warning polygons, provider documents, and selectable settlement forecasts.
 - Where a provider includes an official warning URL, `wevva` shows a direct link on the alert panel.
 - Warning maps use full Braille cells for filled interiors and partial Braille cells along geographic edges.
 - The Tropical Systems screen keeps global storm investigation separate from location-specific alerts and loads official issuing-centre products only when selected.

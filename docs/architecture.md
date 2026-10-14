@@ -20,6 +20,10 @@ place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places
 
 t key -> TropicalSystemsScreen -> global canonical tropical systems + products
 
+g key -> AlertsCentreScreen -> country-alert service/cache
+                            -> complete map unit + provider warning polygons
+                            -> selected-settlement minimal hourly request/cache
+
 m key -> WorldLocationsScreen -> checked-in global map-unit geometry
                              -> cached saved-location summaries
                              -> SavedLocationSelected -> WeatherScreen + refresh
@@ -32,7 +36,8 @@ equivalent.
 
 `Wevva` owns session state: the selected `LocationMetadata`, unit/theme
 settings, saved locations, refresh generations, short-lived forecast/warning
-caches, and background task handles. Complete forecast results, including air
+caches, the reusable Alerts Centre/service, and background task handles.
+Complete forecast results, including air
 quality, are cached for fifteen minutes by requested coordinates and display
 units; the explicit `r` refresh bypasses that cache.
 It uses `WeatherController` for the main forecast refresh. `WeatherScreen`
@@ -74,6 +79,13 @@ from cached values and accept later results without issuing its own queries.
   are communicated by the warning widget.
   Reusable country alerts and native point alerts start together. Tropical
   retrieval is not part of this weather-location refresh path.
+- `wevva/services/country_alerts.py` is the independent country-discovery
+  boundary for the Alerts Centre. It derives supported country choices from
+  the warning library's public alert-source registry, calls the broad public
+  country query with active filtering, orders and deduplicates results, and
+  owns a separate fifteen-minute session cache plus the latest successful
+  per-country identity snapshot used for refresh-scoped `NEW` badges. It never
+  reads or writes the weather screen's reusable-candidate cache.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
   `get_canonical_tropical_systems()` only for the dedicated tropical workspace
   and keeps them in a separate thirty-minute, session-only cache. Canonical
@@ -208,24 +220,134 @@ Fields are admitted only in their documented priority order, and neither
 placement introduces page scrolling.
 Tropical systems are presented only in the dedicated workspace.
 
+The Alerts Centre implementation lives in
+`wevva/screens/alerts_centre_screen.py`. It supplies the type-searchable
+supported-country select, local metadata search, severity/new-first ordering,
+a concise strongest-first warning list, inline states, stale country-request
+protection, and the shared full provider-document presentation. Its
+`CountryAlertsMap` centre pane
+uses the complete selected map unit rather than the weather screen's local
+component cluster. It renders provider-issued warning polygons as dim semantic
+context with the selected warning at full severity, while geometry-less alerts
+remain readable without inferred shapes. Alert selection fits the complete
+selected geometry, reprojects overlapping context, and reranks settlements
+locally without network work.
+
+The Alerts Centre draws candidates from the complete, denser Natural Earth
+1:10m Populated Places layer, ranks points inside selected alert geometry first,
+and lets map size plus collision placement determine how many labels are shown.
+Its focused view also groups the place layer's worldwide Admin-1 metadata into
+plain italic state/province/region context labels. Every represented region is
+retained, including nearby and multi-alert-spanning regions; provider warning
+area prose is not used as map geography and the US receives no separate county
+label path.
+Settlement callouts contain names only and use ordinary theme text. They are
+native focusable controls: click, Enter, or Space emits an Alerts-Centre-only
+selection message rather than the application's global place-navigation
+message. Selection starts one minimal Open-Meteo hourly request for temperature,
+precipitation probability, wind speed/direction, and timezone metadata. Results
+are normalized into `HourlyOpenMeteoForecast`, cached briefly by rounded
+coordinates and temperature/wind units, and guarded by cancellation plus a
+request generation. Country or alert changes clear the selection; relevant
+unit changes refetch it; resize performs no weather work. A dedicated fixed
+hourly strip below the map fills its width with up to 24 consecutive hours and
+has no tabs, cursor, or scrolling. The pure responsive budget limits it to one
+quarter of the Map workspace, always admits temperature and time first, then
+rain and wind values, then complete corresponding bar rows. If the minimum
+complete strip cannot fit, it remains hidden while retaining settlement and
+forecast state; loading, empty, and retryable failure occupy the same peer when
+its one-row body fits. Loading uses a centred indicator. Once a forecast strip
+has been displayed, a replacement settlement request retains that established
+height, capped to the current responsive allowance, rather than collapsing the
+peer while data is in flight.
+
+Country loading swaps the navigation list for an indeterminate catalogue-fetch
+bar, then a percentage-bearing provider-document/geometry bar when measurable
+work begins; empty and retryable states occupy that same centred region. Alert
+rows use the saved-location list's muted separators. A successful fresh fetch
+compares stable source/alert identities with the previous successful snapshot;
+new identities receive a refresh-scoped `NEW` badge and can be sorted first.
+The bounded per-country/language snapshots persist separately in
+`~/.config/wevva/country-alert-observations.json`; the first fetch establishes
+a baseline, cache hits retain the current badges, and the next fresh fetch
+replaces them. Failed fetches never advance the snapshot. The equal-width
+navigation/detail rails and map use two-column hatched gutters in wide
+layouts, and 24-character area summaries are capped
+before rendering so provider geography cannot consume an unbounded navigation
+row. Shared-feed territories start with a country-name filter. At the compact
+80x24 target, the country and filter controls collapse to one row each and the
+map shows at most two ranked city labels. Selected-alert documents place their
+local active-time range directly below the headline.
+
+The warning-library country API returns complete normalized alerts: providers
+whose top-level feeds contain only links must fetch their CAP documents (and
+some separate geometries) before Wevva can render severity, active state,
+polygons, area labels, and provider prose.
+
+`wevva/alerts_centre_layout.py` owns the pure responsive allocation. Wide
+terminals show three columns, medium terminals stack map and document beside
+navigation, 80x24 uses native Map/Details tabs, and smaller terminals expose
+Navigation/Map/Details one pane at a time. These modes only toggle and rearrange
+the same mounted widgets, preserving selection and document scroll state. The
+allocator also owns the forecast-peer height, complete hourly rows, and broad
+settlement-label cap so resize changes presentation without fetching data.
+`Wevva` installs this reusable workspace with Textual and opens it with `g`,
+owns its independent `CountryAlertsService`, and supplies the focused hourly
+loader. Pop/reopen cycles suspend and resume the live widget
+tree rather than remounting a previously removed screen.
+Its `r` refresh bypasses only Alerts Centre caches;
+`w` returns to weather. Settings update its language, units, and theme-derived
+presentation in place without merging this path into local warning refresh.
+
+While the workspace is suspended, provider threads discard progress before
+attempting to cross back into Textual's UI thread, but the in-flight request
+may still populate the persistent screen and cache. Final unmount invalidates
+the request generation before cancellation.
+
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
 with `t`. Its severity-ordered, full-classification storm selector is followed
-by a source selector only for multi-observation systems. An aligned
-full-width current-analysis summary table, a compact Open-Meteo
-current-conditions table for the selected source centre, and persistent
-track-fitted Storm Track pane occupy the wider left column; a two-cell gutter
-separates the right-hand fixed
-product tabs and independently scrolling document body. The storm-selection
+by a source selector only for multi-observation systems. The top-level label
+uses the canonical storm's strongest declared classification and semantic
+severity colour, so changing sources does not restyle the storm. A pure
+`wevva/tropical_layout.py` budget accounts for terminal chrome, stage padding,
+frame/pane borders, tab rows, and gutters. At 80x24 the same mounted summary
+and information widgets form a single stack; complete summary rows are admitted
+in priority order while the map and centre weather remain hidden. Once both
+column and row minima fit, the workspace becomes a balanced two-by-two
+composition: centre weather above the map, and summary above the product
+reader. The outer frame consumes the full stage content inside its `1 2`
+padding. Resizing changes presentation only and retains storm, source, product,
+document, and loading state.
+
+Tiered Open-Meteo current conditions and the track-fitted Storm Track pane
+occupy the split left column. The source summary and product reader occupy the
+right, with matching top-table and lower-pane heights across the two-cell
+gutter. Classification remains in the canonical storm tab rather than being
+repeated in the summary, and advisory number is omitted from that compact
+table. The track pane keeps land and the provider cone in a Braille
+backdrop. Native direction-aware `◆ Now`/daily forecast-fix and
+`• City` callouts sit above it; city hover/focus reverses the complete callout,
+and click, Enter, or Space sends the ordinary `PlaceSelected` message. A city
+callout first searches for collision-free cells outside the forecast cone,
+then falls back to ordinary collision placement when the map is too constrained.
+A minimum projected span expands short tracks to reveal nearby land and prominent
+cities without cropping longer tracks or breaking dateline wrapping. The map
+shows discrete provider-supplied fixes instead of joining them into a
+continuous path. A fix receives a lead label only when a loaded structured
+product supplies `lead_hours` at matching coordinates; vertex order and valid
+timestamps do not imply a lead. Resize only reflows the existing callout
+widgets and does not request products or weather. Product tabs appear only
+when there is a choice, and the two
+reclaimed tab rows return to the independently scrolling body. Providers with
+only a discovery headline, summary, or official link show that information
+directly in a compact reader instead of reserving the full column height. The
 workspace behind both columns retains the application hatch. NHC and CPHC
 observations with a useful discovery headline or summary receive a `Forecast`
 tab; other tabs come only from lazy `get_tropical_products()` results. Product
 content uses literal plain text, explicit Markdown, and restrained tables for
 the structured forecast point shapes supplied by `wevva-warnings`. The
-workspace is a bounded panel inside a full-height
-centring stage and occupies roughly sixty percent of the terminal; at compact
-widths the panel expands into a small screen inset while retaining the same
-summary/conditions/track-left and document-right topology with relaxed column
-minimums.
+workspace fills its full-height stage. Its frame has no internal padding; the
+stage supplies the only `1 2` outer inset.
 Product tabs begin directly with retrieved provider content; the UI does not
 prepend a redundant product title or issued-time block.
 Centre conditions use a current-only request in the application's configured
@@ -257,13 +379,15 @@ come from Natural Earth's ranked 1:50m Populated Places layer, prioritising
 regional significance and then proximity to the track. Issuer and source
 geography metadata never supplies a storm-map label, so a provider's home
 country cannot be mistaken for the land under a storm. The selected forecast
-location never supplies storm-map context. The current position and regular
-24-hour forecast fixes receive visible centred dots without a connecting line.
-When supplied, an official cone is a secondary-coloured Braille layer. The
-screen's `t` and `c` bindings independently hide position markers and the cone;
-both toggles retain the complete scope for placement so the viewport and
-remaining markers do not move or clip. A once-per-observation information
-notification identifies a missing forecast track, cone, or both. The warning
+location never supplies storm-map context. The current position and
+provider-supplied forecast fixes define the complete viewport without a
+connecting line. When explicit lead hours include daily boundaries, visible
+forecast markers and compact labels use only the 24-hour fixes (`24h`, `48h`,
+and so on); the full supplied horizon remains in scope.
+When supplied, an official cone is a subdued warning-coloured Braille layer. The
+track and cone layers render whenever supplied and have no separate visibility
+bindings or notification state. A missing track uses the local unavailable
+treatment when the budget admits that region. The warning
 scope instead keeps a stable whole selected country/map-unit viewport so the
 warning polygon's relative coverage remains meaningful.
 
@@ -271,15 +395,14 @@ The CAP prose panel and tropical product body each own their scrollbar, while
 geographic scopes remain bounded inside their respective areas. Compact scope
 content height comes from the padded projected viewport
 and the shared 2×4 raster cell aspect, then is clamped by widget-specific minimum
-and maximum heights. The dedicated storm scope instead consumes the remaining
-left-pane height while retaining projection fitting. Width changes recompute
+and maximum heights. The dedicated storm scope instead consumes the complete
+lower-left pane while retaining projection fitting. Width changes recompute
 compact heights. Warning Area also uses
 the same one-row top-margin convention as saved-location progress panels; the
 sidebar hatch remains visible in that gap while each child panel keeps a solid
 background. Warning-map raster composition can balance final visible sub-cell
 margins with a translation only. Storm-map placement instead uses the complete
-scope's raster layers and avoids a second visibility-dependent translation, so
-toggling the cone cannot reposition or discard forecast markers.
+scope's raster layers and avoids a second visibility-dependent translation.
 
 `wevva/geography.py` owns the deliberately small shared geographic path:
 Natural Earth map-unit and populated-place loading, local-component selection,
@@ -290,8 +413,9 @@ Warning areas assign every fully covered land/warning cell to one full `⣿`
 glyph, snapping internal colour boundaries to cells while retaining partial
 Braille at the exterior geographic edge. Storm forecasts instead use centred
 position dots over an optional secondary-coloured Braille cone; they do not use
-the warning fill policy or draw a connecting line. The storm widget adds only forecast-path
-selection, its inclusive viewport policy, markers, cone, and semantic styles;
+the warning fill policy or draw a connecting line. The storm widget adds only
+forecast-position selection, its inclusive viewport policy, markers, cone, and
+semantic styles;
 the warning widget adds the selected CAP
 Polygon/MultiPolygon, stable context viewport policy, severity fill, and
 location marker. This is not a general GIS or plotting framework.

@@ -100,6 +100,7 @@ class WeatherScreen(Screen[None]):
         ('?', 'help', 'Help'),  # Context-aware help (AQ or general)
         ('l', 'locations', 'Locations'),
         ('i', 'alert_details', 'Warning details'),
+        ('g', 'alerts_centre', 'Alerts Centre'),
         ('m', 'world_map', 'World Map'),
     ]
     def __init__(
@@ -620,6 +621,11 @@ class WeatherScreen(Screen[None]):
     async def action_tropical_systems(self) -> None:
         """Open the dedicated active tropical-system workspace."""
         await self.app.open_tropical_systems_screen()
+
+    def action_alerts_centre(self) -> None:
+        """Open the country-level alert discovery workspace."""
+
+        self.app.open_alerts_centre_screen()
 
     def action_help(self) -> None:
         """Show help screen - air quality help if AQ widget is focused, else general help."""

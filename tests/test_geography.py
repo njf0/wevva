@@ -8,6 +8,7 @@ import unittest
 from wevva.geography import (
     GeographicViewport,
     ProjectedPoint,
+    detailed_world_populated_places,
     geojson_polygons,
     polygon_points,
     project_visible_polygons,
@@ -83,6 +84,14 @@ class SharedGeographicRenderingTests(unittest.TestCase):
         by_name = {place.name: place for place in places}
         self.assertAlmostEqual(by_name['Honolulu'].longitude, -157.8583)
         self.assertEqual(by_name['Nanchang'].scale_rank, 2)
+
+    def test_detailed_place_layer_includes_small_settlements(self) -> None:
+        places = detailed_world_populated_places()
+        by_name = {place.name: place for place in places}
+
+        self.assertGreater(len(places), 7000)
+        self.assertEqual(by_name['Mendocino'].population, 548)
+        self.assertGreaterEqual(by_name['Mendocino'].scale_rank, 5)
 
     def test_visible_projection_does_not_wrap_remote_land_across_seam(self) -> None:
         viewport = GeographicViewport(0.0, -135.0, -10.0, -10.0, 10.0, 10.0)
@@ -310,6 +319,7 @@ class SharedGeographicRenderingTests(unittest.TestCase):
 
         self.assertNotEqual(frame.characters[row][column], ' ')
         self.assertEqual(frame.styles[row][column], 'yellow')
+        self.assertIn((column, row), canvas.layer_cells(('point',)))
 
     def test_visible_raster_has_balanced_margins_after_composition(self) -> None:
         viewport = GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0)
