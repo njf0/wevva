@@ -388,6 +388,7 @@ class WeatherScreen(Screen[None]):
         context_sidecar = context_sidecar_eligible(
             self.size.width,
             viewport_height,
+            has_warnings=bool(self._alerts),
         )
         (
             _usable_width,
@@ -505,9 +506,10 @@ class WeatherScreen(Screen[None]):
             show_context
             and budget.context_presentation is ContextPresentation.BOTTOM
         ):
-            forecast_height -= (
-                budget.context_height + DEFAULT_LAYOUT_METRICS.instrument_gutter
-            )
+            # Keep the final forecast gutter inside this column so the daily
+            # table's bottom margin paints a deliberate hatch row immediately
+            # above the lower context matrix.
+            forecast_height -= budget.context_height
         self.forecast_column.styles.height = forecast_height
 
         if context_sidecar:
@@ -541,12 +543,7 @@ class WeatherScreen(Screen[None]):
             self.weather_workspace.styles.width = '100%'
             self.weather_workspace.styles.height = (
                 forecast_height
-                + (
-                    budget.context_height
-                    + DEFAULT_LAYOUT_METRICS.instrument_gutter
-                    if show_context
-                    else 0
-                )
+                + (budget.context_height if show_context else 0)
             )
             self.forecast_column.styles.width = '100%'
             self.context_row.styles.width = '100%'

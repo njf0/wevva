@@ -466,6 +466,10 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 ('aqi', 'pollen'),
             )
             self.assertTrue(screen.context_bar.air_quality.display)
+            self.assertEqual(
+                screen.context_row.region.y - screen.daily_forecast.region.bottom,
+                1,
+            )
             self.assertTrue(
                 any(
                     label.label_text.startswith('• Chicago')
@@ -479,6 +483,29 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 visible.index(DailyColumn.PRECIPITATION),
                 visible.index(DailyColumn.WIND),
             )
+
+    async def test_full_screen_keeps_complete_context_matrix_and_air_quality(
+        self,
+    ) -> None:
+        app = _ResponsiveWeatherApp()
+        async with app.run_test(size=(267, 75)) as pilot:
+            screen = await _load_weather(app, pilot, warnings=True)
+            budget = screen._layout_budget
+            assert budget is not None
+
+            self.assertEqual(
+                budget.context_presentation,
+                ContextPresentation.BOTTOM,
+            )
+            self.assertEqual(budget.context_detail_rows, 5)
+            self.assertTrue(screen.context_bar.air_quality.display)
+            self.assertEqual(screen.context_bar.air_quality.row_count, 5)
+            self.assertEqual(screen.weather_workspace.styles.layout.name, 'vertical')
+            self.assertEqual(
+                screen.context_row.region.y - screen.daily_forecast.region.bottom,
+                1,
+            )
+            self.assertEqual(screen.main_panel.max_scroll_y, 0)
 
     async def test_wide_context_uses_sidecar_before_auxiliary_rails(self) -> None:
         app = _ResponsiveWeatherApp()

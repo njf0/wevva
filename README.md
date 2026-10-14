@@ -23,10 +23,11 @@
 > - The primary forecast has a compact, non-scrolling 80x24 mode. When height
 >   permits, its existing location, astronomy, air-quality, and country-map
 >   widgets return as a density-aware context matrix. Once the forecast reaches
->   its full width, wider layouts move location and astronomy above a larger,
->   lower-density country map in a right-hand column before admitting
->   saved-location or warning-detail rails. The tropical workspace has not yet
->   received the same redesign.
+>   its full width, wider layouts can move location and astronomy above a
+>   larger, lower-density country map in a right-hand column to save rows.
+>   Full-height windows restore the complete bottom matrix, including air
+>   quality, while still admitting saved-location and warning-detail rails. The
+>   tropical workspace has not yet received the same redesign.
 
 ## Quick Start
 

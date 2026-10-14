@@ -331,6 +331,33 @@ class LayoutBudgetTests(unittest.TestCase):
         self.assertEqual(roomy.context_map_height, 25)
         self.assertEqual(roomy.context_height, 41)
 
+    def test_full_height_prefers_complete_bottom_context_over_sidecar(self) -> None:
+        almost_full = weather_layout_for(267, 66, has_warnings=True)
+        full = weather_layout_for(
+            267,
+            67,
+            has_warnings=True,
+            locations_requested=True,
+            warning_details_requested=True,
+        )
+
+        self.assertEqual(
+            almost_full.context_presentation,
+            ContextPresentation.SIDECAR,
+        )
+        self.assertEqual(full.context_presentation, ContextPresentation.BOTTOM)
+        self.assertEqual(full.context_detail_rows, 5)
+        self.assertEqual(full.context_height, 23)
+        self.assertEqual(full.usable_width, 183)
+        self.assertEqual(
+            full.warning_details_presentation,
+            AuxiliaryPresentation.SIDEBAR,
+        )
+        self.assertEqual(
+            full.locations_presentation,
+            AuxiliaryPresentation.SIDEBAR,
+        )
+
     def test_terminal_matrix_never_exceeds_the_content_height(self) -> None:
         for width, terminal_height in TERMINAL_MATRIX:
             for has_warnings in (False, True):

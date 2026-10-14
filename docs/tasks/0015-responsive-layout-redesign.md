@@ -269,11 +269,12 @@ are:
 - air quality: AQI, pollen, PM2.5, PM10, ozone.
 
 Once the full forecast canvas has 42 surplus columns and the content viewport
-has at least 31 rows, reuse location and astronomy in a 40-cell sidecar above
-the map. Hide air quality in this narrow presentation, grow the two visible
-tables first, and give the map the remaining bounded height with no more than
-four ranked city labels. Standard aspect ratios retain the complete bottom
-matrix.
+has at least 31 rows, but not enough rows for the complete five-field matrix,
+reuse location and astronomy in a 40-cell sidecar above the map. Hide air
+quality in this narrow presentation, grow the two visible tables first, and
+give the map the remaining bounded height with no more than four ranked city
+labels. Standard aspect ratios and full-height windows retain the complete
+bottom matrix.
 
 ### Locations and warning details
 
@@ -348,9 +349,9 @@ and must be evaluated together.
 - Establish minimum and maximum map geometry.
 - Grow the three context tables and map together through 14-, 17-, 20-, and
   23-row tiers, then remove the block atomically below its minimum.
-- Reuse location and astronomy in a table-over-map sidecar when width and
-  height can support it, while retaining all three tables in the bottom matrix
-  at standard proportions.
+- Reuse location and astronomy in a table-over-map sidecar when width can save
+  rows at intermediate heights, while retaining all three tables in the bottom
+  matrix at standard proportions and once the complete five-field tier fits.
 
 ### Slice E: modal-first auxiliary surfaces and wide rails (complete)
 
@@ -431,12 +432,13 @@ and must be evaluated together.
 - Active-warning presence takes priority over optional forecast decoration.
 - Warning and location content are reachable through modals when their rails
   do not fit.
-- Sidebars appear only after the remaining central width and eligible context
-  sidecar satisfy their tested minima, and are not user visibility toggles.
+- Sidebars appear only after the remaining central width and any eligible
+  intermediate-height context sidecar satisfy their tested minima, and are not
+  user visibility toggles.
 - Context appears as a two-column/three-card bottom matrix at standard
-  proportions or as a table-over-map sidecar after the forecast reaches full
-  width. Both presentations remain bounded and never push primary content into
-  scrolling.
+  proportions and full height, or as a table-over-map sidecar after the
+  forecast reaches full width at intermediate heights. Both presentations
+  remain bounded and never push primary content into scrolling.
 - Resizing performs no network request and preserves logical selection and
   focus state.
 - Public Python APIs and forecast models remain compatible.
@@ -516,14 +518,16 @@ wide-short and narrow-tall terminals and preserve selected day/hour, focus,
 alert tab, and hourly visibility across density boundaries. The budget and
 live sidebar thresholds now both reserve the full 102-column central canvas.
 
-At standard proportions the context area is a centred 98-cell matrix. Three
+At standard proportions and at full-height wide sizes, the context area is a
+centred 98-cell matrix. Three
 existing context widgets fill its left column and the no-padding country map
 spans the right. The cards grow together from two to five priority fields at
 heights 14, 17, 20, and 23; the map tracks the selected height. Once the full
-forecast has sufficient width and the context has useful height, the same
-mounted location and astronomy widgets move into a 40-cell sidecar above a
-larger map with at most four ranked city labels. Air quality returns with the
-bottom matrix. The sidecar budgets those heights independently from the
+forecast has sufficient width and useful intermediate height, the same mounted
+location and astronomy widgets move into a 40-cell sidecar above a larger map
+with at most four ranked city labels. At enough height for all five context
+fields, the complete bottom matrix takes precedence and air quality returns.
+The sidecar budgets those heights independently from the
 parallel forecast. The context disappears atomically below its minimum; every
 state retains a non-scrolling primary page.
 

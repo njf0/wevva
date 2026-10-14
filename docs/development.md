@@ -101,10 +101,11 @@ sizes the country map and three context tables grow together through tested
 14-, 17-, 20-, and 23-row matrix tiers without changing the page-scroll
 contract. The matrix remains eligible at the supported 80-column width, using
 compact date/time values in its 37-cell information column. At sufficiently
-wide and tall sizes, those same mounted widgets move into a right-hand sidecar
-before saved locations or warning details become automatic rails. The sidecar
-shows location and astronomy above a larger map with at most four city labels;
-air quality returns in the full bottom matrix. All modes preserve the
+wide sizes, those same mounted widgets move into a right-hand sidecar when the
+viewport cannot yet support the complete bottom matrix. The sidecar shows
+location and astronomy above a larger map with at most four city labels; once
+all five context rows fit below the forecast, the full bottom matrix wins and
+restores air quality. All modes preserve the
 102-column central canvas. The tropical workspace has its own tested 80x24
 stack with storm/source navigation, complete priority summary rows, and an
 internally scrolling information body; maps and centre weather return only

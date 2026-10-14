@@ -85,9 +85,9 @@ header and footer.
 | below 80 | Best effort; not a guaranteed product target |
 | 80–101 | Supported compact canvas with abbreviated detail/daily fields |
 | 102–143 | Full 102-column central canvas and original wide daily fields |
-| 144–185 | At sufficient height, the existing context moves beside the full forecast; short windows may instead admit one auxiliary rail |
-| 186–227 | Context sidecar plus one automatic auxiliary rail when height permits |
-| 228+ | Context sidecar plus both automatic auxiliary rails when all contain data |
+| 144–185 | At intermediate heights, existing context moves beside the full forecast; short windows may instead admit one auxiliary rail, while full-height windows restore the bottom matrix |
+| 186–227 | Context sidecar plus one automatic auxiliary rail at intermediate heights; complete bottom context plus both rails when height permits |
+| 228+ | Context sidecar plus both automatic auxiliary rails at intermediate heights; complete bottom context plus both rails at full height |
 
 The forecast frames themselves stop at 98 cells and remain centred. The first
 useful block of surplus width is therefore spent on location, astronomy,
@@ -99,10 +99,12 @@ terminal), the screen retains both summary cards when a warning exists, the
 smallest current-condition row, and required hourly condition, temperature,
 and time rows. Additional rows restore hourly rain and wind, richer current
 conditions, the classic tabbed warning preview, complete daily rows, graph
-rows, and finally the bottom context matrix. When sufficient width and height
-exist together, that same context uses an independently budgeted right-hand
-column: its tables gain priority rows first and its map receives the remaining
-bounded height.
+rows, and finally the bottom context matrix. When sufficient width exists
+before the complete bottom matrix fits, that same context uses an independently
+budgeted right-hand column: its tables gain priority rows first and its map
+receives the remaining bounded height. Once all five bottom-matrix rows fit,
+the complete location, astronomy, air-quality, and map selection takes
+precedence again.
 
 An 80x50 terminal and a 160x24 terminal therefore receive different density
 decisions without switching to unrelated screen compositions.
@@ -204,9 +206,11 @@ language.
 The forecast retains the same composition and bounded frames. At standard
 aspect ratios the context remains below it as the two-column matrix described
 above. Once the full forecast canvas and a useful minimum context height fit,
-the same mounted location and astronomy widgets move into a 40-cell sidecar
-above a larger country map. Air quality remains part of the complete bottom
-matrix rather than crowding this narrow presentation. The sidecar map renders
+but the complete bottom matrix does not, the same mounted location and
+astronomy widgets move into a 40-cell sidecar above a larger country map. Air
+quality remains part of the complete bottom matrix rather than crowding this
+narrow presentation, and returns once the viewport can show all five context
+rows. The sidecar map renders
 at most four ranked city labels to preserve the country outline. This is
 existing information, not a new telemetry surface, and it no longer pushes the
 daily forecast downward.
@@ -387,7 +391,7 @@ The deterministic rendered suite exercises these representative sizes:
 | 220x24 | Two auxiliary rails in a window too short for the sidecar |
 | 220x45 | Context sidecar plus one auxiliary rail |
 | 220x60 | Tall context sidecar plus one auxiliary rail |
-| 267x75 | Context sidecar plus both bounded auxiliary rails |
+| 267x75 | Complete bottom context matrix plus both bounded auxiliary rails |
 
 For each size, verify:
 

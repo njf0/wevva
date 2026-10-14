@@ -205,25 +205,27 @@ bounded Warning Area peer beside the document; alerts without geometry return
 the complete width to the prose. The modal's single rounded frame is centred,
 uses the selected severity colour, and carries the bold centred alert-count
 title. Saved locations and
-warning details also have modal access commands. When width and height permit,
-the first 42 surplus columns move existing forecast context beside the full
+warning details also have modal access commands. At intermediate heights, the
+first 42 surplus columns move existing forecast context beside the full
 102-column central canvas. Auxiliary sidebars use later surplus: one at 186
 columns and both at 228 while the sidecar is active. Warning detail wins the
 single auxiliary rail when both surfaces have content. In a short viewport
-where the context sidecar cannot fit usefully, auxiliary rails retain their
-legacy 144/186 thresholds.
+where the context sidecar cannot fit usefully, or a full-height viewport where
+the complete bottom matrix fits, auxiliary rails use the 144/186 thresholds.
 
 When at least 14 final rows are available, location, astronomy, and air-quality
 cards stack in the left half of a centred 98-cell context matrix while the
 country map fills the right half. The cards grow together through two-, three-,
 four-, and five-field tiers at matrix heights 14, 17, 20, and 23; the map tracks
 the same height. At the supported 80-column width the inner matrix contracts to
-76 cells, leaving two viable 37-cell columns. In a sufficiently tall viewport
-of at least 144 columns, the same mounted widgets instead form a 40-cell
-right-hand sidecar. Location and astronomy remain above a larger bounded map;
-air quality is hidden in this narrow presentation and returns with the bottom
-matrix. The sidecar map limits itself to four ranked city labels. Its table and
-map heights are budgeted independently from the parallel forecast column.
+76 cells, leaving two viable 37-cell columns. In a viewport of at least 144
+columns, the same mounted widgets instead form a 40-cell right-hand sidecar
+when doing so saves rows. Location and astronomy remain above a larger bounded
+map; air quality is hidden in this narrow presentation. Once enough height
+exists for the complete five-field bottom matrix, that fuller presentation
+wins again and restores air quality even at full-screen widths. The sidecar map
+limits itself to four ranked city labels. Its table and map heights are
+budgeted independently from the parallel forecast column.
 Fields are admitted only in their documented priority order, and neither
 placement introduces page scrolling.
 Tropical systems are presented only in the dedicated workspace.

@@ -341,6 +341,7 @@ def weather_layout_for(
     context_sidecar = context_sidecar_eligible(
         viewport_width,
         viewport_height,
+        has_warnings=has_warnings,
         metrics=metrics,
     )
     (
@@ -633,12 +634,37 @@ def context_sidecar_eligible(
     viewport_width: int,
     viewport_height: int,
     *,
+    has_warnings: bool = False,
     metrics: LayoutMetrics = DEFAULT_LAYOUT_METRICS,
 ) -> bool:
-    """Return whether useful context fits beside the full forecast canvas."""
+    """Return whether context should move beside the full forecast canvas.
+
+    The sidecar is a height-saving presentation which omits air quality. Once
+    the viewport can show the complete five-row bottom matrix, retain that
+    fuller context presentation even when surplus width is available.
+    """
+
+    full_context_height = _row_cost(
+        warning_height=(metrics.warning_tabbed_rows if has_warnings else 0),
+        show_summary=True,
+        current_height=metrics.current_standard_rows,
+        hourly_row_count=len(_HOURLY_DISPLAY_ORDER),
+        daily_row_count=6,
+        context_height=(
+            metrics.context_card_count
+            * (
+                metrics.context_card_chrome_rows
+                + metrics.context_max_detail_rows
+            )
+            + (metrics.context_card_count - 1)
+            * metrics.context_card_gutter_rows
+        ),
+        metrics=metrics,
+    )
 
     return (
         int(viewport_width)
         >= metrics.minimum_central_width + metrics.sidebar_width
         and int(viewport_height) >= metrics.context_sidecar_min_viewport_height
+        and int(viewport_height) < full_context_height
     )
