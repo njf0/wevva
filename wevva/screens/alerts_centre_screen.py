@@ -13,8 +13,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.events import Resize
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
+    Button,
     Footer,
     Header,
     Input,
@@ -60,6 +61,143 @@ PlaceHourlyLoader = Callable[
 ]
 _PLACE_HOURLY_CACHE_TTL_SECONDS = 15 * 60
 _ALERT_AREA_LABEL_MAX_LENGTH = 24
+
+
+class AlertFilterDialog(ModalScreen[tuple[str, str, str] | None]):
+    """Edit the Alerts Centre's local metadata filter and ordering."""
+
+    BINDINGS = [Binding('escape', 'cancel', 'Cancel', show=False)]
+
+    DEFAULT_CSS = """
+    AlertFilterDialog {
+        align: center middle;
+        background: $background 70%;
+    }
+
+    #alerts-centre-filter-dialog {
+        width: 60;
+        max-width: 90%;
+        height: auto;
+        padding: 1 2;
+        border: round $primary;
+        border-title-color: $primary;
+        background: $panel;
+    }
+
+    #alerts-centre-filter-dialog Input,
+    #alerts-centre-filter-dialog Select {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #alerts-centre-filter-actions {
+        layout: horizontal;
+        width: 100%;
+        height: 3;
+        align-horizontal: center;
+    }
+
+    #alerts-centre-filter-actions Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(
+        self,
+        value: str,
+        severity_value: str,
+        severity_options: tuple[tuple[str, str], ...],
+        sort_value: str,
+    ) -> None:
+        super().__init__()
+        self.value = value
+        self.severity_value = severity_value
+        self.severity_options = severity_options
+        self.sort_value = sort_value
+
+    def compose(self) -> ComposeResult:
+        with Container(id='alerts-centre-filter-dialog') as dialog:
+            dialog.border_title = 'Filter alerts'
+            yield Input(
+                value=self.value,
+                placeholder='Condition, location, or source',
+                id='alerts-centre-filter-dialog-input',
+            )
+            yield Select(
+                options=[('All severities', ''), *self.severity_options],
+                value=self.severity_value,
+                allow_blank=False,
+                id='alerts-centre-filter-dialog-severity',
+            )
+            yield Select(
+                options=[
+                    ('Severity', 'severity'),
+                    ('New first', 'new'),
+                ],
+                value=self.sort_value,
+                allow_blank=False,
+                id='alerts-centre-filter-dialog-sort',
+            )
+            with Container(id='alerts-centre-filter-actions'):
+                yield Button('Clear', id='alerts-centre-filter-clear')
+                yield Button(
+                    'Apply',
+                    variant='primary',
+                    id='alerts-centre-filter-apply',
+                )
+                yield Button('Cancel', id='alerts-centre-filter-cancel')
+
+    def on_mount(self) -> None:
+        field = self.query_one('#alerts-centre-filter-dialog-input', Input)
+        field.focus()
+        field.cursor_position = len(field.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.dismiss(self._result(event.value))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == 'alerts-centre-filter-cancel':
+            self.dismiss(None)
+        elif event.button.id == 'alerts-centre-filter-clear':
+            self.dismiss(self._result('', clear_severity=True))
+        else:
+            self.dismiss(
+                self._result(
+                    self.query_one(
+                        '#alerts-centre-filter-dialog-input',
+                        Input,
+                    ).value
+                )
+            )
+
+    def _result(
+        self,
+        value: str,
+        *,
+        clear_severity: bool = False,
+    ) -> tuple[str, str, str]:
+        severity_value = self.query_one(
+            '#alerts-centre-filter-dialog-severity',
+            Select,
+        ).value
+        sort_value = self.query_one(
+            '#alerts-centre-filter-dialog-sort',
+            Select,
+        ).value
+        return (
+            value,
+            (
+                severity_value
+                if isinstance(severity_value, str) and not clear_severity
+                else ''
+            ),
+            sort_value if isinstance(sort_value, str) else 'severity',
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class AlertsCentreScreen(Screen[None]):
@@ -151,14 +289,14 @@ class AlertsCentreScreen(Screen[None]):
     }
 
     #alerts-centre-country-select,
-    #alerts-centre-sort-select,
-    #alerts-centre-filter-input {
+    #alerts-centre-filter-button {
         width: 100%;
+        min-width: 0;
         margin: 0;
     }
 
     #alerts-centre-country-select,
-    #alerts-centre-filter-input {
+    #alerts-centre-filter-button {
         margin-bottom: 1;
     }
 
@@ -267,13 +405,21 @@ class AlertsCentreScreen(Screen[None]):
     }
 
     #alerts-centre-root.tabbed #alerts-centre-country-select,
-    #alerts-centre-root.tabbed #alerts-centre-filter-input,
+    #alerts-centre-root.tabbed #alerts-centre-filter-button,
     #alerts-centre-root.single #alerts-centre-country-select {
         margin-bottom: 0;
     }
 
-    #alerts-centre-root.single #alerts-centre-filter-input {
+    #alerts-centre-root.single #alerts-centre-filter-button {
         margin-bottom: 0;
+    }
+
+    #alerts-centre-root.tabbed #alerts-centre-filter-button,
+    #alerts-centre-root.single #alerts-centre-filter-button {
+        height: 1;
+        min-height: 1;
+        padding: 0;
+        border: none;
     }
 
     #alerts-centre-root.tabbed #alerts-centre-map-pane,
@@ -336,6 +482,9 @@ class AlertsCentreScreen(Screen[None]):
         self.place_forecast_state = 'idle'
         self.place_forecast_error: Exception | None = None
         self._place_forecast_retained_height = 0
+        self.alert_filter_value = ''
+        self.alert_severity_filter = ''
+        self.alert_sort_value = 'severity'
         self.selected_country_code: str | None = None
         self.alerts: list[Alert] = []
         self.filtered_alerts: list[Alert] = []
@@ -374,20 +523,10 @@ class AlertsCentreScreen(Screen[None]):
                         allow_blank=True,
                         id='alerts-centre-country-select',
                     )
-                    yield Input(
-                        placeholder='Filter alerts',
-                        id='alerts-centre-filter-input',
-                        disabled=True,
-                    )
-                    yield Select(
-                        options=[
-                            ('Severity', 'severity'),
-                            ('New first', 'new'),
-                        ],
-                        value='severity',
-                        allow_blank=False,
-                        id='alerts-centre-sort-select',
-                        disabled=True,
+                    yield Button(
+                        'Filter alerts',
+                        variant='primary',
+                        id='alerts-centre-filter-button',
                     )
                     yield Static(
                         'Select a country to view alerts',
@@ -415,7 +554,7 @@ class AlertsCentreScreen(Screen[None]):
                                 id='alerts-centre-place-forecast'
                             )
                         with Container(id='alerts-centre-document-pane') as document_pane:
-                            document_pane.border_title = 'Selected alert'
+                            document_pane.border_title = 'Alert Detail'
                             yield Static(
                                 'Select an alert to view detailed information',
                                 id='alerts-centre-document-empty',
@@ -433,12 +572,8 @@ class AlertsCentreScreen(Screen[None]):
         return self.query_one('#alerts-centre-country-select', Select)
 
     @property
-    def alert_filter(self) -> Input:
-        return self.query_one('#alerts-centre-filter-input', Input)
-
-    @property
-    def alert_sort(self) -> Select[str]:
-        return self.query_one('#alerts-centre-sort-select', Select)
+    def alert_filter_button(self) -> Button:
+        return self.query_one('#alerts-centre-filter-button', Button)
 
     @property
     def alert_list(self) -> OptionList:
@@ -538,8 +673,6 @@ class AlertsCentreScreen(Screen[None]):
             AlertsCentrePresentation.SINGLE,
         }
         self.country_select.compact = compact_controls
-        self.alert_filter.compact = compact_controls
-        self.alert_sort.compact = compact_controls
         self.country_map.set_max_city_labels(budget.settlement_label_limit)
         self.place_forecast.set_layout(
             budget.place_forecast_height,
@@ -596,9 +729,38 @@ class AlertsCentreScreen(Screen[None]):
             self.countries[0].code if self.countries else None,
         )
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == 'alerts-centre-filter-input':
-            self._apply_alert_filter(event.value)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id != 'alerts-centre-filter-button':
+            return
+        event.stop()
+        severity_options = _alert_severity_options(self.alerts)
+        available_severities = {value for _, value in severity_options}
+        if self.alert_severity_filter not in available_severities:
+            self.alert_severity_filter = ''
+        self.app.push_screen(
+            AlertFilterDialog(
+                self.alert_filter_value,
+                self.alert_severity_filter,
+                severity_options,
+                self.alert_sort_value,
+            ),
+            callback=self._on_alert_filter_result,
+        )
+
+    def _on_alert_filter_result(
+        self,
+        result: tuple[str, str, str] | None,
+    ) -> None:
+        if result is None:
+            return
+        value, severity_value, sort_value = result
+        self.alert_filter_value = value
+        self.alert_severity_filter = severity_value
+        self.alert_sort_value = sort_value
+        self._apply_alert_filter(
+            value,
+            preferred_key=self.selected_alert_key,
+        )
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if (
@@ -607,11 +769,6 @@ class AlertsCentreScreen(Screen[None]):
             and event.value != self.selected_country_code
         ):
             self._choose_country(event.value)
-        elif event.select.id == 'alerts-centre-sort-select' and not self.alert_sort.disabled and self.alert_list.display:
-            self._apply_alert_filter(
-                self.alert_filter.value,
-                preferred_key=self.selected_alert_key,
-            )
 
     def on_option_list_option_selected(
         self,
@@ -646,7 +803,7 @@ class AlertsCentreScreen(Screen[None]):
             self.country_select.value = country.code
         if previous_country != country.code:
             self._clear_selected_settlement()
-            self.alert_filter.value = country_alert_default_filter(
+            self.alert_filter_value = country_alert_default_filter(
                 country.code,
                 country.name,
             )
@@ -680,8 +837,7 @@ class AlertsCentreScreen(Screen[None]):
                 country,
                 (),
             )
-        self.alert_filter.disabled = True
-        self.alert_sort.disabled = True
+        self.alert_filter_button.disabled = True
         self._show_alert_list_progress()
         self._load_task = asyncio.create_task(self._load_country(self.selected_country_code, generation, refresh=refresh))
 
@@ -705,8 +861,7 @@ class AlertsCentreScreen(Screen[None]):
         except Exception:
             if not self._request_is_current(generation, country_code):
                 return
-            self.alert_filter.disabled = False
-            self.alert_sort.disabled = False
+            self.alert_filter_button.disabled = False
             self._show_alert_list_state('Alerts are temporarily unavailable. Press r to retry.')
             return
         finally:
@@ -717,6 +872,10 @@ class AlertsCentreScreen(Screen[None]):
             return
         previous_key = self.selected_alert_key
         self.alerts = list(alerts)
+        if self.alert_severity_filter not in {
+            value for _, value in _alert_severity_options(self.alerts)
+        }:
+            self.alert_severity_filter = ''
         new_alert_identities = getattr(
             self.service,
             'new_alert_identities',
@@ -740,9 +899,11 @@ class AlertsCentreScreen(Screen[None]):
         )
         if self.selected_place is not None and not self._selected_place_is_available():
             self._clear_selected_settlement()
-        self.alert_filter.disabled = False
-        self.alert_sort.disabled = False
-        self._apply_alert_filter(self.alert_filter.value, preferred_key=previous_key)
+        self.alert_filter_button.disabled = False
+        self._apply_alert_filter(
+            self.alert_filter_value,
+            preferred_key=previous_key,
+        )
 
     def _progress_callback(
         self,
@@ -817,9 +978,19 @@ class AlertsCentreScreen(Screen[None]):
     ) -> None:
         normalized_query = ' '.join(query.casefold().split())
         self.filtered_alerts = [
-            alert for alert in self.alerts if not normalized_query or normalized_query in _alert_search_text(alert)
+            alert
+            for alert in self.alerts
+            if (
+                not self.alert_severity_filter
+                or (alert.severity or '').strip().casefold()
+                == self.alert_severity_filter
+            )
+            and (
+                not normalized_query
+                or normalized_query in _alert_search_text(alert)
+            )
         ]
-        if self.alert_sort.value == 'new':
+        if self.alert_sort_value == 'new':
             self.filtered_alerts.sort(key=lambda alert: country_alert_identity(alert) not in self.new_alert_keys)
         current_key = preferred_key or self.selected_alert_key
         selected = next(
@@ -881,7 +1052,7 @@ class AlertsCentreScreen(Screen[None]):
         self.details.content.update(alert_renderable(alert, include_timing=True))
         self.details.scroll_home(animate=False)
         pane = self.query_one('#alerts-centre-document-pane', Container)
-        pane.border_title = alert_condition_name(alert)
+        pane.border_title = 'Alert Detail'
         color = alert_severity_color(self.app.theme_variables, alert)
         frame_color = color or self.app.theme_variables.get('primary', '#0178d4')
         pane.set_styles(f'border: round {frame_color}; border-title-color: {frame_color};')
@@ -896,7 +1067,7 @@ class AlertsCentreScreen(Screen[None]):
         empty.display = True
         empty.update('Select an alert to view detailed information')
         pane = self.query_one('#alerts-centre-document-pane', Container)
-        pane.border_title = 'Selected alert'
+        pane.border_title = 'Alert Detail'
         primary = self.app.theme_variables.get('primary', '#0178d4')
         pane.set_styles(f'border: round {primary}; border-title-color: {primary};')
 
@@ -1206,10 +1377,24 @@ def _place_hourly_cache_key(
     )
 
 
+def _alert_severity_options(
+    alerts: list[Alert],
+) -> tuple[tuple[str, str], ...]:
+    options: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for alert in alerts:
+        label = (alert.severity or '').strip()
+        value = label.casefold()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        options.append((label, value))
+    return tuple(options)
+
+
 def _alert_search_text(alert: Alert) -> str:
     source_name = getattr(alert.source_info, 'name', None) or ''
     fields = (
-        alert.severity,
         alert_condition_name(alert),
         alert.event,
         alert.headline,

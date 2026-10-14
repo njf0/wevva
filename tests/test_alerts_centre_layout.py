@@ -182,15 +182,18 @@ class AlertsCentreResponsiveScreenTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(screen._presentation, AlertsCentrePresentation.TABBED)
             self.assertTrue(screen.country_select.compact)
-            self.assertTrue(screen.alert_filter.compact)
-            self.assertTrue(screen.alert_sort.compact)
             self.assertEqual(screen.country_select.region.height, 1)
-            self.assertEqual(screen.alert_filter.region.height, 1)
-            self.assertEqual(screen.alert_sort.region.height, 1)
+            self.assertEqual(screen.alert_filter_button.region.height, 1)
+            self.assertEqual(screen.alert_filter_button.variant, 'primary')
             self.assertEqual(screen.country_map.max_city_labels, 2)
             self.assertEqual(
                 screen.selected_alert_key,
                 ('fixture', 'responsive-warning'),
+            )
+            self.assertEqual(document.border_title, 'Alert Detail')
+            self.assertEqual(
+                screen.country_map.border_title,
+                'Map of Alerts for Germany',
             )
             self.assertTrue(navigation.display)
             self.assertTrue(map_pane.display)
@@ -221,8 +224,6 @@ class AlertsCentreResponsiveScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(map_pane.display)
             self.assertTrue(document.display)
             self.assertFalse(screen.country_select.compact)
-            self.assertFalse(screen.alert_filter.compact)
-            self.assertFalse(screen.alert_sort.compact)
             self.assertEqual(screen.country_map.max_city_labels, 8)
             self.assertEqual(navigation.region.width, document.region.width)
             self.assertIsNotNone(

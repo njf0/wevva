@@ -323,6 +323,7 @@ class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             )
             for _ in range(3):
                 await pilot.pause()
+            self.assertEqual(widget.border_title, 'Map of Alerts for Germany')
             geometry = widget.geometry
             assert geometry is not None
             widget.update_selected_alert(('fixture', 'wind'))

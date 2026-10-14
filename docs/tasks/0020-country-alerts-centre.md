@@ -55,7 +55,7 @@ local alert refresh untouched.
 ```text
 ┌─ Alert navigation ─┬─ Country warning map ─┬─ Selected alert ─┐
 │ Country select     │                       │ full provider     │
-│ Alert filter       │ country outline       │ document          │
+│ Filter button      │ country outline       │ document          │
 │ Sort select        │ warning polygons      │ independently     │
 │ severity/event/    │ focused settlements   │ scrollable        │
 │ short area list    │ hourly forecast strip │                    │
@@ -102,9 +102,13 @@ otherwise use the last in-session selection or the first supported option. A
 country change cancels or supersedes the prior request and clears no newer
 result.
 
-A second `Input` filters the already loaded alerts locally. Search across:
+A primary `Filter alerts` button opens a small modal containing the text filter,
+a severity filter populated only with severities in the selected country's
+loaded alerts, and the `Severity`/`New first` ordering select. Apply/Enter
+commits all three, Clear removes the text and severity filters while retaining
+the selected ordering, and Cancel/Escape retains the previous values. Search
+text across:
 
-- severity;
 - normalized condition/event;
 - headline;
 - `area_names`;
@@ -137,7 +141,7 @@ Accra and Tema
 - Never derive a location label by parsing arbitrary warning prose.
 - Sort strongest severity first, then the most immediate onset/expiry, then a
   stable condition/area/id tie-breaker.
-- Offer `Severity` and `New first` local sort modes. Newly observed identities
+- Offer `Severity` and `New first` local sort modes in the filter modal. Newly observed identities
   retain their underlying severity order within the latter mode.
 - Mark identities added since the preceding successful fresh country/language
   fetch with a compact `NEW` badge on the primary background. Cache hits retain
@@ -403,8 +407,9 @@ responsive topology changes, and a refresh when it remains present.
 ### Post-implementation UI refinement
 
 - Complete: replaced the country input/list pair with one native `Select`,
-  retained the severity/location alert filter, and removed provider-count and
-  coverage-copy clutter from the navigation pane.
+  moved the text and severity alert filters and alert ordering select behind a
+  primary `Filter alerts` button and modal, and removed provider-count and coverage-copy clutter from
+  the navigation pane.
 - Complete: warning rows now use a bold coloured severity plus regular
   condition on line one and one 24-character ellipsized provider-area line
   below it.

@@ -420,7 +420,7 @@ class CountryAlertsMap(Container):
 
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
-        self.border_title = 'Country warning map'
+        self.border_title = 'Map of Alerts'
         self._country_code = ''
         self._country_name = ''
         self._alerts: tuple[Alert, ...] = ()
@@ -477,7 +477,7 @@ class CountryAlertsMap(Container):
         self._alerts = tuple(alerts)
         self._selected_alert_key = selected_alert_key
         self._rebuild_view()
-        self.border_title = f'{self._country_name} warning map'
+        self.border_title = f'Map of Alerts for {self._country_name}'
         if self.is_mounted:
             self._sync_label_widgets()
         self.refresh()
@@ -509,7 +509,7 @@ class CountryAlertsMap(Container):
         self._selected_alert_key = None
         self._placements = {}
         self.border_title = (
-            f'{country_name} warning map' if country_name else 'Country warning map'
+            f'Map of Alerts for {country_name}' if country_name else 'Map of Alerts'
         )
         if self.is_mounted:
             self._sync_label_widgets()

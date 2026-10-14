@@ -232,7 +232,9 @@ Tropical systems are presented only in the dedicated workspace.
 
 The Alerts Centre implementation lives in
 `wevva/screens/alerts_centre_screen.py`. It supplies the type-searchable
-supported-country select, local metadata search, severity/new-first ordering,
+supported-country select, and a primary button opening the local metadata-filter
+modal containing a country-alert-derived severity filter and severity/new-first
+ordering,
 a concise strongest-first warning list, inline states, stale country-request
 protection, and the shared full provider-document presentation. Its
 `CountryAlertsMap` centre pane

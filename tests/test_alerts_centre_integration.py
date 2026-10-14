@@ -6,9 +6,11 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from textual.widgets import Input, Select
+
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
-from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
 from wevva.screens.weather_screen import WeatherScreen
 from tests.weather_fixtures import hourly_forecast
 
@@ -58,17 +60,68 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIs(app.screen, weather_screen)
             self.assertTrue(alerts_screen.is_mounted)
-            filter_widget = alerts_screen.alert_filter
+            filter_button = alerts_screen.alert_filter_button
 
             await pilot.press('g')
             for _ in range(2):
                 await pilot.pause()
             self.assertIs(app.screen, alerts_screen)
-            self.assertIs(alerts_screen.alert_filter, filter_widget)
-            filter_widget.focus()
-            await pilot.press('x')
+            self.assertIs(alerts_screen.alert_filter_button, filter_button)
+            filter_button.focus()
+            await pilot.press('enter')
             await pilot.pause()
-            self.assertEqual(filter_widget.value, 'x')
+            self.assertIsInstance(app.screen, AlertFilterDialog)
+            field = app.screen.query_one(
+                '#alerts-centre-filter-dialog-input',
+                Input,
+            )
+            self.assertEqual(field.value, '')
+            self.assertEqual(field.placeholder, 'Condition, location, or source')
+            severity_select = app.screen.query_one(
+                '#alerts-centre-filter-dialog-severity',
+                Select,
+            )
+            self.assertEqual(severity_select.value, '')
+            sort_select = app.screen.query_one(
+                '#alerts-centre-filter-dialog-sort',
+                Select,
+            )
+            self.assertEqual(sort_select.value, 'severity')
+            self.assertEqual(
+                len(alerts_screen.query('#alerts-centre-sort-select')),
+                0,
+            )
+            await pilot.press('x', 'enter')
+            await pilot.pause()
+            self.assertIs(app.screen, alerts_screen)
+            self.assertEqual(alerts_screen.alert_filter_value, 'x')
+
+            filter_button.focus()
+            await pilot.press('enter')
+            await pilot.pause()
+            self.assertEqual(
+                app.screen.query_one(
+                    '#alerts-centre-filter-dialog-input',
+                    Input,
+                ).value,
+                'x',
+            )
+            await pilot.press('escape')
+            await pilot.pause()
+            self.assertEqual(alerts_screen.alert_filter_value, 'x')
+
+            filter_button.focus()
+            await pilot.press('enter')
+            await pilot.pause()
+            app.screen.query_one(
+                '#alerts-centre-filter-dialog-sort',
+                Select,
+            ).value = 'new'
+            await pilot.click('#alerts-centre-filter-clear')
+            await pilot.pause()
+            self.assertIs(app.screen, alerts_screen)
+            self.assertEqual(alerts_screen.alert_filter_value, '')
+            self.assertEqual(alerts_screen.alert_sort_value, 'new')
 
     async def test_late_provider_progress_does_not_block_reopening_workspace(self) -> None:
         class LingeringProgressService:

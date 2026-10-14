@@ -11,10 +11,10 @@ from unittest.mock import patch
 from rich.console import Console
 from textual.app import App
 from textual.containers import Container
-from textual.widgets import ProgressBar, Static
+from textual.widgets import ProgressBar, Select, Static
 from wevva_warnings import Alert, WarningSource
 
-from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry
 
 
@@ -260,22 +260,41 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(screen.alert_list.get_option_at_index(0)._divider)
             self.assertFalse(screen.alert_list.get_option_at_index(1)._divider)
 
-            screen.alert_filter.value = 'north district'
+            screen.alert_filter_button.focus()
+            await pilot.press('enter')
+            await pilot.pause()
+            self.assertIsInstance(app.screen, AlertFilterDialog)
+            severity_select = app.screen.query_one(
+                '#alerts-centre-filter-dialog-severity',
+                Select,
+            )
+            self.assertEqual(
+                severity_select._options,
+                [
+                    ('All severities', ''),
+                    ('Severe', 'severe'),
+                    ('Moderate', 'moderate'),
+                ],
+            )
+            await pilot.press('escape')
+            await pilot.pause()
+
+            screen._on_alert_filter_result(('north district', '', 'severity'))
             await pilot.pause()
             self.assertEqual([alert.id for alert in screen.filtered_alerts], ['flood'])
 
-            screen.alert_filter.value = 'moderate'
+            screen._on_alert_filter_result(('', 'moderate', 'severity'))
             await pilot.pause()
             self.assertEqual([alert.id for alert in screen.filtered_alerts], ['wind'])
 
-            screen.alert_filter.value = 'likely'
+            screen._on_alert_filter_result(('likely', 'moderate', 'severity'))
             await pilot.pause()
             self.assertEqual([alert.id for alert in screen.filtered_alerts], ['wind'])
             self.assertEqual(screen.selected_alert_key, ('fixture-source', 'wind'))
             self.assertIn('Strong winds expected', _rendered(screen.details.content))
             self.assertEqual(service.calls, [('DE', False)])
 
-            screen.alert_filter.value = 'not-present'
+            screen._on_alert_filter_result(('not-present', '', 'severity'))
             await pilot.pause()
             empty = screen.query_one('#alerts-centre-list-empty', Static)
             self.assertTrue(empty.display)
@@ -309,7 +328,7 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
 
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
-            self.assertEqual(screen.alert_sort.value, 'severity')
+            self.assertEqual(screen.alert_sort_value, 'severity')
             self.assertEqual(
                 [alert.id for alert in screen.filtered_alerts],
                 ['flood', 'wind'],
@@ -321,7 +340,13 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn('on ', str(new_prompt.spans[0].style))
 
-            screen.alert_sort.value = 'new'
+            screen._on_alert_filter_result(
+                (
+                    screen.alert_filter_value,
+                    screen.alert_severity_filter,
+                    'new',
+                )
+            )
             await pilot.pause()
             self.assertEqual(
                 [alert.id for alert in screen.filtered_alerts],
@@ -360,7 +385,7 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
         ):
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                self.assertEqual(screen.alert_filter.value, 'Guam')
+                self.assertEqual(screen.alert_filter_value, 'Guam')
                 self.assertEqual(
                     [alert.id for alert in screen.filtered_alerts],
                     ['guam-wind'],
