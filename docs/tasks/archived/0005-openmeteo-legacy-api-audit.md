@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. The undocumented instance fetch methods were broken and
+unused, so they and their private-only helpers were removed.
 
 ## Context
 
@@ -74,4 +75,12 @@ important than removing dead code.
 
 ## Outcome
 
-To be completed when the task is finished.
+Repository code, README, and documentation had no caller or documented use of
+`fetch_and_parse_forecast()`. The method also depended on a nonexistent
+`self.fetch()` and did not honor its return annotation, so the compatibility
+decision was to remove it from all three exported model classes rather than
+preserve a nonfunctional path. `_get_metadata()` and `_get_units()` and their
+now-unused typing imports were removed with it; the supported service and
+public API fetch paths remain unchanged.
+
+Focused model tests, source compilation, and the complete 286-test suite pass.

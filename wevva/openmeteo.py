@@ -6,7 +6,7 @@ current, hourly, and daily views.
 
 from datetime import datetime
 from collections.abc import Sequence
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from zoneinfo import ZoneInfo
@@ -336,34 +336,21 @@ class OpenMeteoForecast:
         """Extract units dict from API response, returning as-is."""
         return response.get(f'{key}_units', {})
 
-    def _get_metadata(
-        self,
-        response: dict,
-    ) -> LocationMetadata:
-        """Store metadata (latitude, longitude, elevation, timezone)."""
-        self.forecast_metadata = LocationMetadata(
-            latitude=response.get('latitude'),
-            longitude=response.get('longitude'),
-            elevation=int(response.get('elevation', 0)) if response.get('elevation') is not None else None,
-            timezone=response.get('timezone') or '',
-            timezone_abbreviation=response.get('timezone_abbreviation') or '',
-        )
-        return self.forecast_metadata
-
-    def _get_units(
-        self,
-        response: dict,
-        key: str,
-    ) -> Dict[str, str]:
-        """Store units for the forecast variables (hourly/daily/etc)."""
-        units = response.get(f'{key}_units', {})
-        self.forecast_units.update(units)
-
-    def get_point(self, offset: int = 0) -> Optional[Dict[str, Any]]:
-        """Get a point from the timeseries (0 = first)."""
+    def get_point(self, offset: int = 0) -> dict[str, Any] | None:
+        """Return a timeseries point, or ``None`` when the offset is invalid."""
         if 0 <= offset < len(self.forecast_timeseries):
             return self.forecast_timeseries[offset]
         return None
+
+    def _get_value(self, key: str, offset: int = 0) -> Any | None:
+        """Return a point value, or ``None`` for a missing point or value."""
+        point = self.get_point(offset)
+        return point.get(key) if point is not None else None
+
+    def _get_rounded_value(self, key: str, offset: int = 0) -> float | None:
+        """Return a rounded point value while preserving missing-value semantics."""
+        value = self._get_value(key, offset)
+        return round(value) if value is not None else None
 
 
 class CurrentOpenMeteoForecast(OpenMeteoForecast):
@@ -391,71 +378,53 @@ class CurrentOpenMeteoForecast(OpenMeteoForecast):
             result[0][key] = processed_value
         self.forecast_timeseries = result
 
-    def fetch_and_parse_forecast(
-        self,
-    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, str]]:
-        """Fetch and return (metadata, timeseries, units dict) as a tuple."""
-        # Fetch the full API response
-        full_api_response = self.fetch()
-
-        # Set metadata by supplying the full response
-        self._get_metadata(full_api_response)
-
-        # Parse and store units by supplying the 'daily' section
-        self._get_units(full_api_response, 'current')
-
-        # Parse timeseries by supplying the full response
-        self._get_timeseries(full_api_response)
-
     def get_time(self) -> str:
         """Get the time of the current weather observation."""
-        t = self.forecast_timeseries[0].get('time')
+        t = self._get_value('time')
         if isinstance(t, str):
             t = datetime.fromisoformat(t)
         return t.isoformat() if t else ''
 
     def get_temperature(self) -> float | None:
         """Get air temperature at 2m."""
-        return round(self.forecast_timeseries[0].get('temperature_2m'))
+        return self._get_rounded_value('temperature_2m')
 
     def get_feels_like(self) -> float | None:
         """Get apparent temperature (feels like)."""
-        return round(self.forecast_timeseries[0].get('apparent_temperature'))
+        return self._get_rounded_value('apparent_temperature')
 
     def get_humidity(self) -> float | None:
         """Get relative humidity at 2m."""
-        return round(self.forecast_timeseries[0].get('relative_humidity_2m'))
+        return self._get_rounded_value('relative_humidity_2m')
 
     def get_wind_speed(self) -> float | None:
         """Get wind speed at 10m in the configured API unit."""
-        ws = self.forecast_timeseries[0].get('wind_speed_10m')
-        return round(ws) if ws is not None else None
+        return self._get_rounded_value('wind_speed_10m')
 
     def get_wind_gust(self) -> float | None:
         """Get wind gusts at 10m in the configured API unit."""
-        gust = self.forecast_timeseries[0].get('wind_gusts_10m')
-        return round(gust) if gust is not None else None
+        return self._get_rounded_value('wind_gusts_10m')
 
     def get_wind_direction(self) -> float | None:
         """Get wind direction at 10m (degrees, may not be present)."""
-        return self.forecast_timeseries[0].get('wind_direction_10m')
+        return self._get_value('wind_direction_10m')
 
     def get_pressure(self) -> float | None:
         """Get surface pressure (may not be present)."""
-        return round(self.forecast_timeseries[0].get('surface_pressure'))
+        return self._get_rounded_value('surface_pressure')
 
     def get_precipitation(self) -> float | None:
         """Get precipitation (mm or %, may not be present)."""
-        return self.forecast_timeseries[0].get('precipitation')
+        return self._get_value('precipitation')
 
     def get_condition(self) -> str:
         """Get weather code or description (not always present in current endpoint)."""
-        code = self.forecast_timeseries[0].get('weather_code')
+        code = self._get_value('weather_code')
         return str(code) if code is not None else ''
 
     def get_is_day(self) -> int | None:
         """Get is_day flag (1 for day, 0 for night, may not be present)."""
-        return self.forecast_timeseries[0].get('is_day')
+        return self._get_value('is_day')
 
 
 class HourlyOpenMeteoForecast(OpenMeteoForecast):
@@ -470,7 +439,7 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
         if not ts:
             self.forecast_timeseries = []
             return
-        times = ts.get('time', [])
+        times = ts['time']
         variables = list(ts.keys())
         tz_name = self.forecast_metadata.timezone
         tzinfo = ZoneInfo(tz_name)
@@ -504,105 +473,81 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
             result.append(entry)
         self.forecast_timeseries = result
 
-    def fetch_and_parse_forecast(
-        self,
-    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, str]]:
-        """Fetch and return (metadata, timeseries, units dict) as a tuple."""
-        # Fetch the full API response
-        full_api_response = self.fetch()
-
-        # Set metadata by supplying the full response
-        self._get_metadata(full_api_response)
-
-        # Parse and store units by supplying the 'hourly' section
-        self._get_units(full_api_response, 'hourly')
-
-        # Parse timeseries by supplying the full response
-        self._get_timeseries(full_api_response)
-
     def get_temperature(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('temperature_2m')
+        return self._get_value('temperature_2m', offset)
 
     def get_humidity(self, offset: int = 0) -> float | None:
         """Get relative humidity at 2m for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('relative_humidity_2m'))
+        return self._get_rounded_value('relative_humidity_2m', offset)
 
     def get_feels_temperature(self, offset: int = 0) -> float | None:
         """Get apparent temperature at 2m for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('apparent_temperature'))
+        return self._get_rounded_value('apparent_temperature', offset)
 
     def get_precipitation_probability(self, offset: int = 0) -> float | None:
         """Get precipitation probability for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('precipitation_probability'))
+        return self._get_rounded_value('precipitation_probability', offset)
 
     def get_precipitation(self, offset: int = 0) -> float | None:
         """Get precipitation for a given hour."""
-        point = self.get_point(offset)
-        return point.get('precipitation')
+        return self._get_value('precipitation', offset)
 
     def get_rain(self, offset: int = 0) -> float | None:
         """Get rain amount for a given hour."""
-        point = self.get_point(offset)
-        return point.get('rain')
+        return self._get_value('rain', offset)
 
     def get_showers(self, offset: int = 0) -> float | None:
         """Get showers amount for a given hour."""
-        point = self.get_point(offset)
-        return point.get('showers')
+        return self._get_value('showers', offset)
 
     def get_snowfall(self, offset: int = 0) -> float | None:
         """Get snowfall amount for a given hour."""
-        point = self.get_point(offset)
-        return point.get('snowfall')
+        return self._get_value('snowfall', offset)
 
     def get_weather_code(self, offset: int = 0, return_emoji: bool = False) -> str:
         """Get weather code for a given hour."""
-        point = self.get_point(offset)
-        code = point.get('weather_code')
+        code = self._get_value('weather_code', offset)
+        if code is None:
+            return ''
         cond = get_condition(code) if code is not None else None
         if not cond:
             return str(code)
         if return_emoji:
             # Prefer precomputed emoji (set during parsing), fall back to cond + is_day
-            return point.get('weather_emoji') or (cond.night_emoji if point.get('is_day') == 0 else cond.day_emoji)
+            return self._get_value('weather_emoji', offset) or (
+                cond.night_emoji if self._get_value('is_day', offset) == 0 else cond.day_emoji
+            )
         return cond.name
 
     # New helpers for abbreviation/emoji
     def get_condition_abbreviation(self, offset: int = 0) -> str:
-        point = self.get_point(offset)
-        code = point.get('weather_code')
+        code = self._get_value('weather_code', offset)
+        if code is None:
+            return ''
         cond = get_condition(code) if code is not None else None
         return cond.abbr if cond else str(code)
 
     def get_condition_emoji(self, offset: int = 0) -> str:
-        point = self.get_point(offset)
-        code = point.get('weather_code')
+        code = self._get_value('weather_code', offset)
         cond = get_condition(code) if code is not None else None
         if not cond:
             return ''
         # Prefer precomputed emoji (set during parsing)
-        return point.get('weather_emoji') or (cond.night_emoji if point.get('is_day') == 0 else cond.day_emoji)
+        return self._get_value('weather_emoji', offset) or (
+            cond.night_emoji if self._get_value('is_day', offset) == 0 else cond.day_emoji
+        )
 
     def get_surface_pressure(self, offset: int = 0) -> float | None:
         """Get surface pressure for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('surface_pressure'))
+        return self._get_rounded_value('surface_pressure', offset)
 
     def get_cloud_cover(self, offset: int = 0) -> float | None:
         """Get cloud cover for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('cloud_cover'))
+        return self._get_rounded_value('cloud_cover', offset)
 
     def get_visibility(self, offset: int = 0) -> float | None:
         """Get visibility for a given hour."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        vis = point.get('visibility')
+        vis = self._get_value('visibility', offset)
         if vis is None:
             return None
         # Open-Meteo returns visibility in meters; we display rounded kilometers.
@@ -611,47 +556,38 @@ class HourlyOpenMeteoForecast(OpenMeteoForecast):
 
     def get_wind_speed(self, offset: int = 0) -> float | None:
         """Get wind speed at 10m for a given hour in the configured API unit."""
-        point = self.get_point(offset)
-        return point.get('wind_speed_10m')
+        return self._get_value('wind_speed_10m', offset)
 
     def get_wind_gust(self, offset: int = 0) -> float | None:
         """Get wind gusts at 10m for a given hour in the configured API unit."""
-        point = self.get_point(offset)
-        return round(point.get('wind_gusts_10m'))
+        return self._get_rounded_value('wind_gusts_10m', offset)
 
-    def get_wind_direction(self, offset: int = 0) -> float | None:
+    def get_wind_direction(self, offset: int = 0) -> str | None:
         """Get wind direction at 10m for a given hour."""
-        point = self.get_point(offset)
-        return bearing_to_direction(point.get('wind_direction_10m'))
+        bearing = self._get_value('wind_direction_10m', offset)
+        return bearing_to_direction(bearing) if bearing is not None else None
 
     def get_uv_index(self, offset: int = 0) -> float | None:
         """Get UV index for a given hour."""
-        point = self.get_point(offset)
-        return round(point.get('uv_index'))
+        return self._get_rounded_value('uv_index', offset)
 
     def get_us_aqi(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('us_aqi')
+        return self._get_value('us_aqi', offset)
 
     def get_european_aqi(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('european_aqi')
+        return self._get_value('european_aqi', offset)
 
     def get_pm2_5(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('pm2_5')
+        return self._get_value('pm2_5', offset)
 
     def get_pm10(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('pm10')
+        return self._get_value('pm10', offset)
 
     def get_ozone(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('ozone')
+        return self._get_value('ozone', offset)
 
     def get_grass_pollen(self, offset: int = 0) -> float | None:
-        point = self.get_point(offset)
-        return point.get('grass_pollen')
+        return self._get_value('grass_pollen', offset)
 
 
 class DailyOpenMeteoForecast(OpenMeteoForecast):
@@ -666,7 +602,7 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         if not ts:
             self.forecast_timeseries = []
             return
-        times = ts.get('time', [])
+        times = ts['time']
         variables = list(ts.keys())
 
         result = []
@@ -680,52 +616,27 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
             result.append(entry)
         self.forecast_timeseries = result
 
-    def fetch_and_parse_forecast(
-        self,
-    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, str]]:
-        """Fetch and return (metadata, timeseries, units dict) as a tuple."""
-        # Fetch the full API response
-        full_api_response = self.fetch()
-
-        # Set metadata by supplying the full response
-        self._get_metadata(full_api_response)
-
-        # Parse and store units by supplying the 'daily' section
-        self._get_units(full_api_response, 'daily')
-
-        # Parse timeseries by supplying the full response
-        self._get_timeseries(full_api_response)
-
     def get_temperature_min(self, offset: int = 0) -> float | None:
         """Get minimum 2m temperature for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('temperature_2m_min')
+        return self._get_value('temperature_2m_min', offset)
 
     def get_temperature_max(self, offset: int = 0) -> float | None:
         """Get maximum 2m temperature for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('temperature_2m_max')
+        return self._get_value('temperature_2m_max', offset)
 
     def get_precipitation(self, offset: int = 0) -> float | None:
         """Get precipitation sum for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('precipitation_sum')
+        return self._get_value('precipitation_sum', offset)
 
     def get_precipitation_probability(self, offset: int = 0) -> float | None:
         """Get precipitation probability for a given day (not always present)."""
-        point = self.get_point(offset)
-        return round(point.get('precipitation_probability_max'))
+        return self._get_rounded_value('precipitation_probability_max', offset)
 
     def get_weather_code(self, offset: int = 0, return_emoji: bool = False) -> str:
         """Get weather code for a given day."""
-        point = self.get_point(offset)
-        code = point.get('weather_code')
+        code = self._get_value('weather_code', offset)
+        if code is None:
+            return ''
         cond = get_condition(code) if code is not None else None
         if not cond:
             return str(code)
@@ -734,49 +645,33 @@ class DailyOpenMeteoForecast(OpenMeteoForecast):
         return cond.name
 
     def get_condition_abbreviation(self, offset: int = 0) -> str:
-        point = self.get_point(offset)
-        code = point.get('weather_code')
+        code = self._get_value('weather_code', offset)
+        if code is None:
+            return ''
         cond = get_condition(code) if code is not None else None
         return cond.abbr if cond else str(code)
 
     def get_wind_speed(self, offset: int = 0) -> float | None:
         """Get max wind speed at 10m for a given day in the configured API unit."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('wind_speed_10m_max')
+        return self._get_value('wind_speed_10m_max', offset)
 
     def get_wind_gust(self, offset: int = 0) -> float | None:
         """Get max wind gusts at 10m for a given day in the configured API unit."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('wind_gusts_10m_max')
+        return self._get_value('wind_gusts_10m_max', offset)
 
-    def get_wind_direction(self, offset: int = 0) -> float | None:
+    def get_wind_direction(self, offset: int = 0) -> str | None:
         """Get dominant wind direction at 10m for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return bearing_to_direction(point.get('wind_direction_10m_dominant'))
+        bearing = self._get_value('wind_direction_10m_dominant', offset)
+        return bearing_to_direction(bearing) if bearing is not None else None
 
-    def get_sunrise(self, offset: int = 0) -> Optional[str]:
+    def get_sunrise(self, offset: int = 0) -> datetime | None:
         """Get sunrise time for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('sunrise')
+        return self._get_value('sunrise', offset)
 
-    def get_sunset(self, offset: int = 0) -> Optional[str]:
+    def get_sunset(self, offset: int = 0) -> datetime | None:
         """Get sunset time for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('sunset')
+        return self._get_value('sunset', offset)
 
-    def get_daylight_duration(self, offset: int = 0) -> Optional[int]:
+    def get_daylight_duration(self, offset: int = 0) -> int | None:
         """Get daylight duration (in seconds) for a given day."""
-        point = self.get_point(offset)
-        if not point:
-            return None
-        return point.get('daylight_duration')
+        return self._get_value('daylight_duration', offset)

@@ -62,7 +62,9 @@ from cached values and accept later results without issuing its own queries.
   `wevva/openmeteo.py` for complete forecasts, and makes a current-only query
   for saved-location summaries. That module defines the requested fields, API
   unit parameters, response metadata extraction, and current/hourly/daily
-  model classes.
+  model classes. Model accessors return `None` for invalid offsets or absent
+  scalar values and an empty string for absent textual condition helpers;
+  malformed provider series still fail when the models are constructed.
 - `wevva/services/air_quality.py` calls Open-Meteo's Air Quality API. The
   controller and public API merge selected hourly series into weather data.
 - `wevva/services/alerts.py` wraps `wevva-warnings`, normalizes country codes,

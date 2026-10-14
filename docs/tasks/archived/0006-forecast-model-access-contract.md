@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. Forecast accessors now share a predictable absent-value
+contract while malformed provider series still fail during construction.
 
 ## Context
 
@@ -71,4 +72,15 @@ This is contract cleanup, not blanket defensive programming.
 
 ## Outcome
 
-To be completed when the task is finished.
+Added shared value and rounded-value helpers to the base forecast model.
+Current, hourly, and daily accessors now return `None` for invalid offsets or
+missing scalar values, while condition and other textual display helpers use
+an empty string. Normal value transformations, including rounding, visibility
+conversion, weather conditions, emoji, and wind directions, remain unchanged.
+
+Hourly and daily parsing now requires the provider's `time` series, and
+mismatched series continue to raise instead of becoming apparently valid empty
+forecasts. Focused tests cover empty and partial models, negative and
+out-of-range offsets, malformed series, normal transformations, and retirement
+of the obsolete fetch path. Source compilation and the complete 286-test suite
+pass. No live API or manual terminal check was performed.
