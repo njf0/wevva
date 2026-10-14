@@ -2,7 +2,8 @@
 
 ## Status
 
-Completed
+Archived — completed. Native point queries and reusable country candidates now
+follow separate, tested refresh and caching paths.
 
 ## Context
 
@@ -54,7 +55,7 @@ reused as a whole-country cache entry.
 - `wevva/app.py`
 - `wevva/services/alerts.py`
 - `tests/test_warning_cache.py`
-- `docs/tasks/0002-warning-cache.md`
+- `docs/tasks/archived/0002-warning-cache.md`
 - `wevva-warnings`: query API, warning-source metadata, backend capability
   model, and NWS backend
 

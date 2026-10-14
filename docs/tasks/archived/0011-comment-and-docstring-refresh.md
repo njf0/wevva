@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — deferred. Broad comment cleanup has no durable completion boundary,
+so documentation improvements should instead accompany changes to each module.
 
 ## Context
 

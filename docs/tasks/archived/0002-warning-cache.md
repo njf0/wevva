@@ -2,7 +2,8 @@
 
 ## Status
 
-Completed
+Archived — completed. The session cache remains implemented and was later
+refined by Task 0013 for native point-query sources.
 
 ## Context
 

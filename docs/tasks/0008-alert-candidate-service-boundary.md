@@ -43,7 +43,7 @@ retrieval and matching, with failure/empty-result semantics documented once.
 - `wevva/app.py`
 - `wevva/messages.py`
 - `tests/test_warning_cache.py`
-- `docs/tasks/0002-warning-cache.md`
+- `docs/tasks/archived/0002-warning-cache.md`
 
 ## Approach
 

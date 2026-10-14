@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — superseded. The application has outgrown this audit's scope, while
+the concrete config and alert-boundary concerns remain in Tasks 0007 and 0008.
 
 ## Context
 

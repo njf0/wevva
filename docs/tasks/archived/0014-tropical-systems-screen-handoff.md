@@ -2,8 +2,8 @@
 
 ## Status
 
-In progress; implementation is substantially complete and awaiting final live
-visual verification and the normal dependency release transition.
+Archived — superseded. Later tropical tasks now own the remaining workspace
+and provider work, while the development guide records the dependency handoff.
 
 ## Context
 

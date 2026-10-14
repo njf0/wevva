@@ -2,7 +2,8 @@
 
 ## Status
 
-Complete
+Archived — completed. The implemented warning-progress flow is now documented
+by the architecture guide and protected by the warning-cache tests.
 
 ## Context
 
