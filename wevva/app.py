@@ -42,9 +42,9 @@ from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.services.alerts import (
-    _combine_alerts,
-    _get_native_alerts_async_with_status,
-    _get_reusable_alerts_async_with_status,
+    get_alert_candidates_async,
+    get_native_point_alerts_async,
+    match_alert_candidates_async,
     normalize_country_code,
 )
 from wevva.services.country_alerts import CountryAlertsService
@@ -806,14 +806,13 @@ class Wevva(App, inherit_bindings=False):
         loop = asyncio.get_running_loop()
         provider_names: dict[str, str] = {}
         native_lookup = asyncio.create_task(
-            _get_native_alerts_async_with_status(
+            get_native_point_alerts_async(
                 lat,
                 lon,
                 country_code,
                 warning_language,
             )
         )
-        reusable_completed = cached_candidates is not None
 
         def report_progress(event: str, payload: dict[str, object]) -> None:
             """Transfer the warning worker's callback safely to the TUI loop."""
@@ -835,29 +834,18 @@ class Wevva(App, inherit_bindings=False):
 
         try:
             if cached_candidates is None:
-                try:
-                    candidates, reusable_completed = await _get_reusable_alerts_async_with_status(
-                        country_code,
-                        warning_language,
-                        progress=report_progress,
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    candidates = []
-                    reusable_completed = False
+                candidates, completed = await get_alert_candidates_async(
+                    country_code,
+                    warning_language,
+                    progress=report_progress,
+                )
 
-                if reusable_completed:
+                if completed:
                     self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
             else:
                 candidates = list(cached_candidates)
 
-            try:
-                native_alerts, _ = await native_lookup
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                native_alerts = []
+            native_alerts, _ = await native_lookup
 
             if (
                 refresh_generation != self._refresh_generation
@@ -865,19 +853,13 @@ class Wevva(App, inherit_bindings=False):
                 or self.location.longitude != lon
             ):
                 return
-            try:
-                alerts = await asyncio.to_thread(
-                    _combine_alerts,
-                    candidates,
-                    native_alerts,
-                    lat,
-                    lon,
-                    progress=report_progress,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                alerts = []
+            alerts = await match_alert_candidates_async(
+                candidates,
+                native_alerts,
+                lat,
+                lon,
+                progress=report_progress,
+            )
 
             if (
                 refresh_generation != self._refresh_generation

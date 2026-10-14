@@ -74,6 +74,10 @@ from cached values and accept later results without issuing its own queries.
   and de-duplicated. Progress for reusable candidate retrieval is forwarded to
   `WeatherAlertsProgress` messages on the Textual event loop, then rendered by
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
+  alert service returns a named candidate result: completed empty and
+  unsupported-country queries are cacheable, provider failures are not, and
+  cancellation propagates without producing a result. The app consumes only
+  the service's non-private retrieval and matching entry points. The
   sidebar shows an indeterminate bar while a provider request is pending and
   switches to measured progress once the provider returns its alert count.
   Independently of that rail, the header subtitle reads `Checking warnings…`

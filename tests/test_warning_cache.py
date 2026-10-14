@@ -11,8 +11,16 @@ from wevva.alerts import Alert
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import WeatherAlertsProgress, WeatherAlertsUpdated
-from wevva.services.alerts import _combine_alerts, _get_alerts_with_status, _get_native_alerts_with_status
+from wevva.services.alerts import (
+    AlertCandidateResult,
+    _get_alerts_with_status,
+    _get_native_alerts_with_status,
+    get_alert_candidates_async,
+    match_alert_candidates,
+    match_alert_candidates_async,
+)
 from wevva.widgets.saved_locations import SavedLocationsSidebar
+from wevva_warnings import UnsupportedCountryError
 
 
 class _WeatherScreen:
@@ -78,8 +86,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ], True))
         native_lookup = AsyncMock(return_value=([], True))
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             await self._schedule_and_wait()
@@ -100,8 +108,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         reusable_lookup = AsyncMock(return_value=([], True))
         native_lookup = AsyncMock(return_value=([], True))
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             self.clock += self.app.ALERT_CACHE_TTL_SECONDS
@@ -115,8 +123,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         reusable_lookup = AsyncMock(side_effect=[([], True), ([], False), ([], False)])
         native_lookup = AsyncMock(return_value=([], True))
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             await self._schedule_and_wait()
@@ -125,8 +133,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.app._alert_cache.clear()
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             await self._schedule_and_wait()
@@ -143,7 +151,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             await unblock.wait()
             return [], True
 
-        with patch('wevva.app._get_reusable_alerts_async_with_status', new=lookup):
+        with patch('wevva.app.get_alert_candidates_async', new=lookup):
             self.app._schedule_alert_refresh(1)
             assert self.app._alerts_task is not None
             await started.wait()
@@ -157,8 +165,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         reusable_lookup = AsyncMock(return_value=([], True))
         native_lookup = AsyncMock(return_value=([], True))
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             self.app.location.country_code = 'DEU'
@@ -184,7 +192,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.app.warning_language = 'auto'
         key = ('DE', 'auto')
         self.app._alert_cache[key] = self.clock, (expired_alert,)
-        with patch('wevva.app._get_native_alerts_async_with_status', new=AsyncMock(return_value=([], True))):
+        with patch('wevva.app.get_native_point_alerts_async', new=AsyncMock(return_value=([], True))):
             await self._schedule_and_wait()
         self.assertEqual(self._alert_updates()[-1].alerts, [])
 
@@ -197,7 +205,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return [], True
 
-        with patch('wevva.app._get_reusable_alerts_async_with_status', new=lookup):
+        with patch('wevva.app.get_alert_candidates_async', new=lookup):
             self.app._schedule_alert_refresh(1)
             assert self.app._alerts_task is not None
             await started.wait()
@@ -216,8 +224,8 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         ])
 
         with (
-            patch('wevva.app._get_reusable_alerts_async_with_status', new=reusable_lookup),
-            patch('wevva.app._get_native_alerts_async_with_status', new=native_lookup),
+            patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+            patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
             self.app.location = LocationMetadata(latitude=39.7392, longitude=-104.9903, country_code='US')
@@ -236,7 +244,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            'wevva.app._get_native_alerts_async_with_status',
+            'wevva.app.get_native_point_alerts_async',
             new=AsyncMock(return_value=([], True)),
         ):
             await self._schedule_and_wait()
@@ -258,11 +266,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_warning_indicator_wraps_empty_success_without_toasts(self) -> None:
         with (
             patch(
-                'wevva.app._get_reusable_alerts_async_with_status',
+                'wevva.app.get_alert_candidates_async',
                 new=AsyncMock(return_value=([], True)),
             ),
             patch(
-                'wevva.app._get_native_alerts_async_with_status',
+                'wevva.app.get_native_point_alerts_async',
                 new=AsyncMock(return_value=([], True)),
             ),
         ):
@@ -283,11 +291,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                'wevva.app._get_reusable_alerts_async_with_status',
+                'wevva.app.get_alert_candidates_async',
                 new=AsyncMock(side_effect=report_progress),
             ),
             patch(
-                'wevva.app._get_native_alerts_async_with_status',
+                'wevva.app.get_native_point_alerts_async',
                 new=AsyncMock(return_value=([], True)),
             ),
         ):
@@ -299,11 +307,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_warning_failure_stops_indicator_without_toast(self) -> None:
         with (
             patch(
-                'wevva.app._get_reusable_alerts_async_with_status',
+                'wevva.app.get_alert_candidates_async',
                 new=AsyncMock(return_value=([], False)),
             ),
             patch(
-                'wevva.app._get_native_alerts_async_with_status',
+                'wevva.app.get_native_point_alerts_async',
                 new=AsyncMock(return_value=([], True)),
             ),
         ):
@@ -322,11 +330,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch(
-                'wevva.app._get_reusable_alerts_async_with_status',
+                'wevva.app.get_alert_candidates_async',
                 new=AsyncMock(return_value=([alert], True)),
             ),
             patch(
-                'wevva.app._get_native_alerts_async_with_status',
+                'wevva.app.get_native_point_alerts_async',
                 new=AsyncMock(return_value=([], True)),
             ),
         ):
@@ -340,11 +348,11 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.app.weather_screen.saved_locations_sidebar_visible = True
         with (
             patch(
-                'wevva.app._get_reusable_alerts_async_with_status',
+                'wevva.app.get_alert_candidates_async',
                 new=AsyncMock(return_value=([], True)),
             ),
             patch(
-                'wevva.app._get_native_alerts_async_with_status',
+                'wevva.app.get_native_point_alerts_async',
                 new=AsyncMock(return_value=([], True)),
             ),
         ):
@@ -380,7 +388,7 @@ class AlertServiceStatusTests(unittest.TestCase):
         reusable_alert = _alert_in_box('geometry', min_lat=40.0, max_lat=41.0, min_lon=-75.0, max_lon=-73.0)
         native_alert = Alert(id='nws-point', source='nws', event='Flood', headline='Point-query flood')
 
-        alerts = _combine_alerts([reusable_alert], [native_alert], 40.7128, -74.0060)
+        alerts = match_alert_candidates([reusable_alert], [native_alert], 40.7128, -74.0060)
 
         self.assertEqual([alert.id for alert in alerts], ['geometry', 'nws-point'])
 
@@ -389,7 +397,7 @@ class AlertServiceStatusTests(unittest.TestCase):
         reusable_alert = _alert_in_box('geometry', min_lat=40.0, max_lat=41.0, min_lon=-75.0, max_lon=-73.0)
         unmatched_alert = _alert_in_box('elsewhere', min_lat=50.0, max_lat=51.0, min_lon=-2.0, max_lon=-1.0)
 
-        alerts = _combine_alerts(
+        alerts = match_alert_candidates(
             [reusable_alert, unmatched_alert],
             [],
             40.7128,
@@ -406,6 +414,49 @@ class AlertServiceStatusTests(unittest.TestCase):
                 call('alerts_checked', {'completed': 2, 'total': 2, 'phase': 'matching'}),
             ],
         )
+
+
+class AlertCandidateServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_successful_empty_candidate_result_is_cacheable(self) -> None:
+        with patch('wevva.services.alerts.get_reusable_alerts_for_country', return_value=[]):
+            result = await get_alert_candidates_async('GB')
+
+        self.assertEqual(result, AlertCandidateResult(candidates=[], completed=True))
+
+    async def test_unsupported_country_is_a_completed_empty_result(self) -> None:
+        with patch(
+            'wevva.services.alerts.get_reusable_alerts_for_country',
+            side_effect=UnsupportedCountryError('ZZ'),
+        ):
+            result = await get_alert_candidates_async('ZZ')
+
+        self.assertEqual(result, AlertCandidateResult(candidates=[], completed=True))
+
+    async def test_provider_failure_is_an_uncacheable_empty_result(self) -> None:
+        with patch(
+            'wevva.services.alerts.get_reusable_alerts_for_country',
+            side_effect=RuntimeError('offline'),
+        ):
+            result = await get_alert_candidates_async('GB')
+
+        self.assertEqual(result, AlertCandidateResult(candidates=[], completed=False))
+
+    async def test_candidate_cancellation_propagates_without_a_result(self) -> None:
+        with patch(
+            'wevva.services.alerts.asyncio.to_thread',
+            new=AsyncMock(side_effect=asyncio.CancelledError),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await get_alert_candidates_async('GB')
+
+    async def test_matching_failure_is_normalized_by_the_service(self) -> None:
+        with patch(
+            'wevva.services.alerts.match_alert_candidates',
+            side_effect=RuntimeError('invalid geometry'),
+        ):
+            alerts = await match_alert_candidates_async([], [], 51.5, -0.1)
+
+        self.assertEqual(alerts, [])
 
 
 class WarningProgressTests(unittest.TestCase):

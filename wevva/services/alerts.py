@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from wevva_warnings import (
     Alert,
@@ -18,6 +19,17 @@ from wevva_warnings import (
 )
 
 from wevva.utils.country_codes import get_alpha2_by_alpha3
+
+
+class AlertCandidateResult(NamedTuple):
+    """Reusable country candidates and whether the query completed normally.
+
+    A completed empty result is safe to cache. Provider failure is represented
+    by ``completed=False``; cancellation propagates without producing a result.
+    """
+
+    candidates: list[Alert]
+    completed: bool
 
 
 def normalize_country_code(country_code: str | None) -> str | None:
@@ -126,7 +138,7 @@ def _get_native_alerts_with_status(
         return [], False
 
 
-def _combine_alerts(
+def match_alert_candidates(
     candidates: list[Alert],
     native_alerts: list[Alert],
     lat: float,
@@ -190,45 +202,33 @@ def get_alerts(
     )[0]
 
 
-async def _get_alerts_async_with_status(
-    lat: float,
-    lon: float,
-    country_code: str | None = None,
-    warning_language: str = 'auto',
-    progress: WarningQueryProgress | None = None,
-) -> tuple[list[Alert], bool]:
-    """Worker-thread version of :func:`_get_alerts_with_status`."""
-    return await asyncio.to_thread(
-        _get_alerts_with_status,
-        lat,
-        lon,
-        country_code,
-        warning_language,
-        progress,
-    )
-
-
-async def _get_reusable_alerts_async_with_status(
+async def get_alert_candidates_async(
     country_code: str | None,
     warning_language: str = 'auto',
     progress: WarningQueryProgress | None = None,
-) -> tuple[list[Alert], bool]:
-    """Worker-thread version of :func:`_get_reusable_alerts_with_status`."""
-    return await asyncio.to_thread(
+) -> AlertCandidateResult:
+    """Fetch reusable country candidates without exposing provider failures.
+
+    Successful empty and unsupported-country queries return ``completed=True``
+    and may be cached. Provider failures return ``completed=False``. Task
+    cancellation is not converted to either result.
+    """
+    candidates, completed = await asyncio.to_thread(
         _get_reusable_alerts_with_status,
         country_code,
         warning_language,
         progress,
     )
+    return AlertCandidateResult(candidates, completed)
 
 
-async def _get_native_alerts_async_with_status(
+async def get_native_point_alerts_async(
     lat: float,
     lon: float,
     country_code: str | None,
     warning_language: str = 'auto',
 ) -> tuple[list[Alert], bool]:
-    """Worker-thread version of :func:`_get_native_alerts_with_status`."""
+    """Fetch native point-query alerts with normalized provider status."""
     return await asyncio.to_thread(
         _get_native_alerts_with_status,
         lat,
@@ -236,6 +236,31 @@ async def _get_native_alerts_async_with_status(
         country_code,
         warning_language,
     )
+
+
+async def match_alert_candidates_async(
+    candidates: list[Alert],
+    native_alerts: list[Alert],
+    lat: float,
+    lon: float,
+    *,
+    progress: WarningQueryProgress | None = None,
+) -> list[Alert]:
+    """Match and combine alerts in a worker, returning empty on routine failure.
+
+    Cancellation propagates so callers do not cache or publish superseded work.
+    """
+    try:
+        return await asyncio.to_thread(
+            match_alert_candidates,
+            candidates,
+            native_alerts,
+            lat,
+            lon,
+            progress=progress,
+        )
+    except Exception:
+        return []
 
 
 async def get_alerts_async(

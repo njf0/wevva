@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. Alert candidate status and failure normalization now
+belong to a named service boundary rather than private app dependencies.
 
 ## Context
 
@@ -69,8 +70,22 @@ empty results and failures unambiguous.
 
 ## Decisions and notes
 
-This is a cleanup of the post-Task-0002 boundary, not a redesign of warnings.
+`AlertCandidateResult` distinguishes candidates from normal completion status:
+completed empty and unsupported-country results are cacheable, provider
+failures are not, and cancellation propagates without producing a result.
 
 ## Outcome
 
-To be completed when the task is finished.
+Added non-private async service entry points for reusable candidate retrieval,
+native point retrieval, and candidate matching. The app no longer imports
+underscore-prefixed alert helpers or repeats exception handling already owned
+by the service. Matching failures retain the existing empty-result background
+behavior, while task cancellation still reaches the app's lifecycle boundary.
+
+The existing 30-minute country/language cache, forced refresh, per-location
+native lookup, expiry filtering, progress callbacks, header indicator, and
+generation/location stale-result checks are unchanged. Focused tests cover
+completed empty results, unsupported countries, provider and matching failure,
+cancellation, caching, progress, and native point behavior. Source compilation
+and the complete 298-test suite pass. No live warning-provider or interactive
+TUI check was performed.
