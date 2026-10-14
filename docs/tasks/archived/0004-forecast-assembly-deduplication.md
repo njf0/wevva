@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. The TUI controller and public API now share one pure
+air-quality series alignment operation.
 
 ## Context
 
@@ -71,4 +72,13 @@ architecture.
 
 ## Outcome
 
-To be completed when the task is finished.
+Moved the air-quality field definition and alignment logic into
+`wevva.services.air_quality`. The request field list, TUI controller, and public
+API now use that shared definition. The merge returns a new hourly dictionary,
+pads or truncates valid lists to the weather timeline, and ignores malformed
+optional data without damaging the weather series.
+
+Focused tests cover missing, malformed, short, exact, and long series; input
+immutability; equivalent controller/API output; and preservation of the public
+API's copied raw response. Source compilation and the complete 280-test suite
+pass.

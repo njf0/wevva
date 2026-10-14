@@ -9,7 +9,7 @@ from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from wevva.config import location_key
-from wevva.location_metadata import LocationMetadata
+from wevva.location_metadata import LocationMetadata, location_metadata_from_place
 
 # Status message option IDs
 _STATUS_SEARCHING = 'status-searching'
@@ -83,17 +83,7 @@ class SearchResultsList(OptionList):
         if option_id not in self._place_cache:
             return None
 
-        place = self._place_cache[option_id]
-        return LocationMetadata(
-            latitude=place.get('latitude'),
-            longitude=place.get('longitude'),
-            elevation=place.get('elevation'),
-            name=place.get('name') or '',
-            admin=place.get('admin') or '',
-            country=place.get('country') or '',
-            country_code=place.get('country_code') or '',
-            timezone=place.get('tz_identifier') or '',
-        )
+        return location_metadata_from_place(self._place_cache[option_id])
 
     def get_single_result(self) -> LocationMetadata | None:
         """Get metadata if exactly one result exists."""

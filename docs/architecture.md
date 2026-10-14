@@ -55,8 +55,9 @@ from cached values and accept later results without issuing its own queries.
 ## Data and external boundaries
 
 - `wevva/services/geocoding.py` calls Open-Meteo geocoding and normalizes its
-  response to small dictionaries. The TUI and CLI turn these into
-  `LocationMetadata`.
+  response to small dictionaries. The TUI, CLI, and public API turn these into
+  `LocationMetadata` through the shared `location_metadata_from_place()`
+  conversion.
 - `wevva/services/weather.py` delegates to `OpenMeteoForecast.fetch_all()` in
   `wevva/openmeteo.py` for complete forecasts, and makes a current-only query
   for saved-location summaries. That module defines the requested fields, API
@@ -107,7 +108,8 @@ The public API lives in `wevva/api.py` and is exported by `wevva/__init__.py`.
 `geocode()` returns `LocationMetadata` values; alerts are separate helpers.
 The `*_sync` wrappers call `asyncio.run` and deliberately reject use inside an
 already-running event loop. This path builds models directly rather than using
-the TUI controller, although both paths independently merge air quality.
+the TUI controller, while both paths use the same pure air-quality series
+alignment helper.
 
 ## Presentation
 

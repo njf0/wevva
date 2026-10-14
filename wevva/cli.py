@@ -28,7 +28,7 @@ from wevva.constants import (
     DEFAULT_WARNING_LANGUAGE,
     DEFAULT_WIND_SPEED_UNIT,
 )
-from wevva.location_metadata import LocationMetadata
+from wevva.location_metadata import LocationMetadata, location_metadata_from_place
 from wevva.services.geocoding import search_places
 
 app = typer.Typer(add_completion=False, invoke_without_command=True)
@@ -134,31 +134,6 @@ def _format_place(place: dict[str, Any]) -> str:
     return f'{name}, {country}'
 
 
-def _location_metadata_from_place(place: dict[str, Any]) -> LocationMetadata:
-    """Build ``LocationMetadata`` from a geocoding result.
-
-    Parameters
-    ----------
-    place: dict[str, Any]
-        Geocoding result entry.
-
-    Returns
-    -------
-    LocationMetadata
-        Normalized location metadata object.
-
-    """
-    return LocationMetadata(
-        latitude=place.get('latitude'),
-        longitude=place.get('longitude'),
-        name=place.get('name') or '',
-        admin=place.get('admin') or '',
-        country=place.get('country') or '',
-        country_code=place.get('country_code') or '',
-        timezone=place.get('tz_identifier') or place.get('timezone') or '',
-    )
-
-
 def _location_config_from_metadata(location: LocationMetadata) -> dict[str, Any]:
     """Serialize ``LocationMetadata`` for config persistence.
 
@@ -262,7 +237,7 @@ def _resolve_first_location(
     if not results:
         return None, None
     place = results[0]
-    return _location_metadata_from_place(place), place
+    return location_metadata_from_place(place), place
 
 
 def _questionary_select(title: str, options: list[tuple[str, str]], current: str) -> str:
@@ -381,7 +356,7 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
                         style=SETUP_STYLE,
                     ).ask()
                 )
-                selected_location = _location_metadata_from_place(selected)
+                selected_location = location_metadata_from_place(selected)
                 default_location = _format_place(selected)
                 default_location_metadata = _location_config_from_metadata(selected_location)
             else:

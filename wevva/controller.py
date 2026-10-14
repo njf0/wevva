@@ -15,7 +15,7 @@ from wevva.openmeteo import (
     HourlyOpenMeteoForecast,
     OpenMeteoForecast,
 )
-from wevva.services.air_quality import fetch_air_quality
+from wevva.services.air_quality import fetch_air_quality, merge_air_quality_fields
 from wevva.services.weather import fetch_weather  # fetches raw Open-Meteo response
 
 
@@ -75,27 +75,9 @@ class WeatherController:
             air_quality = await fetch_air_quality(lat, lon, start, end, country_code)
 
         # 5) Merge air quality fields into hourly timeseries
-        hourly_data = data.get('hourly', {})
-        if air_quality and 'hourly' in air_quality:
-            aq_hourly = air_quality['hourly']
-            weather_times = hourly_data.get('time', [])
-            n = len(weather_times)
-            for field in [
-                'us_aqi',
-                'european_aqi',
-                'pm2_5',
-                'pm10',
-                'ozone',
-                'grass_pollen',
-            ]:
-                if field in aq_hourly:
-                    aq_values = aq_hourly[field]
-                    # Pad or truncate to match weather timeseries length
-                    if len(aq_values) < n:
-                        aq_values = aq_values + [None] * (n - len(aq_values))
-                    elif len(aq_values) > n:
-                        aq_values = aq_values[:n]
-                    hourly_data[field] = aq_values
+        raw_hourly = data.get('hourly')
+        hourly_data = raw_hourly if isinstance(raw_hourly, dict) else {}
+        hourly_data = merge_air_quality_fields(hourly_data, air_quality)
 
         # 6) Build models for each forecast view
         current = CurrentOpenMeteoForecast(meta, units_current, data.get('current', {}))

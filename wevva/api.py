@@ -8,7 +8,7 @@ from copy import deepcopy
 from typing import Any, ParamSpec, TypeVar
 
 from wevva.alerts import Alert, get_alerts, get_alerts_async
-from wevva.location_metadata import LocationMetadata
+from wevva.location_metadata import LocationMetadata, location_metadata_from_place
 from wevva.models import ForecastBundle
 from wevva.openmeteo import (
     CurrentOpenMeteoForecast,
@@ -16,18 +16,10 @@ from wevva.openmeteo import (
     HourlyOpenMeteoForecast,
     OpenMeteoForecast,
 )
-from wevva.services.air_quality import fetch_air_quality
+from wevva.services.air_quality import fetch_air_quality, merge_air_quality_fields
 from wevva.services.geocoding import search_places
 from wevva.services.weather import fetch_weather
 
-AIR_QUALITY_FIELDS: tuple[str, ...] = (
-    'us_aqi',
-    'european_aqi',
-    'pm2_5',
-    'pm10',
-    'ozone',
-    'grass_pollen',
-)
 T = TypeVar('T')
 P = ParamSpec('P')
 
@@ -54,21 +46,6 @@ def _run_sync(
     raise WevvaAPIError('Sync API cannot run inside an active event loop. Use async API functions instead.')
 
 
-def _location_metadata_from_place(place: dict[str, Any]) -> LocationMetadata:
-    """Convert one geocoding result into ``LocationMetadata``."""
-    lat = place.get('latitude')
-    lon = place.get('longitude')
-    return LocationMetadata(
-        latitude=float(lat) if isinstance(lat, (int, float)) else None,
-        longitude=float(lon) if isinstance(lon, (int, float)) else None,
-        name=place.get('name') or '',
-        admin=place.get('admin') or '',
-        country=place.get('country') or '',
-        country_code=place.get('country_code') or '',
-        timezone=place.get('tz_identifier') or '',
-    )
-
-
 def _apply_place_metadata(metadata: LocationMetadata, place: dict[str, Any] | None) -> None:
     """Overlay geocoding place fields onto API metadata."""
     if not place:
@@ -79,29 +56,6 @@ def _apply_place_metadata(metadata: LocationMetadata, place: dict[str, Any] | No
     metadata.country_code = place.get('country_code') or metadata.country_code
     if not metadata.timezone:
         metadata.timezone = place.get('tz_identifier') or metadata.timezone
-
-
-def _merge_air_quality_fields(hourly_data: dict[str, Any], air_quality: dict[str, Any] | None) -> dict[str, Any]:
-    """Attach air-quality lists to hourly weather data."""
-    merged = dict(hourly_data)
-    if not air_quality:
-        return merged
-    aq_hourly = air_quality.get('hourly')
-    if not isinstance(aq_hourly, dict):
-        return merged
-
-    weather_times = merged.get('time', [])
-    weather_count = len(weather_times) if isinstance(weather_times, list) else 0
-    for field in AIR_QUALITY_FIELDS:
-        values = aq_hourly.get(field)
-        if not isinstance(values, list):
-            continue
-        if len(values) < weather_count:
-            values = values + [None] * (weather_count - len(values))
-        elif len(values) > weather_count:
-            values = values[:weather_count]
-        merged[field] = values
-    return merged
 
 
 async def _build_forecast_bundle(
@@ -134,7 +88,7 @@ async def _build_forecast_bundle(
             country_code or metadata.country_code,
         )
 
-    merged_hourly = _merge_air_quality_fields(hourly_data, air_quality)
+    merged_hourly = merge_air_quality_fields(hourly_data, air_quality)
     data['hourly'] = merged_hourly
 
     current = CurrentOpenMeteoForecast(metadata, units_current, data.get('current', {}))
@@ -158,7 +112,7 @@ async def geocode(
 ) -> list[LocationMetadata]:
     """Search for places and return normalized location metadata entries."""
     places = await search_places(query, count=count, language=language)
-    return [_location_metadata_from_place(place) for place in places]
+    return [location_metadata_from_place(place) for place in places]
 
 
 def geocode_sync(
