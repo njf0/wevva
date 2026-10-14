@@ -45,6 +45,13 @@ The focused regression suite uses the standard library:
 uv run python -m unittest discover -s tests
 ```
 
+Warning caching, progress routing, and stale-location safeguards have a smaller
+unit and mounted-Textual smoke-test command:
+
+```bash
+uv run python -m unittest tests.test_warning_cache tests.test_warning_textual_smoke
+```
+
 The country Alerts Centre has deterministic service, screen, interactive-map,
 selected-settlement hourly-lifecycle, and responsive-budget coverage, including
 cache expiry, stale hourly results, and country-switch races:

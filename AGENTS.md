@@ -59,6 +59,9 @@ uv run python -m compileall -q wevva
 # Focused standard-library regression tests
 uv run python -m unittest discover -s tests
 
+# Warning cache and mounted Textual smoke tests
+uv run python -m unittest tests.test_warning_cache tests.test_warning_textual_smoke
+
 # Release workflow — only with explicit approval to publish externally
 uv build
 uv publish

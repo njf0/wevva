@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. Mounted smoke tests now protect warning-progress
+visibility, quiet empty-cache hits, and stale results after location changes.
 
 ## Context
 
@@ -67,8 +68,20 @@ same task/cancellation safeguards already implemented by the application.
 
 ## Decisions and notes
 
-This task is optional and should remain intentionally small.
+The smoke coverage follows the current warning pipeline rather than the older
+proposal literally: measured document, geometry, and matching work may be
+shown, while unsupported aggregate phases are ignored. An empty cached
+candidate set remains visually quiet.
 
 ## Outcome
 
-To be completed when the task is finished.
+Added three deterministic tests around a mounted `WeatherScreen`. They verify
+that only supported individual-warning phases reveal measured progress, an
+empty reusable-candidate cache hit bypasses provider lookup without revealing
+the progress panel, and a delayed result for a superseded location cannot
+replace the current location's warning display. All provider calls are mocked.
+
+The focused warning command is documented in `AGENTS.md` and
+`docs/development.md`. The 29-test warning group, source compilation, and the
+complete 301-test suite pass. No live-provider or interactive terminal check
+was performed.
