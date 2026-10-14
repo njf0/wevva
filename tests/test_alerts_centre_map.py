@@ -23,6 +23,10 @@ from wevva.widgets.country_alerts_map import (
     country_alert_city_label_budget,
     render_country_alerts_map,
 )
+from wevva.widgets.weather_alerts import (
+    alert_severity_color,
+    alert_severity_surface_color,
+)
 from tests.weather_fixtures import hourly_forecast
 
 
@@ -60,6 +64,21 @@ EAST_GERMANY = {
 
 
 class CountryAlertsMapGeometryTests(unittest.TestCase):
+    def test_moderate_warning_uses_text_colour_at_sea_and_surface_colour_on_land(
+        self,
+    ) -> None:
+        alert = _alert('wind', severity='Moderate', geometry=WEST_GERMANY)
+        theme = {
+            'text-warning': '#f1d58a',
+            'warning': '#e2a93b',
+            'warning-darken-2': '#a56f16',
+            'text-accent': '#abcdef',
+            'accent': '#123456',
+        }
+
+        self.assertEqual(alert_severity_color(theme, alert), '#f1d58a')
+        self.assertEqual(alert_severity_surface_color(theme, alert), '#a56f16')
+
     def test_country_view_retains_every_disconnected_map_unit_component(self) -> None:
         scope = build_country_alerts_map_geometry('US')
         unit = map_unit('US')
@@ -119,12 +138,16 @@ class CountryAlertsMapGeometryTests(unittest.TestCase):
                 ('fixture', 'flood'): 'red',
                 ('fixture', 'wind'): 'dim yellow',
             },
+            alert_land_styles={
+                ('fixture', 'flood'): 'dark_red',
+                ('fixture', 'wind'): 'dim dark_orange',
+            },
             selected_alert_key=('fixture', 'flood'),
         )
 
         styles = {str(span.style) for span in rendered.spans}
-        self.assertIn('red', styles)
-        self.assertIn('dim yellow', styles)
+        self.assertIn('dark_red', styles)
+        self.assertIn('dim dark_orange', styles)
         self.assertIn('blue', styles)
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
 

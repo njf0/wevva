@@ -228,8 +228,13 @@ protection, and the shared full provider-document presentation. Its
 `CountryAlertsMap` centre pane
 uses the complete selected map unit rather than the weather screen's local
 component cluster. It renders provider-issued warning polygons as dim semantic
-context with the selected warning at full severity, while geometry-less alerts
-remain readable without inferred shapes. Alert selection fits the complete
+context with the selected warning at full severity. Warning pixels over sea use
+the readable `text-*` severity colour, while pixels that truly intersect the
+land raster use a darker shade from the matching semantic family
+(`warning-darken-2` rather than `text-warning`, for example), preserving the
+coastline without borrowing a stronger severity colour, clipping, or inferring
+geometry. Geometry-less alerts remain readable without inferred shapes. Alert
+selection fits the complete
 selected geometry, reprojects overlapping context, and reranks settlements
 locally without network work.
 

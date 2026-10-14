@@ -31,7 +31,10 @@ from wevva.geography import (
 )
 from wevva.services.country_alerts import country_alert_identity
 from wevva.widgets.geographic_scope import GeographicCanvas, ProjectedPolygon
-from wevva.widgets.weather_alerts import alert_severity_color
+from wevva.widgets.weather_alerts import (
+    alert_severity_color,
+    alert_severity_surface_color,
+)
 
 
 PlaceKey = tuple[float, float]
@@ -277,9 +280,10 @@ def render_country_alerts_map(
     height: int,
     land_style: str | None,
     alert_styles: Mapping[AlertKey, str | None],
+    alert_land_styles: Mapping[AlertKey, str | None],
     selected_alert_key: AlertKey | None,
 ) -> Text:
-    """Render land and all issued warning polygons with selected emphasis."""
+    """Render warnings with distinct sea and true land-intersection styles."""
 
     canvas = GeographicCanvas(max(1, width), max(1, height), scope.viewport)
     canvas.fill_polygons(scope.land, layer='land')
@@ -288,15 +292,19 @@ def render_country_alerts_map(
     ordered_layers = [*non_selected, *selected]
     layers: list[tuple[str, str | None]] = [('land', land_style)]
     solid_layers = ['land']
+    overlap_styles: dict[tuple[str, str], str | None] = {}
     for index, layer in enumerate(ordered_layers):
         layer_name = f'alert-{index}'
         canvas.fill_polygons(layer.polygons, layer=layer_name)
         layers.append((layer_name, alert_styles.get(layer.key)))
+        if layer.key in alert_land_styles:
+            overlap_styles[(layer_name, 'land')] = alert_land_styles[layer.key]
         solid_layers.append(layer_name)
     return canvas.frame(
         layers,
         solid_braille_layers=solid_layers,
         centering_layers=() if scope.selected_alert_polygons else ('land',),
+        overlap_styles=overlap_styles,
     ).to_text()
 
 
@@ -586,12 +594,24 @@ class CountryAlertsMap(Container):
         theme = self.app.theme_variables
         secondary = theme.get('text-secondary')
         alert_styles: dict[AlertKey, str | None] = {}
+        alert_land_styles: dict[AlertKey, str | None] = {}
         for layer in self._alert_layers:
             colour = alert_severity_color(theme, layer.alert) or theme.get('text-accent')
+            land_colour = (
+                alert_severity_surface_color(theme, layer.alert)
+                or theme.get('accent')
+                or colour
+            )
+            selected = layer.key == self._selected_alert_key
             alert_styles[layer.key] = (
                 colour
-                if layer.key == self._selected_alert_key
+                if selected
                 else f'dim {colour}' if colour else 'dim'
+            )
+            alert_land_styles[layer.key] = (
+                land_colour
+                if selected
+                else f'dim {land_colour}' if land_colour else 'dim'
             )
         backdrop.update(
             render_country_alerts_map(
@@ -601,6 +621,7 @@ class CountryAlertsMap(Container):
                 height=height,
                 land_style=f'dim {secondary}' if secondary else 'dim',
                 alert_styles=alert_styles,
+                alert_land_styles=alert_land_styles,
                 selected_alert_key=self._selected_alert_key,
             ),
             layout=False,

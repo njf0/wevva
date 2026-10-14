@@ -413,6 +413,10 @@ responsive topology changes, and a refresh when it remains present.
   navigation/document panes and a country viewport padded by only two percent.
 - Complete: map labels are capped at four ranked capital/major-city candidates,
   leaving dim context polygons and the full-colour selected polygon dominant.
+- Complete: warning fills use the readable semantic text colour over sea and a
+  deliberately darker shade from the same semantic family only where warning
+  and land raster pixels intersect, keeping coastlines legible without changing
+  provider geometry or implying a different severity.
 - Complete: wide navigation and detail rails have equal widths, the three
   wide-layout panes have two-column hatched gutters, loading uses the list
   region's progress bar, and the unselected document prompt is centred in its

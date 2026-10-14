@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import math
 
@@ -162,8 +162,22 @@ class GeographicCanvas:
         *,
         solid_braille_layers: Iterable[str] = (),
         centering_layers: Iterable[str] | None = None,
+        overlap_styles: Mapping[tuple[str, str], str | None] | None = None,
     ) -> GeographicFrame:
         layer_list = list(layers)
+        layer_indexes = {
+            layer_name: index
+            for index, (layer_name, _style) in enumerate(layer_list)
+        }
+        overlap_styles_by_layer: dict[str, list[tuple[int, str | None]]] = {}
+        for (visible_layer, intersecting_layer), style in (
+            (overlap_styles or {}).items()
+        ):
+            intersecting_index = layer_indexes.get(intersecting_layer)
+            if intersecting_index is not None:
+                overlap_styles_by_layer.setdefault(visible_layer, []).append(
+                    (intersecting_index, style)
+                )
         solid_layers = set(solid_braille_layers)
         self._offset_x, self._offset_y = self._centering_offset(
             centering_layers
@@ -218,7 +232,18 @@ class GeographicCanvas:
                     top = dominant
                     mask = 0xFF
                 characters[row][column] = chr(0x2800 + mask)
-                styles[row][column] = layer_list[top][1]
+                top_layer = layer_list[top][0]
+                style = layer_list[top][1]
+                for intersecting_index, overlap_style in (
+                    overlap_styles_by_layer.get(top_layer, ())
+                ):
+                    if (
+                        layer_masks[top][row][column]
+                        & layer_masks[intersecting_index][row][column]
+                    ):
+                        style = overlap_style
+                        break
+                styles[row][column] = style
         return GeographicFrame(characters, styles, self)
 
     def pixel_position(self, point: ProjectedPoint) -> tuple[int, int]:

@@ -304,6 +304,52 @@ class SharedGeographicRenderingTests(unittest.TestCase):
         self.assertTrue(any(style == 'blue' for row in frame.styles for style in row))
         self.assertTrue(any(style == 'yellow' for row in frame.styles for style in row))
 
+    def test_visible_layer_uses_a_distinct_style_only_at_true_pixel_overlap(self) -> None:
+        viewport = GeographicViewport(0.0, 0.0, 0.0, 0.0, 8.0, 8.0)
+        canvas = GeographicCanvas(4, 2, viewport)
+        canvas.fill_polygons(
+            [
+                (
+                    (
+                        ProjectedPoint(0.1, 0.1),
+                        ProjectedPoint(3.9, 0.1),
+                        ProjectedPoint(3.9, 7.9),
+                        ProjectedPoint(0.1, 7.9),
+                        ProjectedPoint(0.1, 0.1),
+                    ),
+                )
+            ],
+            layer='land',
+        )
+        canvas.fill_polygons(
+            [
+                (
+                    (
+                        ProjectedPoint(0.1, 0.1),
+                        ProjectedPoint(7.9, 0.1),
+                        ProjectedPoint(7.9, 7.9),
+                        ProjectedPoint(0.1, 7.9),
+                        ProjectedPoint(0.1, 0.1),
+                    ),
+                )
+            ],
+            layer='warning',
+        )
+
+        frame = canvas.frame(
+            (('land', 'dim blue'), ('warning', 'text-warning')),
+            solid_braille_layers=('land', 'warning'),
+            overlap_styles={('warning', 'land'): 'warning'},
+        )
+
+        self.assertEqual(
+            frame.styles,
+            [
+                ['warning', 'warning', 'text-warning', 'text-warning'],
+                ['warning', 'warning', 'text-warning', 'text-warning'],
+            ],
+        )
+
     def test_point_and_polyline_primitives_share_the_same_raster(self) -> None:
         viewport = GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0)
         canvas = GeographicCanvas(10, 5, viewport)

@@ -100,6 +100,28 @@ def alert_severity_color(theme: dict[str, str], alert: Alert) -> str | None:
     return theme.get(f'text-{severity_key}', theme.get('text-accent'))
 
 
+def alert_severity_surface_color(
+    theme: dict[str, str],
+    alert: Alert,
+) -> str | None:
+    """Return a darker semantic shade for warning pixels over land."""
+
+    severity = (alert.severity or '').strip().lower()
+    if severity in ORANGE_SEVERITIES:
+        return (
+            interpolated_hex(
+                theme.get('warning-darken-2') or theme.get('warning'),
+                theme.get('error-darken-2') or theme.get('error'),
+            )
+            or theme.get('error')
+        )
+
+    severity_key = SEVERITY_THEME_KEYS.get(severity)
+    if severity_key is None:
+        return theme.get('accent-darken-2') or theme.get('accent')
+    return theme.get(f'{severity_key}-darken-2') or theme.get(severity_key)
+
+
 def alert_tab_label(theme: dict[str, str], alert: Alert) -> Text:
     """Build the shared compact label used by warning tab selectors."""
 
