@@ -12,6 +12,7 @@ from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSys
 
 from wevva.alerts import Alert
 from wevva.config import (
+    ConfigWriteError,
     add_saved_location,
     load_preferences,
     location_config_from_metadata,
@@ -461,7 +462,11 @@ class Wevva(App, inherit_bindings=False):
             self.notify('Choose a location before saving it.', severity='warning')
             return
 
-        saved_locations = add_saved_location(self.location)
+        try:
+            saved_locations = add_saved_location(self.location)
+        except ConfigWriteError as error:
+            self.notify(str(error), severity='error')
+            return
         self._set_saved_locations_from_config(saved_locations)
         self._schedule_saved_weather_refresh()
         self.notify(f'Saved {self._current_location_label()}.', severity='information')
@@ -477,7 +482,11 @@ class Wevva(App, inherit_bindings=False):
             self.notify('That location is not saved yet.', severity='warning')
             return
 
-        saved_locations = remove_saved_location(location)
+        try:
+            saved_locations = remove_saved_location(location)
+        except ConfigWriteError as error:
+            self.notify(str(error), severity='error')
+            return
         self._set_saved_locations_from_config(saved_locations)
         self._schedule_saved_weather_refresh()
         self.notify(f'Removed {location_label(location)}.', severity='information')
@@ -569,7 +578,11 @@ class Wevva(App, inherit_bindings=False):
                 save_kwargs['default_location'] = None
                 save_kwargs['default_location_metadata'] = None
 
-            save_preferences(**save_kwargs)
+            try:
+                save_preferences(**save_kwargs)
+            except ConfigWriteError as error:
+                self.notify(str(error), severity='error')
+                return
             self.notify('Default settings saved.', severity='information')
 
     def _current_location_label(self) -> str | None:

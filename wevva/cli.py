@@ -19,7 +19,14 @@ from questionary import Choice, Style
 from textual.theme import BUILTIN_THEMES
 
 from wevva.app import Wevva
-from wevva.config import add_saved_location, load_preferences, location_metadata_from_config, save_default_location, save_preferences
+from wevva.config import (
+    ConfigWriteError,
+    add_saved_location,
+    load_preferences,
+    location_metadata_from_config,
+    save_default_location,
+    save_preferences,
+)
 from wevva.constants import (
     DEFAULT_EMOJI_ENABLED,
     DEFAULT_PRECIPITATION_UNIT,
@@ -372,16 +379,20 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
                 if save_raw:
                     default_location = location_query
 
-    save_preferences(
-        temperature_unit=temperature_unit,
-        wind_speed_unit=wind_speed_unit,
-        precipitation_unit=precipitation_unit,
-        default_location=default_location,
-        theme=theme,
-        emoji_enabled=emoji_enabled,
-        warning_language=warning_language,
-        default_location_metadata=default_location_metadata,
-    )
+    try:
+        save_preferences(
+            temperature_unit=temperature_unit,
+            wind_speed_unit=wind_speed_unit,
+            precipitation_unit=precipitation_unit,
+            default_location=default_location,
+            theme=theme,
+            emoji_enabled=emoji_enabled,
+            warning_language=warning_language,
+            default_location_metadata=default_location_metadata,
+        )
+    except ConfigWriteError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
     typer.secho('\nSetup saved.', fg=typer.colors.GREEN)
     return load_preferences()
 
@@ -416,10 +427,13 @@ def _resolve_initial_location(preferences: dict[str, Any], cli_location: str | N
     if isinstance(saved_query, str) and saved_query.strip():
         location, _ = _resolve_first_location(saved_query)
         if location is not None:
-            save_default_location(
-                saved_query,
-                default_location_metadata=_location_config_from_metadata(location),
-            )
+            try:
+                save_default_location(
+                    saved_query,
+                    default_location_metadata=_location_config_from_metadata(location),
+                )
+            except ConfigWriteError as error:
+                typer.secho(str(error), fg=typer.colors.RED, err=True)
         return location
 
     saved_locations = [
@@ -451,26 +465,30 @@ def _apply_default_location_mutations(
         Reloaded preferences after applying updates.
 
     """
-    if clear_default_location:
-        save_default_location(None, default_location_metadata=None)
-        typer.secho('Cleared saved default location.', fg=typer.colors.GREEN)
+    try:
+        if clear_default_location:
+            save_default_location(None, default_location_metadata=None)
+            typer.secho('Cleared saved default location.', fg=typer.colors.GREEN)
 
-    if set_default_location:
-        location_meta, place = _resolve_first_location(set_default_location)
-        if location_meta is not None and place is not None:
-            label = _format_place(place)
-            save_default_location(
-                label,
-                default_location_metadata=_location_config_from_metadata(location_meta),
-            )
-            add_saved_location(location_meta)
-            typer.secho(f'Saved default location: {label}', fg=typer.colors.GREEN)
-        else:
-            save_default_location(set_default_location, default_location_metadata=None)
-            typer.secho(
-                'Saved location text, but geocoding failed; Wevva will retry at launch.',
-                fg=typer.colors.YELLOW,
-            )
+        if set_default_location:
+            location_meta, place = _resolve_first_location(set_default_location)
+            if location_meta is not None and place is not None:
+                label = _format_place(place)
+                save_default_location(
+                    label,
+                    default_location_metadata=_location_config_from_metadata(location_meta),
+                )
+                add_saved_location(location_meta)
+                typer.secho(f'Saved default location: {label}', fg=typer.colors.GREEN)
+            else:
+                save_default_location(set_default_location, default_location_metadata=None)
+                typer.secho(
+                    'Saved location text, but geocoding failed; Wevva will retry at launch.',
+                    fg=typer.colors.YELLOW,
+                )
+    except ConfigWriteError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
 
     return load_preferences()
 

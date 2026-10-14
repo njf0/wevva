@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed
+Archived — completed. Config reads are now side-effect-free, mutations load
+once, and write failures are surfaced to CLI and TUI users.
 
 ## Context
 
@@ -69,8 +70,21 @@ helper is appropriate only if it removes the existing multiple-read flow.
 
 ## Decisions and notes
 
-The write-error UX needs maintainer agreement before implementation.
+Write failures use a dedicated `ConfigWriteError`. Explicit CLI mutations show
+the error and exit unsuccessfully; implicit startup metadata refreshes show the
+error but still allow launch. The TUI shows an error notification and does not
+report that the save succeeded.
 
 ## Outcome
 
-To be completed when the task is finished.
+`get_config_path()` now only locates the file, while the write boundary creates
+its parent directory. Saved-location and default-location mutations each use a
+single load/normalize/write path instead of calling another public save helper
+that reloads preferences.
+
+Temporary-directory tests cover side-effect-free default loading, directory
+creation on write, preference round trips, legacy default-location migration,
+single-load mutations, and explicit write failures. Additional tests verify
+the TUI notification and CLI error/exit behavior. Source compilation, focused
+integration checks, and the complete 293-test suite pass. No manual writes to
+the real user configuration or interactive TUI check were performed.

@@ -35,6 +35,10 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 _UNSET = object()
 
 
+class ConfigWriteError(OSError):
+    """Raised when normalized preferences cannot be persisted."""
+
+
 def _normalize_unit(value: Any, *, allowed: tuple[str, ...], default: str) -> str:
     """Return a validated unit string with fallback.
 
@@ -237,7 +241,7 @@ def _normalize_saved_locations(value: Any) -> list[dict[str, Any]]:
 
 
 def get_config_path() -> Path:
-    """Return the config path, creating directories when needed.
+    """Return the config path without creating directories or files.
 
     Returns
     -------
@@ -245,10 +249,7 @@ def get_config_path() -> Path:
         Path to ``~/.config/wevva/config.json``.
 
     """
-    # Ensure the standard per-user config directory exists.
-    config_dir = Path.home() / '.config' / 'wevva'
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / 'config.json'
+    return Path.home() / '.config' / 'wevva' / 'config.json'
 
 
 def load_preferences() -> dict[str, Any]:
@@ -325,11 +326,11 @@ def _write_preferences(preferences: dict[str, Any]) -> None:
     """
     config_path = get_config_path()
     try:
-        with open(config_path, 'w') as f:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with config_path.open('w') as f:
             json.dump(preferences, f, indent=2)
-    except OSError:
-        # Avoid crashing the TUI when config cannot be written.
-        pass
+    except OSError as error:
+        raise ConfigWriteError(f'Could not save preferences to {config_path}: {error}') from error
 
 
 def save_preferences(
@@ -367,7 +368,12 @@ def save_preferences(
     Returns
     -------
     None
-        Preferences are written to disk when possible.
+        Preferences are written to disk.
+
+    Raises
+    ------
+    ConfigWriteError
+        If the configuration directory or file cannot be written.
 
     """
     # Start from existing preferences so partial updates preserve other fields.
@@ -410,15 +416,8 @@ def save_preferences(
 def save_saved_locations(saved_locations: list[dict[str, Any]]) -> None:
     """Persist saved locations while preserving other preferences."""
     preferences = load_preferences()
-    save_preferences(
-        temperature_unit=preferences['temperature_unit'],
-        wind_speed_unit=preferences['wind_speed_unit'],
-        precipitation_unit=preferences['precipitation_unit'],
-        theme=preferences['theme'],
-        emoji_enabled=preferences['emoji_enabled'],
-        warning_language=preferences['warning_language'],
-        saved_locations=saved_locations,
-    )
+    preferences['saved_locations'] = _normalize_saved_locations(saved_locations)
+    _write_preferences(preferences)
 
 
 def add_saved_location(location: LocationMetadata) -> list[dict[str, Any]]:
@@ -427,7 +426,8 @@ def add_saved_location(location: LocationMetadata) -> list[dict[str, Any]]:
     saved_locations = list(preferences.get('saved_locations') or [])
     saved_locations.append(location_config_from_metadata(location))
     saved_locations = _normalize_saved_locations(saved_locations)
-    save_saved_locations(saved_locations)
+    preferences['saved_locations'] = saved_locations
+    _write_preferences(preferences)
     return saved_locations
 
 
@@ -439,7 +439,8 @@ def remove_saved_location(location: LocationMetadata) -> list[dict[str, Any]]:
         item for item in preferences.get('saved_locations', []) if location_key(item) != remove_key
     ]
     saved_locations = _normalize_saved_locations(saved_locations)
-    save_saved_locations(saved_locations)
+    preferences['saved_locations'] = saved_locations
+    _write_preferences(preferences)
     return saved_locations
 
 
@@ -459,17 +460,16 @@ def save_default_location(
     Returns
     -------
     None
-        Preferences are written to disk when possible.
+        Preferences are written to disk.
+
+    Raises
+    ------
+    ConfigWriteError
+        If the configuration directory or file cannot be written.
 
     """
     preferences = load_preferences()
-    save_preferences(
-        temperature_unit=preferences['temperature_unit'],
-        wind_speed_unit=preferences['wind_speed_unit'],
-        precipitation_unit=preferences['precipitation_unit'],
-        default_location=default_location,
-        theme=preferences['theme'],
-        emoji_enabled=preferences['emoji_enabled'],
-        warning_language=preferences['warning_language'],
-        default_location_metadata=default_location_metadata,
-    )
+    preferences['default_location'] = _normalize_location(default_location)
+    if default_location_metadata is not _UNSET:
+        preferences['default_location_metadata'] = _normalize_location_metadata(default_location_metadata)
+    _write_preferences(preferences)

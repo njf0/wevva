@@ -130,3 +130,7 @@ it was not.
 User preferences live outside the repository at
 `~/.config/wevva/config.json`. Be aware that the setup wizard, CLI default
 location options, and in-app settings/save-location actions can modify it.
+Reading preferences does not create the directory or file. Writes create the
+parent directory when needed and raise `ConfigWriteError` on failure; the CLI
+prints that error and explicit mutations exit unsuccessfully, while the TUI
+shows an error notification instead of reporting a successful save.
