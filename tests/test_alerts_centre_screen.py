@@ -409,7 +409,7 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
             details = _rendered(screen.details.content)
-            self.assertIn('Flooding expected\nActive from ', details)
+            self.assertIn('Flooding expected\n\nActive from ', details)
             self.assertIn(' until ', details)
 
     async def test_successful_empty_and_total_failure_have_inline_states(self) -> None:

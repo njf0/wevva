@@ -771,7 +771,7 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
     heading.stylize('markdown.h3')
     renderables: list[object] = [heading]
     if include_timing:
-        renderables.append(_alert_timing_renderable(alert))
+        renderables.extend((Text(''), _alert_timing_renderable(alert)))
     if alert.description and alert.description.strip():
         renderables.extend((Text(''), *_alert_text_renderables(alert.description)))
     if alert.instruction and alert.instruction.strip():
