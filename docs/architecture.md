@@ -164,6 +164,16 @@ one-line four-instrument row, and hourly condition/temperature/time fit in the
 22 rows between the header and footer. Rain is added before wind as rows become
 available; current conditions grow only after both value rows fit.
 
+Interactive map callouts share the pure ranked terminal-cell planner in
+`wevva/widgets/map_callouts.py`. Each map continues to own its geographic
+candidates, ranking, label budget, widgets, and activation messages, while the
+planner consistently handles left/right direction, occupied cells, future
+anchor protection, and caller-selected fallback. Native labels which contain
+their marker disable vertical movement, so every successful marker endpoint
+stays on its projected cell. Tropical fixes additionally request an exact
+one-cell fallback, and tropical city labels supply cone cells as preferred—not
+mandatory—avoidance.
+
 The country map uses the same Natural Earth map-unit, populated-place, local
 projection, Braille raster, and collision-fitted label path as the other
 geographic scopes. The selected location chooses a useful local component

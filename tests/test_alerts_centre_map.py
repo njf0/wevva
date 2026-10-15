@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from textual.app import App, ComposeResult
 from wevva_warnings import Alert
@@ -23,6 +24,7 @@ from wevva.widgets.country_alerts_map import (
     country_alert_city_label_budget,
     render_country_alerts_map,
 )
+from wevva.widgets.geographic_scope import GeographicCanvas
 from wevva.widgets.weather_alerts import (
     alert_severity_color,
     alert_severity_surface_color,
@@ -150,6 +152,70 @@ class CountryAlertsMapGeometryTests(unittest.TestCase):
         self.assertIn('dim dark_orange', styles)
         self.assertIn('blue', styles)
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
+
+    def test_consecutive_context_polygons_with_the_same_style_share_a_layer(
+        self,
+    ) -> None:
+        scope = build_country_alerts_map_geometry('DE')
+        assert scope is not None
+        first = _alert('first', severity='Moderate', geometry=WEST_GERMANY)
+        second = _alert('second', severity='Moderate', geometry=WEST_GERMANY)
+        selected = _alert('selected', severity='Severe', geometry=WEST_GERMANY)
+        alert_layers = build_country_alert_polygon_layers(
+            [first, second, selected],
+            scope.viewport,
+        )
+        frame_layers: list[tuple[str, str | None]] = []
+        filled_alert_polygons: dict[str, int] = {}
+        original_frame = GeographicCanvas.frame
+        original_fill_polygons = GeographicCanvas.fill_polygons
+
+        def capture_frame(canvas, layers, **kwargs):
+            frame_layers.extend(layers)
+            return original_frame(canvas, frame_layers, **kwargs)
+
+        def capture_fill_polygons(canvas, polygons, *, layer):
+            polygons = tuple(polygons)
+            if layer.startswith('alert-'):
+                filled_alert_polygons[layer] = (
+                    filled_alert_polygons.get(layer, 0) + len(polygons)
+                )
+            return original_fill_polygons(canvas, polygons, layer=layer)
+
+        with (
+            patch(
+                'wevva.widgets.country_alerts_map.GeographicCanvas.frame',
+                new=capture_frame,
+            ),
+            patch(
+                'wevva.widgets.country_alerts_map.GeographicCanvas.fill_polygons',
+                new=capture_fill_polygons,
+            ),
+        ):
+            render_country_alerts_map(
+                scope,
+                alert_layers,
+                width=60,
+                height=20,
+                land_style='blue',
+                alert_styles={
+                    ('fixture', 'first'): 'dim yellow',
+                    ('fixture', 'second'): 'dim yellow',
+                    ('fixture', 'selected'): 'red',
+                },
+                alert_land_styles={
+                    ('fixture', 'first'): 'dim dark_orange',
+                    ('fixture', 'second'): 'dim dark_orange',
+                    ('fixture', 'selected'): 'dark_red',
+                },
+                selected_alert_key=('fixture', 'selected'),
+            )
+
+        self.assertEqual(
+            frame_layers,
+            [('land', 'blue'), ('alert-0', 'dim yellow'), ('alert-1', 'red')],
+        )
+        self.assertEqual(filled_alert_polygons, {'alert-0': 1, 'alert-1': 1})
 
     def test_selected_polygon_fits_a_smaller_view_and_prioritizes_inside_places(self) -> None:
         flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)
@@ -352,6 +418,33 @@ class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(widget.placements)
 
             visible_keys = {placement.key for placement in widget.placements}
+            assert widget.geometry is not None
+            canvas = GeographicCanvas(
+                widget.content_size.width,
+                widget.content_size.height,
+                widget.geometry.viewport,
+            )
+            canvas.fill_polygons(widget.geometry.land, layer='land')
+            canvas.frame(
+                (('land', None),),
+                centering_layers=(
+                    () if widget.geometry.selected_alert_polygons else ('land',)
+                ),
+            )
+            points = {
+                (place.latitude, place.longitude): point
+                for place, point in widget.geometry.places
+            }
+            for placement in widget.placements:
+                marker_column = (
+                    placement.column + placement.width - 1
+                    if placement.marker_on_right
+                    else placement.column
+                )
+                self.assertEqual(
+                    (marker_column, placement.row),
+                    canvas.cell_position(points[placement.key]),
+                )
             label = next(
                 label
                 for label in labels

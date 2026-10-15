@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from functools import lru_cache
 import math
 
@@ -28,6 +27,12 @@ from wevva.widgets.geographic_scope import (
     GeographicFrame,
     ProjectedPolygon,
 )
+from wevva.widgets.map_callouts import (
+    DirectionalCalloutCandidate,
+    DirectionalCalloutPlacement,
+    DirectionalCalloutPolicy,
+    plan_directional_callouts,
+)
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
@@ -43,15 +48,7 @@ _WORLD_VIEWPORT = GeographicViewport(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class WorldLocationPlacement:
-    """One collision-free terminal placement for a location callout."""
-
-    key: str
-    column: int
-    row: int
-    width: int
-    marker_on_right: bool
+WorldLocationPlacement = DirectionalCalloutPlacement[str]
 
 
 class WorldLocationLabel(Static, can_focus=True):
@@ -331,9 +328,8 @@ class WorldLocationsMap(Container):
             layout=False,
         )
 
-        occupied: set[tuple[int, int]] = set()
         visited: set[str] = set()
-        placements: dict[str, WorldLocationPlacement] = {}
+        candidates = []
         for location in self._locations:
             key = location_key(location)
             if key in visited:
@@ -346,65 +342,29 @@ class WorldLocationsMap(Container):
                 float(location.longitude),
                 float(location.latitude),
             )
-            anchor = frame.canvas.cell_position(point)
-            placement = _place_callout(
-                key,
-                anchor=anchor,
-                label_width=cell_len(label.label_text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=occupied,
+            candidates.append(
+                DirectionalCalloutCandidate(
+                    key=key,
+                    anchor=frame.canvas.cell_position(point),
+                    width=cell_len(label.label_text),
+                )
             )
-            if placement is None:
-                label.display = False
-                continue
+        planned = plan_directional_callouts(
+            candidates,
+            canvas_width=width,
+            canvas_height=height,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )
+        placements = {placement.key: placement for placement in planned}
+        for key, placement in placements.items():
+            label = self._labels[key]
             label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
-            placements[key] = placement
+        for key, label in self._labels.items():
+            if key not in placements:
+                label.display = False
         self._placements = placements
-
-
-def _place_callout(
-    key: str,
-    *,
-    anchor: tuple[int, int],
-    label_width: int,
-    canvas_width: int,
-    canvas_height: int,
-    occupied: set[tuple[int, int]],
-) -> WorldLocationPlacement | None:
-    """Place one callout as close to its projected cell as possible."""
-
-    label_width = min(max(1, label_width), canvas_width)
-    anchor_column, anchor_row = anchor
-    row_offsets = [0]
-    for distance in range(1, canvas_height):
-        row_offsets.extend((-distance, distance))
-
-    for row_offset in row_offsets:
-        row = anchor_row + row_offset
-        if not 0 <= row < canvas_height:
-            continue
-        candidates = (
-            (anchor_column, False),
-            (anchor_column - label_width + 1, True),
-        )
-        for column, marker_on_right in candidates:
-            if column < 0 or column + label_width > canvas_width:
-                continue
-            cells = {(column + offset, row) for offset in range(label_width)}
-            if cells & occupied:
-                continue
-            occupied.update(cells)
-            return WorldLocationPlacement(
-                key=key,
-                column=column,
-                row=row,
-                width=label_width,
-                marker_on_right=marker_on_right,
-            )
-    return None
 
 
 @lru_cache(maxsize=1)

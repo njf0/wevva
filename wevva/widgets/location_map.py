@@ -32,7 +32,12 @@ from wevva.widgets.geographic_scope import (
     ProjectedPolygon,
     preferred_geographic_height,
 )
-from wevva.widgets.map_callouts import place_directional_callout
+from wevva.widgets.map_callouts import (
+    DirectionalCalloutCandidate,
+    DirectionalCalloutPlacement,
+    DirectionalCalloutPolicy,
+    plan_directional_callouts,
+)
 
 _MIN_CONTENT_HEIGHT = 12
 _MAX_CONTENT_HEIGHT = 26
@@ -67,15 +72,7 @@ class LocationMapPalette:
     location_label: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class LocationMapPlacement:
-    """One collision-free terminal placement for a map callout."""
-
-    key: str
-    column: int
-    row: int
-    width: int
-    marker_on_right: bool
+LocationMapPlacement = DirectionalCalloutPlacement[str]
 
 
 def build_location_map_geometry(
@@ -570,49 +567,28 @@ class LocationMap(Container):
             return
 
         canvas = GeographicCanvas(width, height, self._scope.viewport)
-        occupied: set[tuple[int, int]] = set()
-        placements: dict[str, LocationMapPlacement] = {}
         specs = self._label_specs()[: 1 + self._max_place_labels]
-        anchors = [
-            canvas.cell_position(point)
-            for _key, _location, point, _current in specs
-        ]
-        for index, (key, _location, _point, _current) in enumerate(specs):
-            label = self._labels.get(key)
-            if label is None:
-                continue
-            anchor = anchors[index]
-            protected_occupied = occupied | set(anchors[index + 1 :])
-            placement = _place_callout(
-                key,
-                anchor=anchor,
-                label_width=cell_len(label.label_text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=protected_occupied,
+        candidates = [
+            DirectionalCalloutCandidate(
+                key=key,
+                anchor=canvas.cell_position(point),
+                width=cell_len(label.label_text),
             )
-            if placement is None:
-                # A lower-ranked marker should influence direction where both
-                # labels fit, but must not displace a higher-ranked callout.
-                placement = _place_callout(
-                    key,
-                    anchor=anchor,
-                    label_width=cell_len(label.label_text),
-                    canvas_width=width,
-                    canvas_height=height,
-                    occupied=set(occupied),
-                )
-            if placement is None:
-                label.display = False
-                continue
+            for key, _location, point, _current in specs
+            if (label := self._labels.get(key)) is not None
+        ]
+        planned = plan_directional_callouts(
+            candidates,
+            canvas_width=width,
+            canvas_height=height,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )
+        placements = {placement.key: placement for placement in planned}
+        for key, placement in placements.items():
+            label = self._labels[key]
             label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
-            placements[key] = placement
-            occupied.update(
-                (placement.column + offset, placement.row)
-                for offset in range(placement.width)
-            )
 
         visible_keys = set(placements)
         for key, label in self._labels.items():
@@ -648,35 +624,6 @@ def _place_key(place: PopulatedPlace) -> PlaceKey:
 
 def _label_key(place: PopulatedPlace) -> str:
     return f'{place.latitude:.6f},{place.longitude:.6f}'
-
-
-def _place_callout(
-    key: str,
-    *,
-    anchor: tuple[int, int],
-    label_width: int,
-    canvas_width: int,
-    canvas_height: int,
-    occupied: set[tuple[int, int]],
-) -> LocationMapPlacement | None:
-    """Place one native callout near its projected city cell."""
-    placement = place_directional_callout(
-        anchor=anchor,
-        label_width=label_width,
-        canvas_width=canvas_width,
-        canvas_height=canvas_height,
-        occupied=occupied,
-        allow_row_shift=False,
-    )
-    if placement is None:
-        return None
-    return LocationMapPlacement(
-        key=key,
-        column=placement.column,
-        row=placement.row,
-        width=placement.width,
-        marker_on_right=placement.marker_on_right,
-    )
 
 
 def _normalized_place_name(name: str) -> str:

@@ -14,7 +14,11 @@ from wevva.messages import SavedLocationSelected
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
-from wevva.widgets.world_locations_map import WorldLocationLabel, WorldLocationsMap
+from wevva.widgets.world_locations_map import (
+    WorldLocationLabel,
+    WorldLocationsMap,
+    _world_frame,
+)
 
 
 LONDON = LocationMetadata(
@@ -98,6 +102,15 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
             )
 
             occupied = set()
+            frame = _world_frame(
+                world_map.content_size.width,
+                world_map.content_size.height,
+                land_style=None,
+            )
+            locations = {
+                location_key(location): location
+                for location in (LONDON, NEW_YORK, TOKYO)
+            }
             for placement in world_map.placements:
                 cells = {
                     (placement.column + offset, placement.row)
@@ -105,6 +118,16 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
                 }
                 self.assertFalse(cells & occupied)
                 occupied.update(cells)
+                location = locations[placement.key]
+                anchor = frame.canvas.cell_position(
+                    frame.canvas.viewport.project(location.longitude, location.latitude)
+                )
+                marker_column = (
+                    placement.column + placement.width - 1
+                    if placement.marker_on_right
+                    else placement.column
+                )
+                self.assertEqual((marker_column, placement.row), anchor)
 
             backdrop = world_map.query_one('#world-locations-backdrop')
             rendered = backdrop.render()

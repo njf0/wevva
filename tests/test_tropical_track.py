@@ -26,6 +26,7 @@ from wevva.widgets.tropical_track import (
     extract_storm_track,
     project_track_locally,
     render_braille_scope,
+    _scope_frame,
 )
 
 
@@ -411,6 +412,7 @@ class TropicalTrackCalloutPlacementTests(unittest.TestCase):
             canvas_height=5,
             occupied=occupied,
             preferred_avoidance={(column, 2) for column in range(2, 9)} - {(5, 2)},
+            allow_row_shift=True,
         )
 
         assert placement is not None
@@ -431,6 +433,7 @@ class TropicalTrackCalloutPlacementTests(unittest.TestCase):
             canvas_height=1,
             occupied=set(),
             preferred_avoidance={(column, 0) for column in range(5)} - {(2, 0)},
+            allow_row_shift=True,
         )
 
         assert placement is not None
@@ -677,6 +680,37 @@ class TropicalTrackWidgetTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(any(item.kind == 'fix' for item in widget.placements))
             self.assertTrue(any(item.kind == 'city' for item in widget.placements))
+            assert widget._scope is not None
+            frame = _scope_frame(
+                widget._scope,
+                width=widget.content_size.width,
+                height=widget.content_size.height,
+                palette=ScopePalette(),
+            )
+            city_points = {
+                f'city-{label.place.latitude:.6f},{label.place.longitude:.6f}': (
+                    frame.canvas.viewport.project(
+                        label.place.longitude,
+                        label.place.latitude,
+                    )
+                )
+                for label in cities
+            }
+            for placement in widget.placements:
+                marker_column = (
+                    placement.column + placement.width - 1
+                    if placement.marker_on_right
+                    else placement.column
+                )
+                point = (
+                    widget._scope.storm[int(placement.key.removeprefix('fix-'))]
+                    if placement.kind == 'fix'
+                    else city_points[placement.key]
+                )
+                self.assertEqual(
+                    (marker_column, placement.row),
+                    frame.canvas.cell_position(point),
+                )
 
             backdrop = widget.query_one('.tropical-track-backdrop', Static).render()
             self.assertNotIn('Now', backdrop.plain)

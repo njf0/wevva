@@ -37,7 +37,11 @@ from wevva.widgets.geographic_scope import (
     ProjectedPolygon,
     preferred_geographic_height,
 )
-from wevva.widgets.map_callouts import place_directional_callout
+from wevva.widgets.map_callouts import (
+    DirectionalCalloutCandidate,
+    DirectionalCalloutPolicy,
+    plan_directional_callouts,
+)
 
 _MIN_CONTENT_HEIGHT = 7
 _MAX_CONTENT_HEIGHT = 16
@@ -639,53 +643,36 @@ class TropicalStormTrackScope(Container):
             for index, _label_text in self._scope.fix_labels
             if index < len(self._scope.storm)
         }
-        # A lead callout may move around its own anchor, but must never cover
-        # another provider-supplied fix.
-        occupied: set[tuple[int, int]] = set(fix_cells.values())
         placements: dict[str, TropicalMapPlacement] = {}
+        fix_candidates = []
         for index, _label_text in self._scope.fix_labels:
             key = f'fix-{index}'
             label = self._fix_labels.get(key)
             if label is None or index >= len(self._scope.storm):
                 continue
-            anchor = fix_cells[index]
-            occupied.discard(anchor)
-            label.set_marker_only(False)
-            if not label._body_text:
-                label.set_marker_on_right(False)
-                label.display = True
-                label.styles.offset = anchor
-                occupied.add(anchor)
-                placements[key] = TropicalMapPlacement(
+            fix_candidates.append(
+                DirectionalCalloutCandidate(
                     key=key,
-                    kind='fix',
-                    column=anchor[0],
-                    row=anchor[1],
-                    width=1,
-                    marker_on_right=False,
+                    anchor=fix_cells[index],
+                    width=cell_len(label.label_text),
+                    fallback_width=1,
                 )
-                continue
-            placement = place_directional_callout(
-                anchor=anchor,
-                label_width=cell_len(label.label_text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=occupied,
             )
-            if placement is None:
-                label.set_marker_only(True)
-                label.display = True
-                label.styles.offset = anchor
-                occupied.add(anchor)
-                placements[key] = TropicalMapPlacement(
-                    key=key,
-                    kind='fix',
-                    column=anchor[0],
-                    row=anchor[1],
-                    width=1,
-                    marker_on_right=False,
-                )
-                continue
+        fix_plans = plan_directional_callouts(
+            fix_candidates,
+            canvas_width=width,
+            canvas_height=height,
+            policy=DirectionalCalloutPolicy(
+                allow_row_shift=False,
+                retain_higher_priority=False,
+            ),
+        )
+        for label in self._fix_labels.values():
+            label.display = False
+        for placement in fix_plans:
+            key = placement.key
+            label = self._fix_labels[key]
+            label.set_marker_only(placement.used_fallback)
             label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
@@ -700,32 +687,42 @@ class TropicalStormTrackScope(Container):
 
         for label in self._city_labels.values():
             label.display = False
-        labels_added = 0
+        occupied = {
+            (placement.column + offset, placement.row)
+            for placement in fix_plans
+            for offset in range(placement.width)
+        }
+        city_candidates = []
         for place, point in _visible_place_candidates(
             self._scope.places,
             frame.canvas.viewport,
             self._scope.storm,
         ):
-            if labels_added >= _MAX_PLACE_LABELS:
-                break
             key = _place_key(place)
             label = self._city_labels.get(key)
             if label is None:
                 continue
             anchor = frame.canvas.cell_position(point)
-            placement = place_directional_callout(
-                anchor=anchor,
-                label_width=cell_len(label.label_text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=occupied,
-                # The city marker belongs at its geographic anchor even when
-                # that point lies inside the cone; prefer to keep its name off
-                # the cone while retaining a collision-safe fallback.
-                preferred_avoidance=cone_cells - {anchor},
+            city_candidates.append(
+                DirectionalCalloutCandidate(
+                    key=key,
+                    anchor=anchor,
+                    width=cell_len(label.label_text),
+                    # The anchor remains valid inside the cone, while label
+                    # text prefers clear cells when either direction permits.
+                    preferred_avoidance=frozenset(cone_cells - {anchor}),
+                )
             )
-            if placement is None:
-                continue
+        city_plans = plan_directional_callouts(
+            city_candidates,
+            canvas_width=width,
+            canvas_height=height,
+            occupied=occupied,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )[:_MAX_PLACE_LABELS]
+        for placement in city_plans:
+            key = placement.key
+            label = self._city_labels[key]
             label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
@@ -737,7 +734,6 @@ class TropicalStormTrackScope(Container):
                 width=placement.width,
                 marker_on_right=placement.marker_on_right,
             )
-            labels_added += 1
         self._placements = placements
 
 

@@ -31,6 +31,12 @@ from wevva.geography import (
 )
 from wevva.services.country_alerts import country_alert_identity
 from wevva.widgets.geographic_scope import GeographicCanvas, ProjectedPolygon
+from wevva.widgets.map_callouts import (
+    DirectionalCalloutCandidate,
+    DirectionalCalloutPlacement,
+    DirectionalCalloutPolicy,
+    plan_directional_callouts,
+)
 from wevva.widgets.weather_alerts import (
     alert_severity_color,
     alert_severity_surface_color,
@@ -89,15 +95,7 @@ class CountryAlertPolygonLayer:
     polygons: tuple[ProjectedPolygon, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class CountryAlertsMapPlacement:
-    """One collision-free native city-callout placement."""
-
-    key: PlaceKey
-    column: int
-    row: int
-    width: int
-    marker_on_right: bool
+CountryAlertsMapPlacement = DirectionalCalloutPlacement[PlaceKey]
 
 
 @lru_cache(maxsize=256)
@@ -293,13 +291,27 @@ def render_country_alerts_map(
     layers: list[tuple[str, str | None]] = [('land', land_style)]
     solid_layers = ['land']
     overlap_styles: dict[tuple[str, str], str | None] = {}
-    for index, layer in enumerate(ordered_layers):
-        layer_name = f'alert-{index}'
-        canvas.fill_polygons(layer.polygons, layer=layer_name)
-        layers.append((layer_name, alert_styles.get(layer.key)))
-        if layer.key in alert_land_styles:
-            overlap_styles[(layer_name, 'land')] = alert_land_styles[layer.key]
-        solid_layers.append(layer_name)
+    seen_polygons: dict[str, set[ProjectedPolygon]] = {}
+    previous_signature: tuple[str | None, bool, str | None] | None = None
+    layer_name = ''
+    for layer in ordered_layers:
+        alert_style = alert_styles.get(layer.key)
+        has_land_style = layer.key in alert_land_styles
+        alert_land_style = alert_land_styles.get(layer.key)
+        signature = (alert_style, has_land_style, alert_land_style)
+        if signature != previous_signature:
+            layer_name = f'alert-{len(solid_layers) - 1}'
+            layers.append((layer_name, alert_style))
+            if has_land_style:
+                overlap_styles[(layer_name, 'land')] = alert_land_style
+            solid_layers.append(layer_name)
+            previous_signature = signature
+        seen = seen_polygons.setdefault(layer_name, set())
+        unique_polygons = [
+            polygon for polygon in layer.polygons if polygon not in seen
+        ]
+        seen.update(unique_polygons)
+        canvas.fill_polygons(unique_polygons, layer=layer_name)
     return canvas.frame(
         layers,
         solid_braille_layers=solid_layers,
@@ -647,37 +659,39 @@ class CountryAlertsMap(Container):
             )
             label.styles.offset = (column, row)
             label.display = True
-        placements: dict[PlaceKey, CountryAlertsMapPlacement] = {}
-        labels_added = 0
         city_limit = country_alert_city_label_budget(
             width,
             height,
             maximum=self._max_city_labels,
         )
+        candidates = []
         for place, point in self._scope.places:
             key = _place_key(place)
             label = self._labels.get(key)
             if label is None:
                 continue
-            if labels_added >= city_limit:
-                label.display = False
-                continue
-            placement = _place_callout(
-                key,
-                anchor=canvas.cell_position(point),
-                label_width=cell_len(label.label_text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=occupied,
+            candidates.append(
+                DirectionalCalloutCandidate(
+                    key=key,
+                    anchor=canvas.cell_position(point),
+                    width=cell_len(label.label_text),
+                )
             )
-            if placement is None:
-                label.display = False
-                continue
+        planned = plan_directional_callouts(
+            candidates,
+            canvas_width=width,
+            canvas_height=height,
+            occupied=occupied,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )[:city_limit]
+        placements = {placement.key: placement for placement in planned}
+        for label in self._labels.values():
+            label.display = False
+        for key, placement in placements.items():
+            label = self._labels[key]
             label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
-            placements[key] = placement
-            labels_added += 1
         self._placements = placements
 
 
@@ -803,44 +817,6 @@ def _compact_longitude_origin(longitudes: Iterable[float]) -> float:
 
 def _place_key(place: PopulatedPlace) -> PlaceKey:
     return place.latitude, place.longitude
-
-
-def _place_callout(
-    key: PlaceKey,
-    *,
-    anchor: tuple[int, int],
-    label_width: int,
-    canvas_width: int,
-    canvas_height: int,
-    occupied: set[tuple[int, int]],
-) -> CountryAlertsMapPlacement | None:
-    label_width = min(max(1, label_width), canvas_width)
-    anchor_column, anchor_row = anchor
-    row_offsets = [0]
-    for distance in range(1, canvas_height):
-        row_offsets.extend((-distance, distance))
-    for row_offset in row_offsets:
-        row = anchor_row + row_offset
-        if not 0 <= row < canvas_height:
-            continue
-        for column, marker_on_right in (
-            (anchor_column, False),
-            (anchor_column - label_width + 1, True),
-        ):
-            if column < 0 or column + label_width > canvas_width:
-                continue
-            cells = {(column + offset, row) for offset in range(label_width)}
-            if cells & occupied:
-                continue
-            occupied.update(cells)
-            return CountryAlertsMapPlacement(
-                key=key,
-                column=column,
-                row=row,
-                width=label_width,
-                marker_on_right=marker_on_right,
-            )
-    return None
 
 
 __all__ = [
