@@ -308,13 +308,6 @@ class AlertsCentreScreen(Screen[None]):
         scrollbar-size-vertical: 1;
     }
 
-    #alerts-centre-alert-list > .option-list--option-highlighted,
-    #alerts-centre-alert-list:focus > .option-list--option-highlighted {
-        color: $text;
-        background: transparent;
-        text-style: reverse;
-    }
-
     #alerts-centre-alert-list > .option-list--separator {
         color: $primary-muted;
     }
@@ -503,6 +496,7 @@ class AlertsCentreScreen(Screen[None]):
         self._pending_units_changed = False
         self._pending_appearance_changed = False
         self._pending_language_changed = False
+        self._filter_dialog_open = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -608,9 +602,14 @@ class AlertsCentreScreen(Screen[None]):
 
     def on_screen_resume(self) -> None:
         """Apply changes queued while this installed screen was suspended."""
-        country_code = self._initial_country()
-        if country_code is not None and country_code != self.selected_country_code:
-            self._choose_country(country_code)
+        if self._filter_dialog_open:
+            # Returning from our child modal must retain the country being
+            # filtered rather than reapplying the weather location's country.
+            self._filter_dialog_open = False
+        else:
+            country_code = self._initial_country()
+            if country_code is not None and country_code != self.selected_country_code:
+                self._choose_country(country_code)
         self._apply_pending_preferences()
 
     def on_unmount(self) -> None:
@@ -737,6 +736,7 @@ class AlertsCentreScreen(Screen[None]):
         available_severities = {value for _, value in severity_options}
         if self.alert_severity_filter not in available_severities:
             self.alert_severity_filter = ''
+        self._filter_dialog_open = True
         self.app.push_screen(
             AlertFilterDialog(
                 self.alert_filter_value,

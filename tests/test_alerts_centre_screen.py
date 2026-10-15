@@ -166,6 +166,37 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.selected_country_code, 'FR')
             self.assertEqual(service.calls, [('DE', False), ('FR', False)])
 
+    async def test_filter_modal_retains_the_current_country_on_apply(self) -> None:
+        service = _FixtureService({'DE': [], 'FR': []})
+        screen = AlertsCentreScreen(
+            service=service,  # type: ignore[arg-type]
+            countries=[GERMANY, FRANCE],
+            initial_country_code='DE',
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            screen.country_select.value = 'FR'
+            await pilot.pause()
+            screen.alert_filter_button.focus()
+            await pilot.press('enter')
+            await pilot.pause()
+
+            self.assertIsInstance(app.screen, AlertFilterDialog)
+            app.screen.query_one(
+                '#alerts-centre-filter-dialog-sort',
+                Select,
+            ).value = 'new'
+            await pilot.click('#alerts-centre-filter-apply')
+            await pilot.pause()
+
+            self.assertIs(app.screen, screen)
+            self.assertEqual(screen.selected_country_code, 'FR')
+            self.assertEqual(screen.country_select.value, 'FR')
+            self.assertEqual(screen.alert_sort_value, 'new')
+            self.assertEqual(service.calls, [('DE', False), ('FR', False)])
+
     async def test_country_switch_ignores_the_superseded_result(self) -> None:
         german = _alert(
             'german-flood',
@@ -257,8 +288,20 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(first_prompt.no_wrap)
             self.assertEqual(first_prompt.overflow, 'ellipsis')
+            self.assertEqual(screen.alert_list.highlighted, 0)
+            self.assertIsNotNone(
+                screen.alert_list.get_component_rich_style(
+                    'option-list--option-highlighted',
+                ).bgcolor
+            )
             self.assertTrue(screen.alert_list.get_option_at_index(0)._divider)
             self.assertFalse(screen.alert_list.get_option_at_index(1)._divider)
+
+            screen.alert_list.highlighted = 1
+            screen.alert_list.action_select()
+            await pilot.pause()
+            self.assertEqual(screen.selected_alert_key, ('fixture-source', 'wind'))
+            self.assertEqual(screen.alert_list.highlighted, 1)
 
             screen.alert_filter_button.focus()
             await pilot.press('enter')

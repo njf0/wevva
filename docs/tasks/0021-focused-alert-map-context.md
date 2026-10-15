@@ -9,8 +9,13 @@ Proposed — problem and boundaries recorded; implementation not started
 Task 0020 Slice E is complete. It supplies selected-alert viewport fitting,
 provider geometry rendering, retained unprojected geography, responsive label
 budgets, collision placement, and a checked-in Natural Earth 1:10m focused
-place layer. This task enriches only the contextual labels within that existing
-viewport.
+place layer. This task enriches only the contextual labels within the supplied
+effective viewport.
+
+Task 0024 may later replace that automatic viewport with a bounded effective
+viewport produced by pan and zoom controls. Task 0021 owns the label policy for
+either form of viewport—including scale-adaptive density—but does not own the
+controls, viewport state, scale bar, or polygon-rendering performance.
 
 Slices F and G of Task 0020 are complete. Their settlement selection and
 hourly-forecast work consume a stable place identity
@@ -40,6 +45,8 @@ coverage problem, not a viewport or projection failure.
 
 - Natural Earth 1:10m is not a comprehensive settlement gazetteer.
 - Administrative labels are incorrectly coupled to settlement presence.
+- Candidate and display budgets are fixed rather than responding to the
+  geographic scale of the effective viewport.
 - Offshore alerts may truthfully contain no settlement at all and need named
   physical or marine context rather than increasingly obscure towns.
 - Loading a full global gazetteer at runtime, querying a live geocoder for each
@@ -64,7 +71,12 @@ The result follows one global data and ranking path. It does not treat US
 states, counties, NWS zones, or US settlements as a special presentation tier.
 Provider geometry remains the sole authority for the warning footprint.
 
-This remains a static label lookup for an existing viewport, not a general map
+Candidate and display density may increase conservatively as the effective
+viewport zooms closer, whether that viewport comes from the automatic alert fit
+or Task 0024's manual navigation. Geographic scale, not terminal dimensions or
+country-specific rules, drives those bands.
+
+This remains an offline label lookup for a supplied viewport, not a general map
 engine.
 
 ## Firm architectural boundary
@@ -76,6 +88,8 @@ In scope:
 - a small local viewport query, preferably over country/grid buckets rather
   than scanning or materializing an unrestricted source dump per selection;
 - stable category-aware ranking and existing Textual collision placement;
+- deterministic scale-adaptive candidate and display budgets for contextual
+  labels;
 - settlement activation compatibility with Task 0020 Slices F and G;
 - source, version/date, licence, attribution, and reproducible build notes; and
 - deterministic fixture tests with no network dependency.
@@ -83,7 +97,9 @@ In scope:
 Out of scope:
 
 - slippy-map tiles, roads, buildings, addresses, parcels, or land-use layers;
-- user-controlled pan or zoom, arbitrary map browsing, or navigation history;
+- user-controlled pan or zoom, arbitrary map browsing, navigation history,
+  viewport state, controls, or scale bars; Task 0021 may consume Task 0024's
+  effective viewport but never implements its navigation;
 - new projections, map servers, spatial databases, or a general GIS API;
 - drawing new administrative, hydrological, or transport boundary geometry;
 - reverse geocoding or live GeoNames/OpenStreetMap calls during application use;
@@ -135,12 +151,13 @@ The measurement decides whether `cities500` is acceptable or whether a smaller
 population threshold/extract is warranted. Do not commit the full GeoNames
 `allCountries` archive.
 
-## Runtime query and ranking
+## Runtime query, ranking, and density
 
-The focused viewport continues to come from Task 0020. Query a modest halo
-around it so nearby context can remain visible when a warning polygon narrowly
-misses a settlement or crosses a border. Longitude wrapping must retain the
-existing antimeridian behavior.
+The effective viewport comes from Task 0020's automatic alert fit or, when
+available, Task 0024's bounded manual override. Query a modest halo around it
+so nearby context can remain visible when a warning polygon narrowly misses a
+settlement or crosses a border. Longitude wrapping must retain the existing
+antimeridian behavior.
 
 Keep label categories independent:
 
@@ -162,6 +179,13 @@ Keep label categories independent:
 The query may return candidates across national borders because those labels
 can explain a focused alert's location. Country codes remain useful for
 identity, localized naming, and tie-breaking, not as a hard viewport filter.
+
+Define a small number of stable density bands from the effective viewport's
+geographic span relative to the automatic fit. Closer bands may consider more
+settlements, admit lower-ranked source records, and raise the display budget;
+the shared Task 0023 collision planner still decides what fits. Zooming out
+must reduce clutter. Sparse source coverage remains sparse rather than being
+filled with invented or remote labels.
 
 Settlement widgets should receive source-neutral records. A future selected
 settlement must still have a stable key, name, and coordinates for the hourly
@@ -199,6 +223,8 @@ to add NWS-specific zone fetching or name/geometry guessing in Wevva.
   whole-country and other existing maps.
 - Preserve inside-geometry priority, deterministic ranking, collision limits,
   and no-network resize/selection behavior.
+- Add pure scale-band and candidate/display-budget policy that accepts an
+  effective viewport without depending on Task 0024's controls or widget state.
 - Keep Task 0020's existing Natural Earth layer as a safe fallback when the new
   resource cannot load.
 
@@ -223,7 +249,9 @@ to add NWS-specific zone fetching or name/geometry guessing in Wevva.
 
 ## Acceptance criteria
 
-- The alert viewport and polygon rendering are unchanged from Task 0020.
+- Task 0021 does not create or mutate the alert viewport and does not change
+  polygon rendering; it consumes the effective viewport supplied by Task 0020
+  or Task 0024.
 - Focused terrestrial fixtures which were blank under Natural Earth show useful
   nearby settlements, including small communities where source data exists.
 - Admin-1/Admin-2 context does not depend on the presence or visibility of a
@@ -231,6 +259,9 @@ to add NWS-specific zone fetching or name/geometry guessing in Wevva.
 - Administrative labels contain no marker dots and are not selectable.
 - US and rest-of-world fixtures follow the same category and ranking rules.
 - Cross-border and wrapped-longitude viewports return stable relevant labels.
+- Closer effective viewports can admit additional suitable labels and wider
+  views reduce clutter, with deterministic results independent of whether the
+  viewport was produced automatically or by Task 0024.
 - A map resize performs no file reload, rebuild, or network request.
 - Country maps and unrelated location/world maps retain their existing compact
   Natural Earth behavior and performance.
@@ -279,6 +310,7 @@ proof of exhaustive global coverage.
 - `tests/test_alerts_centre_map.py`
 - `tests/test_geography.py`
 - Task 0020 Slices E, F, and G
+- Task 0024's effective-viewport consumer boundary
 
 ## Source references
 
@@ -291,8 +323,9 @@ proof of exhaustive global coverage.
 
 ## Decisions and handoff notes
 
-- The screenshots motivating this task show correctly focused alert viewports;
-  do not reopen viewport fitting without separate evidence.
+- The screenshots motivating this task show correctly focused automatic alert
+  viewports. Do not implement viewport fitting or navigation here; consume the
+  effective viewport supplied by Task 0020/0024.
 - Natural Earth remains the appropriate low-cost country/base-map source. Its
   selective place coverage is not a failed Slice E implementation.
 - The current focused implementation loads
@@ -309,5 +342,6 @@ proof of exhaustive global coverage.
   perform network work for map labels.
 - GeoNames is the leading candidate, not an irrevocable dependency. Slice A
   must establish that its compact artifact has acceptable cost and coverage.
-- The stopping rule is explicit: this task ends with useful static labels for
-  an existing warning viewport. It does not own general-purpose mapping.
+- The stopping rule is explicit: this task ends with useful contextual labels
+  and density policy for a supplied warning viewport. It does not own viewport
+  interaction or general-purpose mapping.
