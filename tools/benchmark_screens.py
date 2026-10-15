@@ -17,7 +17,7 @@ from statistics import median
 import time
 import tracemalloc
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from textual.widgets import Tabs
 from wevva_warnings import CanonicalTropicalSystem
@@ -29,6 +29,14 @@ from tests.weather_fixtures import weather_update
 from wevva import geography
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
+from wevva.messages import (
+    DaySelected,
+    HourHighlighted,
+    PlaceSelected,
+    SearchQueryReady,
+    WeatherAlertsProgress,
+    WeatherAlertsUpdated,
+)
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
@@ -188,6 +196,7 @@ async def _search_scenarios(recorder: _Recorder) -> None:
         return Wevva()
 
     app = await recorder.measure('startup.construct_no_location', construct)
+    app.action_refresh = AsyncMock()
     runner = app.run_test(size=(100, 30))
 
     async def enter():
@@ -205,6 +214,20 @@ async def _search_scenarios(recorder: _Recorder) -> None:
             await _settle(pilot)
 
         await recorder.measure('search.results_update_10', update_results)
+
+        async def query_round_trip() -> None:
+            async def search_fixture(*_args: Any, **_kwargs: Any) -> list[dict[str, object]]:
+                return _places(10)
+
+            with patch('wevva.screens.search_screen.search_places', new=search_fixture):
+                screen.post_message(SearchQueryReady('fixture'))
+                await _settle(pilot)
+                workers = [worker for worker in screen.workers if not worker.is_cancelled]
+                if workers:
+                    await screen.workers.wait_for_complete(workers)
+                await _settle(pilot)
+
+        await recorder.measure('search.query_round_trip_10', query_round_trip)
 
         async def replace_results() -> None:
             screen.dialog.show_results(_places(100))
@@ -225,6 +248,16 @@ async def _search_scenarios(recorder: _Recorder) -> None:
             await _settle(pilot, 3)
 
         await recorder.measure('search.warm_reentry_fresh_modal', reopen)
+
+        async def select_place() -> None:
+            current = app.screen
+            assert isinstance(current, SearchScreen)
+            current.dialog.post_message(PlaceSelected(location=BERLIN))
+            await _settle(pilot, 4)
+
+        await recorder.measure('search.select_to_weather_no_provider', select_place)
+        assert app.screen is app.weather_screen
+        app.action_refresh.assert_awaited_once()
     finally:
         await runner.__aexit__(None, None, None)
 
@@ -259,11 +292,82 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         weather = app.screen
         assert isinstance(weather, WeatherScreen)
 
+        update = weather_update()
+
         async def weather_update_local() -> None:
-            await weather.on_weather_updated(weather_update())
+            await weather.on_weather_updated(update)
             await _settle(pilot, 4)
 
         await recorder.measure('weather.forecast_update_72h', weather_update_local)
+
+        async def cached_weather_update() -> None:
+            await weather.on_weather_updated(update)
+            await _settle(pilot, 3)
+
+        await recorder.measure('weather.cached_forecast_reapply_72h', cached_weather_update)
+
+        async def warning_progress() -> None:
+            weather.on_weather_alerts_progress(
+                WeatherAlertsProgress(
+                    event='source_started',
+                    payload={'source': 'fixture'},
+                )
+            )
+            weather.on_weather_alerts_progress(
+                WeatherAlertsProgress(
+                    event='alerts_total',
+                    payload={'total': 6, 'phase': 'documents'},
+                )
+            )
+            weather.on_weather_alerts_progress(
+                WeatherAlertsProgress(
+                    event='alerts_checked',
+                    payload={'completed': 6, 'total': 6, 'phase': 'documents'},
+                )
+            )
+            await _settle(pilot)
+
+        await recorder.measure('weather.warning_progress_3', warning_progress)
+
+        async def alert_completion() -> None:
+            await weather.on_weather_alerts_updated(
+                WeatherAlertsUpdated(list(update.alerts))
+            )
+            await _settle(pilot)
+
+        await recorder.measure('weather.alert_completion_same_2', alert_completion)
+
+        async def hour_selection() -> None:
+            await weather.on_hour_highlighted(HourHighlighted(4))
+            await _settle(pilot)
+
+        await recorder.measure('weather.hour_selection', hour_selection)
+
+        async def day_selection() -> None:
+            weather.on_day_selected(DaySelected(1))
+            await _settle(pilot, 3)
+
+        await recorder.measure('weather.day_selection', day_selection)
+
+        async def time_updates() -> None:
+            for _ in range(40):
+                weather._refresh_time_display()
+            await _settle(pilot)
+
+        await recorder.measure('weather.time_updates_40', time_updates)
+
+        async def map_temperature_enrichment() -> None:
+            temperatures = {
+                coordinates: 12.0 + index
+                for index, coordinates in enumerate(weather.location_map.city_coordinates)
+            }
+            weather.location_map.update_temperatures(
+                temperatures,
+                temperature_unit='celsius',
+            )
+            await _settle(pilot, 3)
+
+        await recorder.measure('weather.map_temperature_enrichment', map_temperature_enrichment)
         await recorder.measure('weather.resize_burst', lambda: _resize_burst(pilot))
 
         async def open_alerts() -> None:

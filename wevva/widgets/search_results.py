@@ -92,11 +92,6 @@ class SearchResultsList(OptionList):
             return self.get_selected_place(option_id)
         return None
 
-    def clear_all(self) -> None:
-        """Clear all options and cache."""
-        self.clear_options()
-        self._place_cache.clear()
-
     # Helper methods --------------------------------------------------
     def _update_status(self, status_id: str, message: str) -> None:
         """Show a status message (disabled option)."""

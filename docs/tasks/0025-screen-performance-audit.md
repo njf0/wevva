@@ -2,8 +2,8 @@
 
 ## Status
 
-In progress — Slice A baseline and audit harness complete on 15 October 2026;
-production optimisation slices B–G have not started
+In progress — Slices A–C complete on 15 October 2026; production
+optimisation slices D–G have not started
 
 ## Context
 
@@ -702,3 +702,282 @@ The suite emitted asyncio slow-task diagnostics during the mounted Textual
 tests but no failures. No live provider, interactive terminal, font, colour,
 emoji, or manual mouse check was performed; Slice A makes no claim about those
 external/manual conditions.
+
+### Slice B — startup and Search screen
+
+Slice B began from a clean working tree at `6602f68`, which contains the Slice
+A audit and the existing Task 0021/0024 Alerts Centre work. It used the same
+CPython 3.13.0, Textual 8.0.0, macOS 26.7.1 x86_64 environment and terminal
+sizes as Slice A. Provider wait remained excluded except in one explicitly
+controlled obsolete-request experiment.
+
+#### Startup boundary
+
+Five fresh processes separated interpreter startup, package/application
+import, and application construction:
+
+| Fresh-process boundary | Median | Range | Finding |
+|---|---:|---:|---|
+| empty interpreter | 40 ms | 40–40 ms | runner-independent Python floor |
+| `import wevva.app` | 1,000 ms | 740–1,080 ms | about 960 ms beyond the empty interpreter |
+| `import wevva.cli` | 1,240 ms | 1,150–1,370 ms | about 1,200 ms beyond the empty interpreter |
+| construct `Wevva()` after imports | 3.6 ms | 3.4–4.3 ms | application state construction is not the bottleneck |
+
+Python necessarily executes `wevva/__init__.py` before a package submodule.
+That initializer preserves the documented public API exports, while
+`wevva.app` imports the screen graph used throughout the session. A one-process
+`-X importtime` sample attributed substantial overlapping cumulative work to
+the warning registry (about 170 ms), Help (65 ms), Alerts Centre (45 ms), and
+Tropical screen (19 ms), in addition to Textual and the always-needed Weather
+screen. The CLI adds Typer, Questionary, preference, and setup surfaces.
+
+This is a measured cold-start opportunity, but not a proportionate Slice B
+change. Lazy package exports would alter a documented public compatibility
+surface; lazy screen imports would shift costs into later screen entry and add
+conditional imports/type-only paths across the application. There is no
+duplicate application construction to delete. Revisit cold imports only as a
+separate, explicitly scoped task with public-import and first-open baselines,
+not as part of the remaining screen optimisations.
+
+With imports already present, no-location mount into Search remained about
+93 ms. Initial-location construction remained about 4 ms and mounted the
+Weather screen in about 350–360 ms with `action_refresh()` replaced by an
+immediate fake. The two startup modes therefore spend their local time in the
+screen they mount, not in duplicated setup. The real first forecast/provider
+wait and forecast-model application belong to the Weather path and were not
+credited to Search.
+
+#### Search scenarios and measured hotspot
+
+The focused before/after runs used one discarded warm-up and nine samples on
+the same machine. Times are milliseconds and exclude geocoder wait. The
+selected-place scenario converts one result, dismisses Search, mounts the
+already-constructed Weather screen, and awaits one fake refresh call; it does
+not apply a forecast bundle.
+
+| Local scenario | Before | After | Finding |
+|---|---:|---:|---|
+| no-location construction | 3.6 [3.4–4.3] | 3.7 [3.4–4.0] | unchanged |
+| cold Search mount | 88 [83–105] | 93 [84–101] | ordinary run variation |
+| immediate fake geocoder + 10 results | 16 [15–19] | 19 [16–21] | roughly 2 ms worker overhead |
+| direct 10-result update | 24 [20–26] | 23 [20–25] | unchanged |
+| replace 100 results with 10 | 25 [21–27] | 22 [21–29] | already cheap; no list cache justified |
+| four-resize burst | 233 [194–263] | 249 [177–285] | ordinary Textual variation |
+| dismiss | 13 [12–14] | 13 [12–15] | unchanged |
+| fresh-modal warm re-entry | 72 [67–79] | 73 [66–92] | unchanged |
+| select to Weather, no provider | 274 [267–305] | 277 [262–304] | unchanged |
+
+The material problem appeared only with an in-flight request. Previously,
+`SearchScreen` awaited geocoding on its message pump. A newer debounced query
+could not be handled until the obsolete provider request returned, and closing
+the modal did not give the screen explicit ownership of that request.
+
+A controlled five-sample mounted comparison gave the obsolete request a fixed
+250 ms delay, then measured from posting the replacement query until its result
+was displayed. The former serial handler took 288 ms median [277–352]; the
+exclusive-worker path took 27 ms [13–45]. This does not make the provider
+faster: it removes the old provider wait from the newer input's critical path.
+The normal immediate-loader result above confirms that the local cost remains
+small.
+
+`SearchScreen.on_search_query_ready()` now runs as one Textual-owned exclusive
+`place-search` worker. Starting a newer query cancels the older worker, screen
+unmount cancels remaining work, and a completion checks worker/mount state
+before touching widgets. The latter guard also rejects a stale result from a
+misbehaving loader which suppresses cancellation. This uses Textual's existing
+worker lifecycle and adds no task handle, generation counter, cache, or
+application state.
+
+One separate traced post-change pass observed about 2.2 MiB peak allocation for
+cold Search mount, 74 KiB for the immediate query/result round trip, 125 KiB
+for 100→10 replacement, and 4.35 MiB for the Weather handoff. These are
+transient Python peaks, not retained-memory claims. A Search-only `cProfile`
+run remained dominated by Textual stylesheet application, layout, mounting,
+and compositing; result formatting, location conversion, and filtering did not
+rank as independent hotspots.
+
+#### Deterministic lifecycle evidence
+
+Mounted regression coverage now establishes that:
+
+- the no-location mode mounts Search, while a CLI-provided location mounts
+  Weather and requests exactly one refresh;
+- rapid typing replaces the pending debounce timer and invokes only the final
+  query;
+- a replacement query cancels the active request, and even a loader which
+  catches cancellation cannot publish its obsolete result;
+- dismissing Search cancels the active request;
+- one-result Enter and mounted mouse activation both perform the canonical
+  place conversion, reach Weather, and request exactly one refresh; and
+- the ordinary 10-result round trip creates at most one active Search worker.
+
+No elapsed-time assertion was added to the test suite.
+
+#### Complexity and deletion audit
+
+1. `SearchResultsList.clear_all()` had no in-tree caller and only duplicated
+   its two underlying operations. It was deleted; status and result updates
+   continue to clear options and their raw-place lookup together.
+2. Search still owns one debounce timer and one raw result mapping. The screen
+   now delegates request cancellation to one framework worker rather than
+   adding stored task/generation state. Place conversion remains canonical and
+   happens once, on selection, across CLI, TUI, and public API paths.
+3. Country filtering and 100-result replacement are low-cost edge behavior,
+   not disproportionate features. The eager package/application import graph
+   is disproportionate to four-millisecond construction, but simplifying it
+   safely is a separate public-compatibility and cross-screen decision.
+4. Production changed by `+9/-5` lines (net +4) across the Search screen and
+   result widget. The small growth is justified by measured cancellation and
+   stale-completion protection; no new explicit state or abstraction was
+   introduced.
+
+#### Slice B change accounting and verification
+
+- Production: `+9/-5` lines; the two touched files moved from 216 to 220
+  physical lines. No app, CLI, service, public API, or styling change.
+- Tests: `+171/-0` lines in one focused mounted lifecycle module.
+- Audit tooling: `+27/-1` lines (423 to 449) for the immediate-query and
+  no-provider Weather-handoff observations.
+- Documentation: net `+151` physical lines (704 to 855) for this Slice B outcome and task status update only.
+- Dependencies, runtime telemetry, caches, user-visible behavior, and provider
+  semantics: unchanged.
+
+Compilation, the complete benchmark path, and the focused Search/conversion
+tests passed (10 tests). The full suite passed 320 tests in 459.745 seconds; it
+emitted the existing asyncio slow-task diagnostics but no failures. The
+automated driver exercised `80x24` and wider resize states plus mounted
+keyboard and mouse activation. No live geocoder/forecast request, interactive
+terminal, font, colour, or emoji check was performed, so Slice B makes no claim
+about those external conditions.
+
+The recommended remaining order is unchanged: Slice C (Weather), F (World), E
+(Tropical), D (Alerts Centre after its active feature work), then G
+(cross-screen lifecycle and consolidation).
+
+### Slice C — Weather screen
+
+Slice C began at `6602f68` with the completed but uncommitted Slice B changes
+still in the working tree. The Weather production file itself was unchanged
+from that revision. Measurements used the same CPython 3.13.0, Textual 8.0.0,
+macOS 26.7.1 x86_64 environment, terminal sizes, 72-hour/seven-day/two-warning
+fixture, and immediate fake loaders as Slice A. Provider and forecast-cache
+retrieval wait remained excluded; “cached reapply” below means applying the
+same already-resolved model bundle to the persistent screen.
+
+#### Measured hotspot and bounded fix
+
+The dominant cost was not model formatting or the pure responsive allocator.
+`WeatherScreen.on_weather_updated()` posted the original bubbling
+`WeatherUpdated` message to five descendants. Each descendant's copy bubbled
+back to the screen and re-entered the same handler, amplifying the update.
+Targeted `140x45` instrumentation observed 11 location-map updates, 11 city
+temperature loads, 55 `_apply_layout()` calls, and 54 child-layout write
+passes for one forecast message. The first update took about 1,902 ms in that
+instrumented run.
+
+The screen now calls the five child handlers directly once. The original
+message still bubbles to the application once, preserving application-owned
+forecast metadata behavior. Existing map-task cancellation and generation
+checks remain unchanged. In comparable post-change instrumentation, one update
+performed one map update/load, three scheduled `_apply_layout()` callbacks and
+one effective child-layout write pass; it took about 658 ms.
+
+`_apply_layout()` now returns when the newly computed immutable budget matches
+the applied budget. Existing content flags and map refreshes explicitly
+invalidate that budget; no additional memoization state was introduced.
+Explicit duplicate layout scheduling was removed from resize, forecast, and
+warning-panel paths because `_sync_sidebar_visibility()` already owns that
+schedule. Finally, an identical ordered warning list retains its mounted
+summary/panel rather than removing and recreating them. This preserves the
+current warning selection and clears progress without introducing an alert
+cache.
+
+#### Scenario results
+
+The complete post-change harness used one discarded warm-up and three samples.
+Times are milliseconds, show `median [minimum–maximum]`, and include Textual
+settling/render work but no provider wait.
+
+| Weather scenario | Post-change result | Finding |
+|---|---:|---|
+| cold stable-screen entry | 349 [349–353] | unchanged from Slice A's 353 ms |
+| first 72-hour forecast application | 660 [644–668] | down from Slice A's 2,287 [2,231–2,398] |
+| same resolved models reapplied | 106 [101–112] | remaining full-widget formatting is bounded |
+| three warning-progress events | 25 [24–28] | small sidebar-only path |
+| identical two-warning completion | 83 [79–87] | mounted warning widgets are retained |
+| hour selection | 54 [53–54] | selection-only local work |
+| day selection | 120 [112–126] | table/day presentation work, no provider call |
+| 40 one-second display updates | 77 [74–80] | about 1.9 ms per callback; seconds remain visible |
+| map-temperature enrichment | 31 [29–32] | one local label/reflow update |
+| four-resize burst | 1,963 [1,945–1,965] | essentially unchanged from Slice A's 1,958 ms |
+
+The unchanged resize result is an important negative finding. The redundant
+budget/style writes are gone, but Textual layout, styling, rendering, and map
+reflow still dominate four complete terminal resizes. No production rewrite,
+debounce, or cross-widget layout framework is justified by this slice.
+
+A separate single traced pass observed a 23.4 MiB Python allocation peak for
+forecast application, down from Slice A's 29.8 MiB observation. Cached reapply
+peaked at 0.96 MiB, warning progress at 0.12 MiB, hour/day selection at
+0.62/0.57 MiB, 40 time callbacks at 0.17 MiB, map enrichment at 0.13 MiB, and
+the resize burst at 5.17 MiB. These are transient per-scenario peaks from one
+traced run, not retained-memory or portable latency claims.
+
+#### Lifecycle and negative findings
+
+Mounted structural tests establish one child delivery, one application-level
+bubble, one map generation and one temperature load for a forecast message.
+They also establish that an unchanged layout budget performs no child layout
+writes, identical warning completion keeps the same mounted widgets, and hour
+selection, day selection, timer refresh, and `80x24 → 180x55` resize do not
+reload map temperatures or rebuild packaged map geometry.
+
+The one-second timer remains proportionate because the Location context
+visibly displays seconds; reducing its cadence would change behavior. The
+country map still refreshes once for each `WeatherUpdated`, including an
+explicit refresh using already-cached forecast models. Skipping that refresh
+would require a new freshness signal and could alter explicit-refresh
+semantics, so Slice C adds no map cache. The 106 ms same-model reapply also
+does not justify per-widget model caches and their invalidation state.
+
+#### Complexity and deletion audit
+
+1. Duplicate descendant message posting and four redundant explicit layout
+   schedules were removed. The legacy standalone `set_compact()` methods noted
+   in Slice A remain compatibility candidates, not proven safe deletions in
+   this screen-owned slice.
+2. The same behavior still uses one map task/generation, one existing applied
+   layout budget, and one timer. No worker, cache, adapter, or shared
+   abstraction was added. Direct handler delivery makes ownership simpler.
+3. The country map is the costliest auxiliary Weather feature, but after
+   amplification is removed its temperature-enrichment update is about 31 ms.
+   The one-second display costs about 1.9 ms per callback. Neither is now a
+   disproportionate low-value feature; both remain intact.
+4. Weather production changed by `+26/-19` lines, moving from 807 to 814
+   physical lines (net +7). The growth records explicit invalidation at the
+   existing ownership boundaries and is justified by eliminating ten
+   duplicate map/provider fan-outs per forecast message.
+
+#### Slice C change accounting and verification
+
+- Production: `+26/-19` lines in `weather_screen.py`; no service, model,
+  public-API, style, forecast-cache, or warning-cache change.
+- Tests: `+155/-0` lines in one mounted structural regression module; no
+  elapsed-time assertion.
+- Audit tooling: `+79/-1` lines (449 to 527, net +78) for cached forecast,
+  warning, selection, timer, map-enrichment, and existing resize scenarios.
+- Documentation: `+130/-2` lines (855 to 983, net +128) for this Slice C record
+  and status update.
+- Dependencies, runtime telemetry, user-visible features, map-task ownership,
+  stale-generation safeguards, and explicit-refresh behavior: unchanged.
+
+Compilation, the expanded complete benchmark, the four focused structural
+tests, and 74 responsive Weather/warning/cache/map tests passed. The complete
+suite passed 324 tests in 323.878 seconds. Tests emitted asyncio slow-task
+diagnostics but no failures. Automated mounted runs covered `80x24` and wider
+states. No live provider, interactive terminal, font, colour, emoji, or manual
+mouse check was performed.
+
+The recommended remaining order is now Slice F (World), Slice E (Tropical),
+Slice D (Alerts Centre after its active feature work), then Slice G
+(cross-screen lifecycle and consolidation).

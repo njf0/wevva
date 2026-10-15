@@ -6,8 +6,10 @@ Sends a `PlaceSelected` message back to the app.
 
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.screen import ModalScreen
+from textual.worker import get_current_worker
 from textual.widgets import Footer, Header
 
 from wevva.constants import REQUEST_TIMEOUT_S, SEARCH_MAX_RESULTS
@@ -31,8 +33,10 @@ class SearchScreen(ModalScreen[None]):
         return self.query_one(SearchDialog)
 
     # Message handlers -------------------------------------------------
+    @work(exclusive=True, group='place-search')
     async def on_search_query_ready(self, event: SearchQueryReady) -> None:
         """Handle search query from dialog (after debounce)."""
+        worker = get_current_worker()
         try:
             places = await search_places(
                 event.query,
@@ -41,7 +45,12 @@ class SearchScreen(ModalScreen[None]):
                 timeout=REQUEST_TIMEOUT_S,
             )
         except Exception as e:
+            if worker.is_cancelled or not self.is_mounted:
+                return
             self.dialog.show_error(e)
+            return
+
+        if worker.is_cancelled or not self.is_mounted:
             return
 
         if not places:

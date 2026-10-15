@@ -415,8 +415,6 @@ class WeatherScreen(Screen[None]):
     def on_resize(self, event: Resize) -> None:
         """Reallocate context and automatic rails when geometry changes."""
         self._sync_sidebar_visibility(viewport_height=max(1, event.size.height - 2))
-        if self.is_mounted:
-            self.call_after_refresh(self._apply_layout)
 
     def _apply_layout(self) -> None:
         """Apply one pure budget decision to stable mounted weather widgets."""
@@ -434,6 +432,8 @@ class WeatherScreen(Screen[None]):
             locations_requested=self._locations_sidebar_has_content,
             warning_details_requested=self._alert_details_sidebar_has_content,
         )
+        if budget == self._layout_budget:
+            return
         self._layout_budget = budget
         self.summary_row.display = budget.show_summary
         self.weather_summary.set_layout(budget.usable_width)
@@ -581,7 +581,10 @@ class WeatherScreen(Screen[None]):
             if location_key(current_location) not in saved_keys:
                 locations.append(current_location)
         self.saved_locations_sidebar.set_locations(locations)
-        self._locations_sidebar_has_content = bool(locations)
+        has_content = bool(locations)
+        if has_content != self._locations_sidebar_has_content:
+            self._layout_budget = None
+        self._locations_sidebar_has_content = has_content
         self._sync_sidebar_visibility()
 
     def update_saved_location_weather(self, location, summary: str) -> None:
@@ -663,15 +666,15 @@ class WeatherScreen(Screen[None]):
         if self.app.emoji_enabled:
             self.header.icon = event.hourly.get_condition_emoji(0)
 
-        # Explicitly post message to child widgets (messages don't auto-bubble to all descendants)
-        self.context_bar.post_message(event)
-        self.current_weather.post_message(event)
+        # Forward directly so the bubbling message isn't re-handled by this screen.
+        await self.context_bar.on_weather_updated(event)
+        await self.current_weather.on_weather_updated(event)
         self._refresh_location_map(event.current)
-        self.hourly_forecast.post_message(event)
-        self.weather_summary.post_message(event)
+        await self.hourly_forecast.on_weather_updated(event)
+        await self.weather_summary.on_weather_updated(event)
 
         daily = self.query_one(DailyForecast)
-        daily.post_message(event)
+        await daily.on_weather_updated(event)
         await self.render_alert_panel(event.alerts)
 
         # Reveal main panel and clear errors on success
@@ -680,14 +683,13 @@ class WeatherScreen(Screen[None]):
         self.error_banner.update('')
         self.error_banner.display = False
 
-        self.call_after_refresh(self._apply_layout)
-
         # Start time refresh timer after data arrives (updates every second)
         if self._time_refresh_timer is None:
             self._time_refresh_timer = self.set_interval(1, self._refresh_time_display)
 
     def _refresh_location_map(self, current: object | None = None) -> None:
         """Render country context now and enrich city temperatures in the background."""
+        self._layout_budget = None
         self._location_map_generation += 1
         generation = self._location_map_generation
         if self._location_map_task is not None and not self._location_map_task.done():
@@ -753,7 +755,10 @@ class WeatherScreen(Screen[None]):
         self._sync_sidebar_visibility()
 
     def _sync_alert_sidebar_content(self) -> None:
-        self._alert_details_sidebar_has_content = self._local_alert_details_has_content
+        has_content = self._local_alert_details_has_content
+        if has_content != self._alert_details_sidebar_has_content:
+            self._layout_budget = None
+        self._alert_details_sidebar_has_content = has_content
 
     def _refresh_time_display(self) -> None:
         """Periodically refresh time display in context bar."""
@@ -761,20 +766,23 @@ class WeatherScreen(Screen[None]):
 
     async def render_alert_panel(self, alerts: list[Alert]) -> None:
         """Mount the fixed-height warning summary, or none when empty."""
-        await self.weather_warnings.remove_children()
         self.saved_locations_sidebar.clear_warning_progress()
-        self._alerts = []
-        if not alerts:
+        ordered_alerts = sorted(alerts, key=alert_sort_key)
+        if ordered_alerts == self._alerts:
+            self._sync_sidebar_visibility()
+            return
+
+        self._layout_budget = None
+        await self.weather_warnings.remove_children()
+        self._alerts = ordered_alerts
+        if not ordered_alerts:
             self.warnings_row.display = False
             self.weather_warnings.display = False
             self._local_alert_details_has_content = False
             self._sync_alert_sidebar_content()
             self._sync_sidebar_visibility()
-            self.call_after_refresh(self._apply_layout)
             return
 
-        ordered_alerts = sorted(alerts, key=alert_sort_key)
-        self._alerts = ordered_alerts
         self.alert_details_sidebar.update_alert(ordered_alerts[0])
         self._local_alert_details_has_content = True
         self._sync_alert_sidebar_content()
@@ -788,7 +796,6 @@ class WeatherScreen(Screen[None]):
         )
         self.warnings_row.display = True
         self.weather_warnings.display = True
-        self.call_after_refresh(self._apply_layout)
 
     async def on_hour_highlighted(self, message: HourHighlighted) -> None:  # type: ignore[override]
         """Forward hour selection to current conditions row.
