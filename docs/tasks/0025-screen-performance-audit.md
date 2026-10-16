@@ -2,8 +2,8 @@
 
 ## Status
 
-In progress — Slices A–C complete on 15 October 2026; production
-optimisation slices D–G have not started
+In progress — Slices A–C and F complete on 15 October 2026; production
+optimisation slices D, E, and G have not started
 
 ## Context
 
@@ -981,3 +981,136 @@ mouse check was performed.
 The recommended remaining order is now Slice F (World), Slice E (Tropical),
 Slice D (Alerts Centre after its active feature work), then Slice G
 (cross-screen lifecycle and consolidation).
+
+### Slice F — World Locations screen
+
+Slice F began from a clean working tree at `f04e408`, containing the completed
+Slices A–C. Measurements used the same CPython 3.13.0, Textual 8.0.0, macOS
+26.7.1 x86_64 environment and four terminal sizes as the earlier slices.
+Provider work remained excluded: saved-summary results were delivered directly
+from deterministic fixtures, and forecast refresh after activation was an
+immediate fake.
+
+The ordinary fixture retained London, New York, and Tokyo. A separate,
+explicitly non-typical stress fixture placed 40 deterministic locations across
+the inhabited world. The stress fixture exists to expose collision planning,
+native-widget updates, and resize scaling; it is not presented as ordinary
+usage.
+
+#### Measured hotspot and bounded fix
+
+Every map reflow rebuilt the complete global Braille raster even when only a
+temperature label changed or a fresh screen reopened at a previously rendered
+size. The existing `_projected_world_land()` cache avoided repeated projection,
+but `GeographicCanvas.fill_polygons()` and frame composition still ran each
+time. Direct untraced measurements put one representative frame build at about
+145–178 ms. The first global projection took about 346 ms and was already
+cached; no change to that cache was warranted.
+
+Three synchronous late summaries and forty stress summaries each correctly
+coalesced to one reflow, but that one reflow still rebuilt and rewrote the
+backdrop. Before the change, the ordinary burst performed one frame build, one
+backdrop write, and six label-text writes; the stress burst performed one
+frame build, one backdrop write, and 80 label-text writes.
+
+`_world_frame()` now has a four-entry LRU keyed by width, height, and resolved
+land style. Frames are treated as immutable and derive only from checked-in
+geometry plus those keys. Four entries cover the complete audit resize matrix;
+arbitrary dimensions and themes evict older values instead of growing the
+cache without bound. An isolated traced size-matrix check measured about 4 MiB
+retained for all four frames. The map also remembers the one backdrop key it
+has actually applied and skips rewriting it at the same size/style.
+`WorldLocationLabel.set_marker_on_right()` is now idempotent, so a reflow only
+rewrites a label whose text direction or body really changed.
+
+Post-change structural coverage observes one frame-cache hit, no frame miss,
+no backdrop write, and exactly one text write per changed label for the
+ordinary summary burst. A repeated four-size matrix produces four cache hits.
+Resize and summary paths retain the mounted labels and focus, and do not reload
+the packaged world geometry.
+
+#### Scenario results
+
+The comparable runs used one discarded complete warm-up and three samples.
+Times are milliseconds and show `median [minimum–maximum]`. The machine showed
+more scheduler variation than the earlier slices, so structural counts are the
+primary evidence where ranges overlap.
+
+| World scenario | Before | After | Finding |
+|---|---:|---:|---|
+| cold entry, 3 locations | 828 [826–1,287] | 802 [794–1,086] | first raster still has to be built |
+| 3 staggered summaries | 435 [365–785] | 84 [52–220] | 81% lower median; cached backdrop retained |
+| 8 focus moves | 106 [60–190] | 59 [59–60] | already cheap and resource-free |
+| four-size resize | 2,718 [2,134–3,632] | 2,100 [2,022–2,627] | 23% lower median; Textual layout still dominates |
+| return to Weather | 319 [304–339] | 359 [315–488] | no attributable improvement |
+| fresh-screen warm re-entry | 721 [594–821] | 470 [439–1,068] | 35% lower median; frame reused across screens |
+| activate to Weather, no provider | 207 [199–230] | 171 [126–406] focused seven-sample median | unchanged handoff; noisy complete-harness samples were not credited |
+| stress entry, 40 locations | 678 [660–1,376] | 669 [458–820] | widget mounting dominates; no cold claim |
+| 40 staggered summaries | 519 [436–622] | 96 [91–227] | 81% lower median; 40 required label writes remain |
+| 80 stress focus moves | 158 [89–183] | 110 [97–148] | bounded native focus work |
+| stress four-size resize | 2,958 [2,798–3,591] | 3,103 [1,745–3,258] | no wall-time gain despite four proven frame hits |
+
+The stress resize result is a useful negative finding. Avoiding four raster
+builds removes deterministic CPU work, but complete Textual layout and forty
+native-label placements still own the user path and the observed ranges
+overlap. No collision index, retained screen, resize debounce, alternate
+renderer, or generic map framework is justified by this slice.
+
+A separate post-change traced run observed 20.3 MiB peak allocation for cold
+three-location entry, 8.0 MiB for fresh-screen warm re-entry, 0.21 MiB for the
+ordinary summary burst, 9.2 MiB for stress entry, and 0.98 MiB for the stress
+summary burst. Slice A's cold observation was 18.4 MiB; the roughly 1.9 MiB
+increase is consistent with retaining the first rendered frame. The complete four-frame
+cache has a separately measured roughly 4 MiB retained bound. These are Python
+allocation observations, not process-resident-memory guarantees.
+
+#### Lifecycle, complexity, and deletion audit
+
+1. `WorldLocationsMap.set_locations()` had no in-tree caller. The application
+   always constructs a fresh World screen for a changed saved-location set and
+   deliberately blocks deletion based on the hidden Weather sidebar while the
+   map is open. The obsolete mutation path was deleted.
+2. Application ownership remains simple: `Wevva` alone schedules and guards
+   staggered summary requests; the World screen owns no worker or provider
+   cache. The map retains its location order, summary snapshot, native labels,
+   four immutable frames, and one applied-backdrop key. Construction-only
+   copies in the screen are shallow and not worth a lifecycle rewrite.
+3. The separate world map remains a disproportionately costly optional
+   feature: even after this change, 506 production lines and 355 focused test
+   lines support a cold path with about 20.3 MiB transient allocation. It is
+   nevertheless the feature itself—not accidental machinery—and remains
+   intact. Removing or replacing it still requires a separate product choice.
+4. Production changed by `+17/-25` lines, moving the two World modules from
+   514 to 506 physical lines (net -8). The bounded cache and invalidation key
+   are offset by deleting the unused mutation API; no task, worker, provider
+   cache, adapter, or abstraction was added.
+
+Initial focus, left/right movement, mouse/keyboard activation, current-location
+focus, deterministic collision placement, late summaries, resize focus
+retention, return without selection, and activation through the ordinary
+Weather refresh path remain covered. Selection, same-size summary, and resize
+do not issue network work; summary and resize tests also establish no packaged
+world-geometry reload after the initial cached projection.
+
+#### Slice F change accounting and verification
+
+- Production: `+17/-25` lines in `world_locations_map.py`; the screen and
+  application orchestration are unchanged.
+- Tests: `+82/-4` lines (277 to 355, net +78) in the existing focused World
+  module; no elapsed-time assertion.
+- Audit tooling: `+87/-1` lines (527 to 613, net +86) for ordinary summary and
+  activation paths plus the labelled 40-location stress scenarios.
+- Documentation: `+135/-2` lines (983 to 1,116, net +133) for this Slice F
+  record and status update.
+- Dependencies, runtime telemetry, provider semantics, saved-summary task
+  ownership, public API, visual design, and activation behavior: unchanged.
+
+Compilation, the expanded timing and allocation harness, and 37 focused
+World/geography/callout tests passed. The complete suite passed 326 tests in
+360.829 seconds. Tests emitted asyncio slow-task diagnostics but no failures.
+No live provider, interactive terminal, font, colour, Braille-glyph, or manual
+mouse check was performed.
+
+The recommended remaining order is Slice E (Tropical), Slice D (Alerts Centre
+after its active feature work), then Slice G (cross-screen lifecycle and
+consolidation).

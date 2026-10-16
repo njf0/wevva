@@ -119,12 +119,14 @@ class WorldLocationLabel(Static, can_focus=True):
         """Keep the marker at the geographic end of the callout."""
 
         self._marker_on_right = marker_on_right
-        self.label_text = (
+        label_text = (
             f'{self._body_text} •'
             if marker_on_right
             else f'• {self._body_text}'
         )
-        self.update(self.label_text)
+        if label_text != self.label_text:
+            self.label_text = label_text
+            self.update(label_text)
 
     def on_click(self, event: Click) -> None:
         event.stop()
@@ -180,6 +182,7 @@ class WorldLocationsMap(Container):
         self._temperature_unit = temperature_unit
         self._labels: dict[str, WorldLocationLabel] = {}
         self._placements: dict[str, WorldLocationPlacement] = {}
+        self._backdrop_key: tuple[int, int, str | None] | None = None
         self._reflow_pending = False
 
     def compose(self) -> ComposeResult:
@@ -190,24 +193,6 @@ class WorldLocationsMap(Container):
         """Current visible callout placements, primarily for inspection/tests."""
 
         return tuple(self._placements.values())
-
-    def set_locations(
-        self,
-        locations: Sequence[LocationMetadata],
-        *,
-        summaries: Mapping[str, SavedLocationWeatherSummary] | None = None,
-        temperature_unit: str | None = None,
-    ) -> None:
-        """Replace mapped locations while retaining reusable label widgets."""
-
-        self._locations = list(locations)
-        if summaries is not None:
-            self._summaries = dict(summaries)
-        if temperature_unit is not None:
-            self._temperature_unit = temperature_unit
-        if self.is_mounted:
-            self._sync_label_widgets()
-            self._schedule_reflow()
 
     def update_weather_summary(
         self,
@@ -318,15 +303,19 @@ class WorldLocationsMap(Container):
 
         theme = self.app.theme_variables
         secondary = theme.get('text-secondary')
+        land_style = f'dim {secondary}' if secondary else 'dim'
         frame = _world_frame(
             width,
             height,
-            land_style=f'dim {secondary}' if secondary else 'dim',
+            land_style=land_style,
         )
-        self.query_one('#world-locations-backdrop', Static).update(
-            frame.to_text(),
-            layout=False,
-        )
+        backdrop_key = (width, height, land_style)
+        if backdrop_key != self._backdrop_key:
+            self.query_one('#world-locations-backdrop', Static).update(
+                frame.to_text(),
+                layout=False,
+            )
+            self._backdrop_key = backdrop_key
 
         visited: set[str] = set()
         candidates = []
@@ -372,6 +361,9 @@ def _projected_world_land() -> tuple[ProjectedPolygon, ...]:
     return project_visible_polygons(world_map_unit_polygons(), _WORLD_VIEWPORT)
 
 
+# Callers treat the returned frame as immutable; four entries cover the audit's
+# complete resize matrix without retaining an unbounded set of raster canvases.
+@lru_cache(maxsize=4)
 def _world_frame(width: int, height: int, *, land_style: str | None) -> GeographicFrame:
     canvas = GeographicCanvas(max(1, width), max(1, height), _WORLD_VIEWPORT)
     canvas.fill_polygons(_projected_world_land(), layer='land')

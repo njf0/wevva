@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock
+from contextlib import ExitStack
+from unittest.mock import AsyncMock, Mock, patch
 
 from textual.app import App, ComposeResult
 
@@ -75,6 +76,24 @@ class _WorldMapApp(App):
 
 
 class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
+    def test_world_frame_cache_is_bounded_by_size_and_style(self) -> None:
+        _world_frame.cache_clear()
+        try:
+            first = _world_frame(80, 24, land_style='dim red')
+            self.assertIs(first, _world_frame(80, 24, land_style='dim red'))
+            self.assertIsNot(first, _world_frame(80, 24, land_style='dim blue'))
+            for width in (90, 100, 110, 120):
+                _world_frame(width, 24, land_style='dim red')
+            for width in (90, 100, 110, 120):
+                _world_frame(width, 24, land_style='dim red')
+
+            cache = _world_frame.cache_info()
+            self.assertEqual(cache.maxsize, 4)
+            self.assertEqual(cache.currsize, 4)
+            self.assertEqual(cache.hits, 5)
+        finally:
+            _world_frame.cache_clear()
+
     async def test_world_map_uses_native_location_widgets(self) -> None:
         app = _WorldMapApp()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -153,6 +172,61 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(app.selected, [label.location])
 
+    async def test_summary_burst_reuses_backdrop_and_label_widgets(self) -> None:
+        _world_frame.cache_clear()
+        app = _WorldMapApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            for _ in range(3):
+                await pilot.pause()
+
+            world_map = app.world_map
+            labels = list(world_map.query(WorldLocationLabel))
+            labels[0].focus()
+            cache_before = _world_frame.cache_info()
+            backdrop = world_map.query_one('#world-locations-backdrop')
+
+            with ExitStack() as stack:
+                backdrop_update = stack.enter_context(
+                    patch.object(
+                        backdrop,
+                        'update',
+                        new=Mock(wraps=backdrop.update),
+                    )
+                )
+                label_updates = [
+                    stack.enter_context(
+                        patch.object(
+                            label,
+                            'update',
+                            new=Mock(wraps=label.update),
+                        )
+                    )
+                    for label in labels
+                ]
+                world_resource = stack.enter_context(
+                    patch('wevva.widgets.world_locations_map.world_map_unit_polygons')
+                )
+                for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
+                    world_map.update_weather_summary(
+                        location,
+                        SavedLocationWeatherSummary(
+                            temperature=10 + index,
+                            temperature_unit='°C',
+                        ),
+                    )
+                for _ in range(3):
+                    await pilot.pause()
+
+            cache_after = _world_frame.cache_info()
+            self.assertEqual(cache_after.misses, cache_before.misses)
+            self.assertEqual(cache_after.hits, cache_before.hits + 1)
+            backdrop_update.assert_not_called()
+            world_resource.assert_not_called()
+            for update in label_updates:
+                update.assert_called_once()
+            self.assertEqual(list(world_map.query(WorldLocationLabel)), labels)
+            self.assertIs(app.focused, labels[0])
+
     async def test_resize_repositions_existing_native_widgets(self) -> None:
         app = _WorldMapApp()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -166,9 +240,12 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
                 for placement in app.world_map.placements
             }
 
-            await pilot.resize_terminal(140, 40)
-            for _ in range(3):
-                await pilot.pause()
+            with patch(
+                'wevva.widgets.world_locations_map.world_map_unit_polygons'
+            ) as world_resource:
+                await pilot.resize_terminal(140, 40)
+                for _ in range(3):
+                    await pilot.pause()
 
             resized_labels = list(app.world_map.query(WorldLocationLabel))
             resized = {
@@ -179,6 +256,7 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app.focused, labels[0])
             self.assertEqual(len(resized), 3)
             self.assertNotEqual(resized, initial)
+            world_resource.assert_not_called()
 
     async def test_click_uses_the_same_saved_location_message(self) -> None:
         app = _WorldMapApp()

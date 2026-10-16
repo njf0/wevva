@@ -43,6 +43,8 @@ from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.widgets import country_alerts_map, tropical_track, world_locations_map
+from wevva.widgets.saved_locations import SavedLocationWeatherSummary
+from wevva.widgets.world_locations_map import WorldLocationLabel
 
 
 BERLIN = LocationMetadata(
@@ -138,6 +140,19 @@ def _places(count: int) -> list[dict[str, object]]:
     ]
 
 
+def _world_locations(count: int) -> list[LocationMetadata]:
+    return [
+        LocationMetadata(
+            name=f'Location {index:02d}',
+            country='Fixture',
+            country_code='XX',
+            latitude=-55.0 + (index % 8) * 15.0,
+            longitude=-170.0 + (index // 8) * 70.0,
+        )
+        for index in range(count)
+    ]
+
+
 def _tropical_systems() -> list[CanonicalTropicalSystem]:
     nangka = [
         _observation(
@@ -187,6 +202,7 @@ def _clear_geography_caches() -> None:
         country_alerts_map.build_country_alerts_map_geometry,
         tropical_track._visible_world_polygons,
         world_locations_map._projected_world_land,
+        world_locations_map._world_frame,
     ):
         cached.cache_clear()
 
@@ -428,6 +444,20 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         world = app.screen
         assert isinstance(world, WorldLocationsScreen)
 
+        async def summary_updates() -> None:
+            for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
+                world.update_weather_summary(
+                    location,
+                    SavedLocationWeatherSummary(
+                        temperature=12.0 + index,
+                        temperature_unit='°C',
+                    ),
+                    temperature_unit='celsius',
+                )
+            await _settle(pilot, 3)
+
+        await recorder.measure('world.summary_updates_3', summary_updates)
+
         async def move_focus() -> None:
             for _ in range(8):
                 world.action_next_location()
@@ -442,6 +472,62 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
 
         await recorder.measure('world.exit_to_weather', exit_world)
         await recorder.measure('world.warm_reentry_fresh_screen', open_world)
+
+        async def activate_location() -> None:
+            current = app.screen
+            assert isinstance(current, WorldLocationsScreen)
+            labels = list(current.world_map.query(WorldLocationLabel))
+            labels[-1].action_select_location()
+            await _settle(pilot, 4)
+
+        await recorder.measure(
+            'world.activate_to_weather_no_provider',
+            activate_location,
+        )
+        assert app.screen is app.weather_screen
+
+        stress_locations = _world_locations(40)
+
+        async def open_stress_world() -> None:
+            app.push_screen(
+                WorldLocationsScreen(
+                    stress_locations,
+                    current_location=stress_locations[0],
+                    temperature_unit='celsius',
+                )
+            )
+            await _settle(pilot, 4)
+
+        await recorder.measure('world.stress_entry_40_locations', open_stress_world)
+        stress_world = app.screen
+        assert isinstance(stress_world, WorldLocationsScreen)
+
+        async def stress_summary_updates() -> None:
+            for index, location in enumerate(stress_locations):
+                stress_world.update_weather_summary(
+                    location,
+                    SavedLocationWeatherSummary(
+                        temperature=-5.0 + index,
+                        temperature_unit='°C',
+                    ),
+                    temperature_unit='celsius',
+                )
+            await _settle(pilot, 3)
+
+        await recorder.measure('world.stress_summary_updates_40', stress_summary_updates)
+
+        async def stress_focus() -> None:
+            for _ in range(80):
+                stress_world.action_next_location()
+            await _settle(pilot)
+
+        await recorder.measure('world.stress_selection_burst_80', stress_focus)
+        await recorder.measure(
+            'world.stress_resize_burst_40',
+            lambda: _resize_burst(pilot),
+        )
+        await app.pop_screen()
+        await _settle(pilot)
     finally:
         await runner.__aexit__(None, None, None)
 
@@ -512,7 +598,7 @@ def main() -> None:
                     'weather': {'hourly_points': 72, 'daily_points': 7, 'alerts': 2},
                     'alerts_centre': {'alerts': 6, 'unique_polygons': 2},
                     'tropical': {'systems': 2, 'source_observations': 3},
-                    'world_locations': 3,
+                    'world_locations': {'ordinary': 3, 'stress': 40},
                     'resize_events_per_burst': 4,
                 },
                 'scenarios': scenarios,
