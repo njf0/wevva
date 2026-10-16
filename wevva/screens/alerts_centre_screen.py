@@ -30,6 +30,7 @@ from textual.widgets.option_list import Option
 from wevva_warnings import Alert, WarningQueryProgress
 
 from wevva.alerts_centre_layout import (
+    AlertsCentreLayoutBudget,
     AlertsCentrePresentation,
     alerts_centre_layout_for,
 )
@@ -490,6 +491,7 @@ class AlertsCentreScreen(Screen[None]):
         self._load_task: asyncio.Task[None] | None = None
         self._place_hourly_generation = 0
         self._place_hourly_task: asyncio.Task[None] | None = None
+        self._layout_budget: AlertsCentreLayoutBudget | None = None
         self._presentation: AlertsCentrePresentation | None = None
         self._workspace_tab = 'map'
         self._single_tab = 'navigation'
@@ -654,6 +656,9 @@ class AlertsCentreScreen(Screen[None]):
             ),
             place_forecast_retained_height=self._place_forecast_retained_height,
         )
+        if budget == self._layout_budget:
+            return
+        self._layout_budget = budget
         root = self.query_one('#alerts-centre-root', Container)
         root.remove_class('wide', 'stacked', 'tabbed', 'single')
         root.add_class(budget.presentation.value)
@@ -831,12 +836,12 @@ class AlertsCentreScreen(Screen[None]):
             self.new_alert_keys.clear()
             self.selected_alert_key = None
             self._render_alert_options()
-            self._clear_document()
             self.country_map.update_country(
                 self.selected_country_code,
                 country,
                 (),
             )
+            self._clear_document()
         self.alert_filter_button.disabled = True
         self._show_alert_list_progress()
         self._load_task = asyncio.create_task(self._load_country(self.selected_country_code, generation, refresh=refresh))
@@ -891,11 +896,22 @@ class AlertsCentreScreen(Screen[None]):
             if callable(new_alert_identities)
             else set()
         )
+        filtered_alerts = self._matching_alerts(self.alert_filter_value)
+        selected = next(
+            (
+                alert
+                for alert in filtered_alerts
+                if country_alert_identity(alert) == previous_key
+            ),
+            filtered_alerts[0] if filtered_alerts else None,
+        )
         self.country_map.update_country(
             country_code,
             self._country_name(country_code),
             self.alerts,
-            selected_alert_key=previous_key,
+            selected_alert_key=(
+                country_alert_identity(selected) if selected is not None else None
+            ),
         )
         if self.selected_place is not None and not self._selected_place_is_available():
             self._clear_selected_settlement()
@@ -976,22 +992,7 @@ class AlertsCentreScreen(Screen[None]):
         *,
         preferred_key: tuple[str, str] | None = None,
     ) -> None:
-        normalized_query = ' '.join(query.casefold().split())
-        self.filtered_alerts = [
-            alert
-            for alert in self.alerts
-            if (
-                not self.alert_severity_filter
-                or (alert.severity or '').strip().casefold()
-                == self.alert_severity_filter
-            )
-            and (
-                not normalized_query
-                or normalized_query in _alert_search_text(alert)
-            )
-        ]
-        if self.alert_sort_value == 'new':
-            self.filtered_alerts.sort(key=lambda alert: country_alert_identity(alert) not in self.new_alert_keys)
+        self.filtered_alerts = self._matching_alerts(query)
         current_key = preferred_key or self.selected_alert_key
         selected = next(
             (alert for alert in self.filtered_alerts if country_alert_identity(alert) == current_key),
@@ -1010,6 +1011,31 @@ class AlertsCentreScreen(Screen[None]):
             self.selected_alert_key = None
             self._clear_document()
             self._show_alert_list_state('No matching alerts' if self.alerts else 'No active alerts')
+
+    def _matching_alerts(self, query: str) -> list[Alert]:
+        """Return locally filtered alerts in their requested stable order."""
+
+        normalized_query = ' '.join(query.casefold().split())
+        filtered_alerts = [
+            alert
+            for alert in self.alerts
+            if (
+                not self.alert_severity_filter
+                or (alert.severity or '').strip().casefold()
+                == self.alert_severity_filter
+            )
+            and (
+                not normalized_query
+                or normalized_query in _alert_search_text(alert)
+            )
+        ]
+        if self.alert_sort_value == 'new':
+            filtered_alerts.sort(
+                key=lambda alert: (
+                    country_alert_identity(alert) not in self.new_alert_keys
+                )
+            )
+        return filtered_alerts
 
     def _render_alert_options(self) -> None:
         self._alert_by_option_id.clear()

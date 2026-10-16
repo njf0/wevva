@@ -25,7 +25,7 @@ from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSys
 from tests.test_alerts_centre_map import EAST_GERMANY, WEST_GERMANY, _alert
 from tests.test_tropical_systems_screen import _observation
 from tests.test_world_locations_map import LONDON, NEW_YORK, TOKYO
-from tests.weather_fixtures import weather_update
+from tests.weather_fixtures import hourly_forecast, weather_update
 from wevva import geography
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
@@ -63,23 +63,76 @@ class _CountryService:
 
     def __init__(self) -> None:
         self.calls = 0
-        geometries = (WEST_GERMANY, EAST_GERMANY, WEST_GERMANY)
-        self.alerts = [
-            _alert(
-                f'fixture-{index}',
-                severity=('Severe', 'Moderate', 'Minor')[index % 3],
-                geometry=geometries[index % len(geometries)],
-            )
-            for index in range(6)
-        ]
+        self.results = {
+            'DE': _country_alerts('ordinary', 6, (WEST_GERMANY, EAST_GERMANY)),
+            'FR': _country_alerts('france', 6, (_box_geometry(1.0, 45.5, 2.5, 2.0),)),
+            'US': _country_alerts('us-unique', 100, _unique_us_geometries(100)),
+        }
+        self._gate: asyncio.Event | None = None
+        self.started = asyncio.Event()
+
+    def gate_next_request(self) -> asyncio.Event:
+        self._gate = asyncio.Event()
+        self.started = asyncio.Event()
+        return self._gate
 
     async def get_alerts(self, country_code: str, **_kwargs: Any) -> list:
-        assert country_code == 'DE'
         self.calls += 1
-        return list(self.alerts)
+        gate = self._gate
+        if gate is not None:
+            self._gate = None
+            self.started.set()
+            await gate.wait()
+        return list(self.results[country_code])
 
     def new_alert_identities(self, *_args: Any, **_kwargs: Any) -> frozenset:
         return frozenset()
+
+
+def _box_geometry(
+    longitude: float,
+    latitude: float,
+    width: float,
+    height: float,
+) -> dict[str, object]:
+    return {
+        'type': 'Polygon',
+        'coordinates': [[
+            [longitude, latitude],
+            [longitude + width, latitude],
+            [longitude + width, latitude + height],
+            [longitude, latitude + height],
+            [longitude, latitude],
+        ]],
+    }
+
+
+def _unique_us_geometries(count: int) -> tuple[dict[str, object], ...]:
+    return tuple(
+        _box_geometry(
+            -124.0 + (index % 10) * 5.8,
+            25.0 + (index // 10) * 2.5,
+            2.2,
+            1.3,
+        )
+        for index in range(count)
+    )
+
+
+def _country_alerts(
+    prefix: str,
+    count: int,
+    geometries: tuple[dict[str, object], ...],
+) -> list:
+    severities = ('Severe', 'Moderate', 'Minor')
+    return [
+        _alert(
+            f'{prefix}-{index}',
+            severity=severities[min(2, index * 3 // max(1, count))],
+            geometry=geometries[index % len(geometries)],
+        )
+        for index in range(count)
+    ]
 
 
 @dataclass(frozen=True)
@@ -339,6 +392,13 @@ async def _search_scenarios(recorder: _Recorder) -> None:
 async def _workspace_scenarios(recorder: _Recorder) -> None:
     service = _CountryService()
     systems = _tropical_systems()
+    hourly_started = asyncio.Event()
+    hourly_release = asyncio.Event()
+
+    async def load_place_hourly(*_args: Any):
+        hourly_started.set()
+        await hourly_release.wait()
+        return hourly_forecast()
 
     async def construct() -> Wevva:
         return Wevva(
@@ -350,6 +410,7 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
     app = await recorder.measure('startup.construct_with_location', construct)
     app.action_refresh = AsyncMock()
     app.country_alerts_service = service  # type: ignore[assignment]
+    app.load_alert_place_hourly_forecast = load_place_hourly  # type: ignore[method-assign]
     app.weather_screen._city_temperature_loader = AsyncMock(return_value={})
     app._tropical_system_cache = (time.monotonic(), tuple(systems))
     app.load_tropical_products = AsyncMock(side_effect=_tropical_products)
@@ -453,11 +514,76 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         alerts = app.screen
         assert isinstance(alerts, AlertsCentreScreen)
 
+        async def progress_updates() -> None:
+            generation = alerts._load_generation
+            country_code = alerts.selected_country_code
+            assert country_code is not None
+            alerts._apply_progress(
+                generation,
+                country_code,
+                'source_started',
+                {'provider_name': 'Fixture Weather Service'},
+            )
+            alerts._apply_progress(
+                generation,
+                country_code,
+                'alerts_total',
+                {'total': 6},
+            )
+            alerts._apply_progress(
+                generation,
+                country_code,
+                'alerts_checked',
+                {'completed': 6, 'total': 6},
+            )
+            await _settle(pilot)
+
+        await recorder.measure('alerts.progress_updates_3', progress_updates)
+
+        async def filter_and_sort() -> None:
+            alerts.new_alert_keys = {('fixture', 'ordinary-4')}
+            alerts.alert_severity_filter = 'moderate'
+            alerts.alert_sort_value = 'new'
+            alerts._apply_alert_filter('ordinary')
+            await _settle(pilot, 2)
+
+        await recorder.measure('alerts.filter_sort_6', filter_and_sort)
+        alerts.alert_severity_filter = ''
+        alerts.alert_sort_value = 'severity'
+        alerts._apply_alert_filter('')
+        await _settle(pilot, 2)
+
         async def alert_selection() -> None:
             alerts._select_alert(alerts.alerts[-1])
             await _settle(pilot, 2)
 
         await recorder.measure('alerts.selection', alert_selection)
+
+        geometry = alerts.country_map.geometry
+        assert geometry is not None and geometry.places
+        place = geometry.places[0][0]
+
+        async def settlement_selection() -> None:
+            alerts._select_settlement(place)
+            await hourly_started.wait()
+            await _settle(pilot, 2)
+
+        await recorder.measure(
+            'alerts.settlement_selection_loading',
+            settlement_selection,
+        )
+
+        async def hourly_completion() -> None:
+            hourly_release.set()
+            await _settle(pilot, 4)
+
+        await recorder.measure('alerts.hourly_completion_72h', hourly_completion)
+
+        async def hourly_cache_hit() -> None:
+            alerts._select_settlement(place)
+            await _settle(pilot, 2)
+
+        await recorder.measure('alerts.hourly_cache_hit_72h', hourly_cache_hit)
         await recorder.measure('alerts.resize_burst', lambda: _resize_burst(pilot))
 
         async def exit_alerts() -> None:
@@ -466,6 +592,53 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
 
         await recorder.measure('alerts.exit_to_weather', exit_alerts)
         await recorder.measure('alerts.warm_reentry_persistent', open_alerts)
+
+        async def switch_country_france() -> None:
+            alerts._choose_country('FR')
+            await _settle(pilot, 4)
+
+        await recorder.measure('alerts.country_switch_6', switch_country_france)
+
+        service.results['DE'] = _country_alerts(
+            'shared',
+            100,
+            (WEST_GERMANY, EAST_GERMANY),
+        )
+
+        async def switch_shared_stress() -> None:
+            alerts._choose_country('DE')
+            await _settle(pilot, 4)
+
+        await recorder.measure('alerts.country_switch_shared_100', switch_shared_stress)
+
+        async def switch_unique_stress() -> None:
+            alerts._choose_country('US')
+            await _settle(pilot, 4)
+
+        await recorder.measure('alerts.country_switch_us_unique_100', switch_unique_stress)
+
+        async def stress_filter_sort() -> None:
+            alerts.alert_severity_filter = 'moderate'
+            alerts.alert_sort_value = 'new'
+            alerts._apply_alert_filter('us-unique')
+            await _settle(pilot, 3)
+
+        await recorder.measure('alerts.filter_sort_unique_100', stress_filter_sort)
+
+        pending_release = service.gate_next_request()
+        alerts.action_refresh_alerts()
+        await service.started.wait()
+        await recorder.measure('alerts.exit_with_country_pending', exit_alerts)
+
+        async def complete_country_while_hidden() -> None:
+            pending_release.set()
+            await _settle(pilot, 4)
+
+        await recorder.measure(
+            'alerts.country_completion_while_hidden',
+            complete_country_while_hidden,
+        )
+        await recorder.measure('alerts.reentry_after_pending_completion', open_alerts)
         await app.pop_screen()
         await _settle(pilot)
 
@@ -733,7 +906,13 @@ def main() -> None:
                 'fixtures': {
                     'search_places': [10, 100, 10],
                     'weather': {'hourly_points': 72, 'daily_points': 7, 'alerts': 2},
-                    'alerts_centre': {'alerts': 6, 'unique_polygons': 2},
+                    'alerts_centre': {
+                        'ordinary_alerts': 6,
+                        'ordinary_unique_polygons': 2,
+                        'stress_alerts': 100,
+                        'stress_shapes': ['shared_2', 'mostly_unique_us'],
+                        'hourly_points': 72,
+                    },
                     'tropical': {'systems': 2, 'source_observations': 3},
                     'world_locations': {'ordinary': 3, 'stress': 40},
                     'resize_events_per_burst': 4,

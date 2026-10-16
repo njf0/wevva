@@ -374,6 +374,39 @@ class _MapApp(App[None]):
 
 
 class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reflow_reuses_render_canvas_for_callout_placement(self) -> None:
+        app = _MapApp()
+        flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)
+        wind = _alert('wind', severity='Moderate', geometry=EAST_GERMANY)
+
+        async with app.run_test(size=(100, 32)) as pilot:
+            widget = app.query_one(CountryAlertsMap)
+            widget.update_country(
+                'DE',
+                'Germany',
+                [flood, wind],
+                selected_alert_key=('fixture', 'flood'),
+            )
+            for _ in range(3):
+                await pilot.pause()
+
+            filled_layers: list[str] = []
+            original_fill = GeographicCanvas.fill_polygons
+
+            def counted_fill(canvas, polygons, *, layer):
+                filled_layers.append(layer)
+                return original_fill(canvas, polygons, layer=layer)
+
+            with patch.object(
+                GeographicCanvas,
+                'fill_polygons',
+                new=counted_fill,
+            ):
+                widget._reflow()
+
+            self.assertEqual(filled_layers.count('land'), 1)
+            self.assertTrue(widget.placements)
+
     async def test_alert_selection_rebuilds_focused_geography_without_network_work(self) -> None:
         app = _MapApp()
         flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)

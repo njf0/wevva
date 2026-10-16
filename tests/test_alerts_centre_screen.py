@@ -16,6 +16,7 @@ from wevva_warnings import Alert, WarningSource
 
 from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry
+from wevva.widgets.country_alerts_map import CountryAlertsMap
 
 
 GERMANY = SupportedAlertCountry('DE', 'Germany')
@@ -148,6 +149,61 @@ class _RaceService(_FixtureService):
 
 
 class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_initial_result_builds_only_empty_and_final_selected_maps(self) -> None:
+        alert = _alert(
+            'german-flood',
+            severity='Severe',
+            event='Flood Warning',
+            headline='Flooding in Germany',
+        )
+        screen = AlertsCentreScreen(
+            service=_FixtureService({'DE': [alert]}),  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+        rebuilds = 0
+        original_rebuild = CountryAlertsMap._rebuild_view
+
+        def counted_rebuild(widget: CountryAlertsMap) -> None:
+            nonlocal rebuilds
+            rebuilds += 1
+            original_rebuild(widget)
+
+        with patch.object(CountryAlertsMap, '_rebuild_view', new=counted_rebuild):
+            async with app.run_test(size=(100, 30)) as pilot:
+                await pilot.pause()
+
+        self.assertEqual(rebuilds, 2)
+
+    async def test_unchanged_layout_budget_skips_child_reapplication(self) -> None:
+        screen = AlertsCentreScreen(
+            service=_FixtureService({'DE': []}),  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            with (
+                patch.object(
+                    screen.country_map,
+                    'set_max_city_labels',
+                    wraps=screen.country_map.set_max_city_labels,
+                ) as set_label_limit,
+                patch.object(
+                    screen.place_forecast,
+                    'set_layout',
+                    wraps=screen.place_forecast.set_layout,
+                ) as set_place_layout,
+            ):
+                screen._apply_responsive_layout(
+                    screen._layout_width,
+                    screen._layout_height,
+                )
+
+            set_label_limit.assert_not_called()
+            set_place_layout.assert_not_called()
+
     async def test_country_select_changes_the_loaded_country(self) -> None:
         service = _FixtureService({'DE': [], 'FR': []})
         screen = AlertsCentreScreen(

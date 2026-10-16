@@ -2,8 +2,8 @@
 
 ## Status
 
-In progress — Slices A–C, E, and F complete through 16 October 2026;
-production optimisation slices D and G have not started
+In progress — screen Slices A–F complete through 16 October 2026; only
+cross-screen lifecycle and consolidation Slice G remains
 
 ## Context
 
@@ -1270,3 +1270,159 @@ manual mouse check was performed.
 
 The recommended remaining order is Slice D (Alerts Centre after its active
 feature work), then Slice G (cross-screen lifecycle and consolidation).
+
+### Slice D — Alerts Centre
+
+Slice D began from the committed Slice E state at `338a13a`, with the Slice D
+benchmark expansion present but before any Alerts Centre production change.
+It used CPython 3.13.0, Textual 8.0.0, macOS 26.7.1 x86_64, the common
+`80x24`, `100x30`, `140x45`, and `180x55` terminal sizes, one discarded
+complete warm-up, and three samples. Provider wait was excluded: country
+results were immediate deterministic values and the 72-hour settlement result
+used a gate released at measurement start.
+
+The ordinary fixture contains six alerts sharing two provider polygons. The
+stress fixtures contain 100 severity-grouped alerts sharing two polygons and
+100 alerts with mostly unique boxes spread across the United States. The
+matrix now separately covers progress, filtering/sorting, country changes,
+alert/detail selection, settlement loading, hourly completion and cache hits,
+resize, persistent re-entry, exit with a request pending, hidden completion,
+and the following re-entry. Navigation loops remain Task 0024's concern and
+denser detail-source/query work remains with Task 0021.
+
+#### Measured hotspots and bounded fixes
+
+The expanded pre-change profile made the ownership clear. Twenty-nine calls to
+`_apply_responsive_layout()` consumed 5.26 seconds cumulatively even though the
+pure budget frequently had not changed. The screen now retains the immutable
+budget and returns before class, style, select, map-label, and hourly-layout
+writes when equality proves the presentation is unchanged. Requests remain at
+29 in the comparable final profile, while `CountryAlertsMap` label-limit and
+`AlertPlaceHourlyForecast` layout applications both fall from 29 to eight;
+layout cumulative time falls to 1.36 seconds. Tab activation still applies its
+own visibility change directly, and every distinct size/state budget continues
+through the full layout path.
+
+Map reflow rasterized land and alert layers to produce the backdrop, discarded
+the fitted `GeographicCanvas`, then filled and framed the same land again only
+to place region and city labels. The internal renderer now returns its frame
+to the widget, which converts it to the same public `Text` result and reuses
+that exact fitted canvas for callouts. A deterministic mounted test establishes
+one land fill per reflow; geometry, centering, Braille output, warning/land
+overlap colours, and native label anchors therefore share one transform.
+`CountryAlertsMap._reflow()` still ran 15 times, but its cumulative profile
+time fell from 4.53 to 3.73 seconds. Across the unchanged complete profile,
+all geographic `fill_polygons()` calls fell from 235 to 170 and cumulative
+time from 4.65 to 3.52 seconds; the direct one-fill invariant is the stronger
+attribution evidence.
+
+Finally, a country result first built an intermediate map using the old or
+absent selection, then filtering selected the final alert and rebuilt the map.
+Local filtering is now a small pure screen helper used to determine the final
+selection before `update_country()`. The ordinary list, highlight, document,
+and selection code still runs once afterward, but its map update is an
+identity no-op. Initial loading similarly installs the empty new-country map
+before clearing the old document, so document clearing cannot rebuild the old
+country. Comparable map rebuilds fall from 23 to 14. The selected provider
+geometry remains the sole source of the focused viewport.
+
+No result cache, filter cache, spatial index, worker, task, or shared map
+abstraction was added. No additional production deletion was proven: the
+exported pure render/geometry helpers and geometry-less fallback remain live
+compatibility and test surfaces.
+
+#### Scenario results
+
+Times are milliseconds and show `median [minimum–maximum]`. Provider wait is
+excluded, while Textual settling, styling, rendering, and compositing remain
+inside each sample. Several unchanged control-screen medians were also lower
+in the final run, so the structural counts above—not every millisecond below—
+are the primary attribution evidence.
+
+| Alerts Centre scenario | Before | After | Finding |
+|---|---:|---:|---|
+| cold entry, 6 alerts/2 polygons | 1,460 [1,407–1,911] | 1,366 [1,145–1,950] | ranges overlap; first mount and truthful map remain substantial |
+| progress updates, 3 events | 48 [37–55] | 47 [44–65] | cheap negative finding; no progress coalescer added |
+| filter/sort, 6 alerts | 461 [427–588] | 327 [324–375] | filter predicate is cheap; selected map/document presentation owns the path |
+| alert/detail selection | 528 [491–532] | 399 [350–468] | focused projection and complete document remain necessary |
+| settlement selection/loading | 521 [504–560] | 475 [453–621] | layout short-circuit helps; async ownership is retained |
+| hourly completion, 72 points | 517 [467–556] | 458 [452–537] | complete fixed strip still renders after the excluded wait |
+| hourly cache hit, 72 points | 104 [98–123] | 43 [33–48] | unchanged budget avoids redundant child layout work |
+| four-size resize | 3,493 [3,216–3,503] | 2,896 [2,671–2,943] | every distinct size still renders; duplicate land pass removed |
+| persistent warm re-entry | 244 [208–248] | 226 [217–242] | existing installed-screen design remains effective |
+| country switch, 6 alerts | 850 [829–1,063] | 580 [538–607] | only the final selected map is constructed |
+| country switch, 100 alerts/2 shared polygons | 889 [750–984] | 537 [511–541] | layer coalescing and duplicate rejection remain effective |
+| country switch, 100 mostly unique US polygons | 666 [556–824] | 311 [307–324] | projection remains required; intermediate selected view is gone |
+| filter/sort, 100 unique alerts | 643 [443–1,026] | 354 [346–365] | list/document/map work dominates, not string filtering |
+| hidden country completion | 281 [250–333] | 165 [157–166] | persistent result application remains intentional |
+| re-entry after pending completion | 1,269 [1,002–1,740] | 783 [781–784] | active-location country restoration and stale guards remain intact |
+| return to Weather | 323 [284–338] | 270 [264–273] | transition semantics unchanged |
+
+The final traced pass observed about 21.7 MiB peak Python allocation for cold
+entry, 13.8 MiB for either the ordinary or shared-100 country switch, 12.1 MiB
+for alert selection, 12.3 MiB for settlement loading, 10.7 MiB for hourly
+completion, 6.6 MiB for the unique-100 filter/sort path, 1.9 MiB for resize,
+and 0.48 MiB for persistent warm re-entry. The mostly-unique US country switch
+peaked near 3.4 MiB. These are traced transient allocation observations, not
+retained process-memory guarantees; the tracer's timings are not latency
+results.
+
+#### Lifecycle, complexity, and deletion audit
+
+1. No unreachable production path was proven. The exported pure geometry and
+   render helpers and geometry-less fallback remain active compatibility and
+   test surfaces.
+2. Country generation/task state, provider progress, current-country state,
+   `NEW` snapshots, local filter/sort state, selected alert identity, and
+   settlement generation/task/cache state have different invalidation rules.
+   The measured simplification is to calculate the final selection before map
+   construction, not to collapse these safeguards into one state object.
+3. Settlement hourly expansion remains the disproportionate auxiliary feature:
+   its widget is 301 production lines and it additionally owns cache TTL,
+   units, retained height, generation, task, retry, and stale-result behavior.
+   Its measured completion is about 458 ms with a 10.7 MiB transient peak.
+   It remains intact; removing or simplifying the feature requires an explicit
+   product decision rather than an optimization audit.
+4. The core map remains the dominant local feature cost: final profiled reflow
+   is 3.73 seconds across 15 calls. Provider geometry truth, selected fitting,
+   land/warning overlap, complete map-unit context, region annotations, and
+   native settlement activation account for that work. A viewport/frame cache
+   would need alert identity, geometry, size, theme, and selection invalidation
+   and is not justified by this persistent screen's measured ownership.
+
+Existing tests continue to verify consecutive same-style layer coalescing and
+duplicate-polygon rejection. Country/progress races, current-country restore,
+`NEW` highlighting, filter/modal state, selected list highlighting, complete
+provider documents, compact/wide layouts, geometry-less alerts, selected
+geometry truth, settlement cache expiry, unit invalidation, retained loading
+height, stale hourly rejection, failures/retries, and return-to-Weather remain
+covered. Filter, selection, hourly cache hit, and resize add no network or
+packaged-resource loading.
+
+#### Slice D change accounting and verification
+
+- Production: `+87/-36` lines across `alerts_centre_screen.py` and
+  `country_alerts_map.py` (2,260 to 2,311 physical lines, net +51). Growth is
+  the explicit final-selection helper and retained-frame path; duplicate map
+  construction and land raster work are removed.
+- Tests: `+89/-0` lines across the existing Alerts Centre screen and map
+  modules (1,277 to 1,366, net +89); no elapsed-time assertion.
+- Audit tooling: `+192/-13` lines (750 to 929, net +179) in the existing
+  checkout-only script for progress, filter, country, settlement/hourly,
+  pending lifecycle, and two labelled 100-alert stress shapes.
+- Documentation: this Slice D record and status update only.
+- Dependencies, runtime telemetry, service/cache contracts, public API,
+  warning language/units behavior, visual design, and Task 0021/0024-owned
+  features: unchanged.
+
+Compilation, the expanded timing/allocation harness, and 56 focused Alerts
+Centre service/screen/map/layout/hourly/integration tests passed. The complete
+suite passed 332 tests in 308.018 seconds. An earlier full run had one
+load-sensitive failure in the unrelated Search debounce test; that test then
+passed three consecutive isolated runs and the complete rerun. Mounted tests
+cover compact and wide topology, but no live provider, interactive terminal,
+font, colour, Braille-glyph, or manual mouse check was performed.
+
+The recommended remaining order is Slice G only: repeated cross-screen
+lifecycle measurement, then consolidation solely where at least two completed
+screen slices prove the same ownership can be simplified.

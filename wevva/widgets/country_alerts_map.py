@@ -30,7 +30,11 @@ from wevva.geography import (
     viewport_from_lonlat,
 )
 from wevva.services.country_alerts import country_alert_identity
-from wevva.widgets.geographic_scope import GeographicCanvas, ProjectedPolygon
+from wevva.widgets.geographic_scope import (
+    GeographicCanvas,
+    GeographicFrame,
+    ProjectedPolygon,
+)
 from wevva.widgets.map_callouts import (
     DirectionalCalloutCandidate,
     DirectionalCalloutPlacement,
@@ -283,6 +287,31 @@ def render_country_alerts_map(
 ) -> Text:
     """Render warnings with distinct sea and true land-intersection styles."""
 
+    return _country_alerts_map_frame(
+        scope,
+        alert_layers,
+        width=width,
+        height=height,
+        land_style=land_style,
+        alert_styles=alert_styles,
+        alert_land_styles=alert_land_styles,
+        selected_alert_key=selected_alert_key,
+    ).to_text()
+
+
+def _country_alerts_map_frame(
+    scope: CountryAlertsMapGeometry,
+    alert_layers: Sequence[CountryAlertPolygonLayer],
+    *,
+    width: int,
+    height: int,
+    land_style: str | None,
+    alert_styles: Mapping[AlertKey, str | None],
+    alert_land_styles: Mapping[AlertKey, str | None],
+    selected_alert_key: AlertKey | None,
+) -> GeographicFrame:
+    """Build the rendered map while retaining its fitted placement canvas."""
+
     canvas = GeographicCanvas(max(1, width), max(1, height), scope.viewport)
     canvas.fill_polygons(scope.land, layer='land')
     non_selected = [layer for layer in alert_layers if layer.key != selected_alert_key]
@@ -317,7 +346,7 @@ def render_country_alerts_map(
         solid_braille_layers=solid_layers,
         centering_layers=() if scope.selected_alert_polygons else ('land',),
         overlap_styles=overlap_styles,
-    ).to_text()
+    )
 
 
 class CountryAlertRegionLabel(Static):
@@ -625,26 +654,22 @@ class CountryAlertsMap(Container):
                 if selected
                 else f'dim {land_colour}' if land_colour else 'dim'
             )
+        frame = _country_alerts_map_frame(
+            self._scope,
+            self._alert_layers,
+            width=width,
+            height=height,
+            land_style=f'dim {secondary}' if secondary else 'dim',
+            alert_styles=alert_styles,
+            alert_land_styles=alert_land_styles,
+            selected_alert_key=self._selected_alert_key,
+        )
         backdrop.update(
-            render_country_alerts_map(
-                self._scope,
-                self._alert_layers,
-                width=width,
-                height=height,
-                land_style=f'dim {secondary}' if secondary else 'dim',
-                alert_styles=alert_styles,
-                alert_land_styles=alert_land_styles,
-                selected_alert_key=self._selected_alert_key,
-            ),
+            frame.to_text(),
             layout=False,
         )
 
-        canvas = GeographicCanvas(width, height, self._scope.viewport)
-        canvas.fill_polygons(self._scope.land, layer='land')
-        canvas.frame(
-            (('land', None),),
-            centering_layers=() if self._scope.selected_alert_polygons else ('land',),
-        )
+        canvas = frame.canvas
         occupied: set[tuple[int, int]] = set()
         for annotation in self._scope.region_annotations:
             label = self._region_labels.get(annotation.key)
