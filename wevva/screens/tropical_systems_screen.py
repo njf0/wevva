@@ -15,6 +15,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
+from textual.css.query import NoMatches
 from textual.events import Resize
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Markdown, Static, Tab, Tabs
@@ -286,6 +287,7 @@ class TropicalSystemsScreen(Screen[None]):
         self.call_after_refresh(self._apply_layout)
 
     def on_unmount(self) -> None:
+        self._selection_generation += 1
         for task in self._tasks:
             task.cancel()
         self._tasks.clear()
@@ -311,6 +313,8 @@ class TropicalSystemsScreen(Screen[None]):
                 summary_available_rows=0,
                 centre_weather_available_rows=0,
             )
+            if budget == self._layout_budget:
+                return
             self._layout_budget = budget
             root = self.query_one('#tropical-screen-root', Container)
             root.styles.width = budget.frame_width
@@ -340,6 +344,8 @@ class TropicalSystemsScreen(Screen[None]):
             summary_available_rows=summary.available_row_count,
             centre_weather_available_rows=max(6, weather.available_row_count),
         )
+        if budget == self._layout_budget:
+            return
         self._layout_budget = budget
 
         root = self.query_one('#tropical-screen-root', Container)
@@ -646,7 +652,11 @@ class TropicalSystemsScreen(Screen[None]):
             self._centre_weather[key] = response
 
         selected = self.selected_observation
-        if selected is None or _centre_weather_key(selected) != key:
+        if (
+            not self.is_attached
+            or selected is None
+            or _centre_weather_key(selected) != key
+        ):
             return
         weather = self.query_one(TropicalCentreWeather)
         if key in self._centre_weather:
@@ -676,7 +686,11 @@ class TropicalSystemsScreen(Screen[None]):
         finally:
             self._loading_keys.discard(key)
         selected = self.selected_observation
-        if selected is not None and _observation_key(selected) == key:
+        if (
+            self.is_attached
+            and selected is not None
+            and _observation_key(selected) == key
+        ):
             self._show_track(selected)
             await self._populate_product_tabs(selected, self._selection_generation)
 
@@ -684,7 +698,8 @@ class TropicalSystemsScreen(Screen[None]):
         async with self._product_tabs_lock:
             selected = self.selected_observation
             if (
-                selected is None
+                not self.is_attached
+                or selected is None
                 or _observation_key(selected) != _observation_key(observation)
                 or generation != self._selection_generation
             ):
@@ -700,8 +715,23 @@ class TropicalSystemsScreen(Screen[None]):
             self._updating_tabs += 1
             try:
                 await tabs.clear()
+                if (
+                    not self.is_attached
+                    or generation != self._selection_generation
+                ):
+                    return
                 for tab_id, label in tab_specs:
-                    await tabs.add_tab(Tab(label, id=tab_id))
+                    if (
+                        not self.is_attached
+                        or generation != self._selection_generation
+                    ):
+                        return
+                    try:
+                        await tabs.add_tab(Tab(label, id=tab_id))
+                    except NoMatches:
+                        # A popped screen may detach Tabs internals before its
+                        # product task observes cancellation.
+                        return
                 tabs.display = len(tab_specs) > 1
                 tabs.active = desired
                 if desired is None:

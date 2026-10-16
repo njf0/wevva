@@ -69,7 +69,6 @@ class StormScopeGeometry:
     """Projected, renderer-independent layers for one storm scope."""
 
     viewport: GeographicViewport
-    land: tuple[ProjectedPolygon, ...]
     storm: tuple[ProjectedPoint, ...]
     forecast_marker_indices: tuple[int, ...]
     fix_labels: tuple[tuple[int, str], ...] = ()
@@ -218,7 +217,6 @@ def build_storm_scope_geometry(
         return None
     return StormScopeGeometry(
         viewport=viewport,
-        land=_visible_world_polygons(viewport),
         storm=tuple(viewport.project(point.longitude, point.latitude) for point in track),
         forecast_marker_indices=tuple(index for index, point in enumerate(track) if index > 0 and point.forecast_marker),
         fix_labels=tuple(
@@ -292,13 +290,37 @@ def _scope_frame(
     show_cone: bool = True,
 ) -> GeographicFrame:
     """Build the shared raster and preserve identical overlay projection."""
-    canvas = GeographicCanvas(max(1, width), max(1, height), scope.viewport)
+    return _build_scope_frame(
+        scope.viewport,
+        scope.cone,
+        scope.storm,
+        width=width,
+        height=height,
+        palette=palette,
+        show_track=show_track,
+        show_cone=show_cone,
+    )
+
+
+def _build_scope_frame(
+    viewport: GeographicViewport,
+    cone: tuple[ProjectedPolygon, ...],
+    storm: tuple[ProjectedPoint, ...],
+    *,
+    width: int,
+    height: int,
+    palette: ScopePalette,
+    show_track: bool,
+    show_cone: bool,
+) -> GeographicFrame:
+    """Build a tropical backdrop from its immutable rendering inputs."""
+    canvas = GeographicCanvas(max(1, width), max(1, height), viewport)
     canvas.fill_polygons(_visible_world_polygons(canvas.viewport), layer='land')
-    canvas.fill_polygons(scope.cone, layer='cone')
+    canvas.fill_polygons(cone, layer='cone')
     # Keep supplied fixes in the fitted/centred extent without joining them
     # into an inferred continuous path. Native and legacy renderers add the
     # discrete markers after the backdrop has been composed.
-    for point in scope.storm:
+    for point in storm:
         canvas.point(point, layer='track-positions')
     layers = [('land', palette.land)]
     if show_cone:
@@ -306,6 +328,28 @@ def _scope_frame(
     return canvas.frame(
         layers,
         centering_layers=('land', 'cone', 'track-positions'),
+    )
+
+
+@lru_cache(maxsize=16)
+def _native_scope_frame(
+    viewport: GeographicViewport,
+    cone: tuple[ProjectedPolygon, ...],
+    storm: tuple[ProjectedPoint, ...],
+    width: int,
+    height: int,
+    palette: ScopePalette,
+) -> GeographicFrame:
+    """Reuse an immutable native backdrop across reflows and fresh screens."""
+    return _build_scope_frame(
+        viewport,
+        cone,
+        storm,
+        width=width,
+        height=height,
+        palette=palette,
+        show_track=True,
+        show_cone=True,
     )
 
 
@@ -624,13 +668,13 @@ class TropicalStormTrackScope(Container):
             forecast=warning,
             place=theme.get('text-success') or theme.get('text-primary'),
         )
-        frame = _scope_frame(
-            self._scope,
-            width=width,
-            height=height,
-            palette=palette,
-            show_track=True,
-            show_cone=True,
+        frame = _native_scope_frame(
+            self._scope.viewport,
+            self._scope.cone,
+            self._scope.storm,
+            width,
+            height,
+            palette,
         )
         self.query_one('.tropical-track-backdrop', Static).update(
             frame.to_text(),

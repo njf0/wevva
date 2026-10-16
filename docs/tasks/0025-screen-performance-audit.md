@@ -2,8 +2,8 @@
 
 ## Status
 
-In progress — Slices A–C and F complete on 15 October 2026; production
-optimisation slices D, E, and G have not started
+In progress — Slices A–C, E, and F complete through 16 October 2026;
+production optimisation slices D and G have not started
 
 ## Context
 
@@ -1114,3 +1114,159 @@ mouse check was performed.
 The recommended remaining order is Slice E (Tropical), Slice D (Alerts Centre
 after its active feature work), then Slice G (cross-screen lifecycle and
 consolidation).
+
+### Slice E — Tropical Systems screen
+
+Slice E began from the clean committed Slice F state at `c06a97e`. It used the
+same CPython 3.13.0, Textual 8.0.0, macOS 26.7.1 x86_64 environment and four
+terminal sizes as the preceding slices. The fixture still has two canonical
+systems and three untouched source observations, but now supplies a
+coordinate-only forecast product, two representative provider documents, and
+complete centre weather. Controlled gates separate product and centre-weather
+completion from provider wait; the gates are released at measurement start.
+
+#### Measured hotspots and bounded fixes
+
+The dominant local cost was geography that the final renderer did not use.
+`build_storm_scope_geometry()` eagerly projected and retained
+`StormScopeGeometry.land` for every selected observation. Both the native and
+legacy renderers instead project the canvas's aspect-fitted viewport, and no
+production reader consumed the stored field. In an isolated five-sample check,
+building all three observation geometries took about 0.2 ms without this
+field; reproducing the old eager land projection took a 293 ms median
+`[290–421]`. The field, its construction work, and tests of the unused
+intermediate were deleted. Rendered-land coverage remains exercised at compact
+and wide sizes.
+
+Native reflow then rasterized the same fitted land/cone/track-position backdrop
+again for unchanged geometry, size, and theme. A 16-entry LRU now retains only
+those immutable native frames. Its key includes viewport, authoritative cone,
+provider track positions, terminal dimensions, and resolved palette. New
+geometry, size, or theme therefore misses naturally; refresh does not need a
+separate invalidation branch, and arbitrary values evict old frames. Legacy
+rendering remains uncached because it mutates its frame with marker and label
+overlays.
+
+A three-observation/four-size matrix retained about 2.1 MiB across 12 native
+frames and peaked at 2.48 MiB. After projection had already been warmed, filling
+that matrix took about 586 ms while a complete 12-hit lookup took 0.23 ms. The
+bound is intentionally 16 rather than a general map cache.
+
+The existing `_layout_budget` was only diagnostic: all child layouts were
+reapplied even when the pure budget was unchanged. Equality now stops that
+work. In comparable one-run profiles, `_apply_layout()` was still requested 42
+times, while summary, centre-weather, and track `set_layout()` calls each fell
+from 40 to 14. Track reflows fell from 22 to 15, centre-weather row renders from
+52 to 26, and actual native frame builds from 19 to four. The final profile
+reduced `build_storm_scope_geometry()` from 1.48 seconds across 17 calls to
+about 4 ms because it no longer performs eager land projection. Four remaining
+visible-world projections consumed 1.67 seconds and remain the primary cold or
+new-size cost.
+
+Finally, the expanded baseline repeatedly exposed an unhandled `NoMatches`
+exception when a lazy product completed while its fresh screen was being
+popped. Product and centre results are still retained, app-level product tasks
+remain shielded for cache reuse, and screen unmount still cancels its own task
+set. The screen now skips detached UI application, advances its selection
+generation on unmount, and treats missing internal tab nodes during teardown as
+a completed stale presentation. The same post-change harness completed without
+the exception.
+
+#### Scenario results
+
+The ordinary before/after runs used one discarded complete warm-up and three
+samples. Times are milliseconds and show `median [minimum–maximum]`. The richer
+fixture makes cold numbers intentionally different from Slice A. Other-screen
+control timings also moved materially between runs, so the structural counts,
+isolated deletion measurement, and cache-disabled comparison reported below
+are the stronger attribution evidence; the table records whole-path outcomes without
+claiming every difference for Slice E.
+
+| Tropical scenario | Before | After | Finding |
+|---|---:|---:|---|
+| cold entry, 2 systems/3 sources | 1,253 [1,014–1,332] | 698 [671–745] | unused eager land removed; first fitted raster still required |
+| storm selection | 632 [600–684] | 369 [356–397] | new observation geometry remains necessary; eager intermediate removed |
+| source selection | 802 [796–904] | 434 [431–444] | same finding for an untouched alternate source |
+| product selection | 291 [280–339] | 133 [125–157] | provider document mount remains; no document cache added |
+| lazy product completion | 257 [228–369] | 220 [209–222] | coordinate metadata updates labels; cached backdrop avoids repeat raster work |
+| centre-weather completion | 277 [253–311] | 58 [38–105] | small local table update after provider wait is excluded |
+| four-size resize | 2,972 [2,531–3,260] | 2,251 [2,228–2,571] | each unseen size still rasterizes; Textual layout dominates |
+| refresh | 145 [136–182] | 125 [110–171] | source/product/weather refresh semantics unchanged |
+| return to Weather | 427 [393–466] | 314 [307–350] | detached completion is now quiet; transition itself was not optimized |
+| fresh-screen warm re-entry | 827 [696–1,002] | 505 [483–672] | systems/products remain app-cached; matching native frames can be reused |
+
+A same-code cache toggle was deliberately treated as a negative wall-time
+finding. With only the native-frame cache disabled, lazy product completion was
+232 `[224–299]` ms versus 220 `[209–222]` ms in the final run, and warm
+re-entry was 601 `[526–671]` ms versus 505 `[483–672]`; the ranges overlap.
+Cold entry, first storm/source selection, refresh, and resize likewise showed
+no reliable cache-only gain because they introduce new keys or are dominated
+by Textual layout. The direct 12-frame measurement and 19-to-four build count
+prove eliminated CPU work, but no universal complete-path latency claim is
+made for the cache alone.
+
+The final traced run observed about 16.9 MiB peak Python allocation for cold
+entry, 10.5 MiB for warm re-entry, 4.5 MiB for source selection, 2.3 MiB for
+storm selection, 1.9 MiB for product selection, 1.2 MiB for lazy product
+completion, 0.20 MiB for centre-weather completion, and 0.15 MiB for the resize
+burst. These are allocation observations, not process-resident-memory
+guarantees. The separate 2.1 MiB matrix measurement describes retained cache
+cost more directly.
+
+#### Lifecycle, complexity, and deletion audit
+
+1. The unused projected-land field was the only proven production deletion.
+   Nearby-system helpers remain documented compatibility APIs, and source,
+   product, basic-information, failure, trackless, and compact branches all
+   remain reachable.
+2. The three selection maps cannot safely collapse: source selection is keyed
+   by canonical storm, product selection and lazy results by exact issued
+   observation, centre weather by rounded coordinates, and monotonic update
+   presentation by refresh-stable source/id. The generic task set owns teardown
+   cancellation while the centre task map additionally coalesces coordinate
+   requests. Combining these identities would weaken cache or stale-result
+   behavior, so no state abstraction was added.
+3. The track renderer is the dominant feature cost: even after removing the
+   obsolete projection, a cold fitted projection is roughly 0.4 seconds under
+   profiling and the tropical track module is 936 physical lines. It is also
+   the workspace's core feature and remains intact. Centre weather remains the
+   strongest disproportionate auxiliary feature at 290 production lines plus
+   task/cache/error state, but its measured local completion is only about 58
+   ms and 0.20 MiB; removal still requires an explicit product decision.
+4. Provider Markdown/plain documents are deliberately rebuilt only on product
+   selection. The representative Markdown selection remains about 133 ms and
+   1.9 MiB, but caching mounted document widgets would add ownership and theme
+   invalidation for a non-dominant path. No such cache was added.
+
+Classification ordering, source attribution, exact observation objects,
+lazy-cache identity, provider cone/track truth, remembered storm/source/product
+selection, compact topology, refresh bypass, last-update monotonicity, city and
+fix callouts, and current-centre weather remain covered. No resize or
+product-tab path adds network or packaged-geography loading.
+
+#### Slice E change accounting and verification
+
+- Production: `+90/-16` lines across `tropical_systems_screen.py` and
+  `tropical_track.py` (2,016 to 2,090 physical lines, net +74). Most growth is
+  the bounded immutable-frame builder/cache and explicit teardown safeguards;
+  the obsolete per-scope land field and eager construction are deleted.
+- Tests: `+94/-27` lines across the existing tropical screen, track, and global
+  presentation modules (2,262 to 2,329 physical lines, net +67); no
+  elapsed-time assertion.
+- Audit tooling: `+141/-4` lines (613 to 750, net +137) in the one existing
+  checkout-only harness for storm/source/product changes, controlled lazy
+  completions, richer geometry/documents, refresh, and cache clearing.
+- Documentation: this Slice E record and status update only.
+- Dependencies, runtime telemetry, provider/service contracts, documented
+  public Python API, visual design, app cache keys/expiry, and explicit-refresh
+  behavior: unchanged.
+
+Compilation, the expanded timing/allocation harness, and 69 focused tropical
+screen/track/layout/global-presentation tests passed. The complete suite passed
+329 tests in 301.201 seconds. Tests emitted asyncio slow-task diagnostics but
+no failures. Mounted tests covered `80x24` and wider topology transitions. No
+live provider, interactive terminal, font, colour, emoji, Braille-glyph, or
+manual mouse check was performed.
+
+The recommended remaining order is Slice D (Alerts Centre after its active
+feature work), then Slice G (cross-screen lifecycle and consolidation).

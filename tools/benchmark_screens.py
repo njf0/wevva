@@ -20,7 +20,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from textual.widgets import Tabs
-from wevva_warnings import CanonicalTropicalSystem
+from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from tests.test_alerts_centre_map import EAST_GERMANY, WEST_GERMANY, _alert
 from tests.test_tropical_systems_screen import _observation
@@ -189,6 +189,63 @@ def _tropical_systems() -> list[CanonicalTropicalSystem]:
     ]
 
 
+def _tropical_products(system: TropicalSystem) -> list[TropicalProduct]:
+    """Representative coordinate metadata plus two visible documents."""
+    latitude = float(system.center_lat or 0.0)
+    longitude = float(system.center_lon or 0.0)
+    return [
+        TropicalProduct(
+            kind='forecast',
+            label='Forecast fixes',
+            data={
+                'points': [
+                    {
+                        'latitude': latitude + 1.0,
+                        'longitude': longitude + 1.0,
+                        'lead_hours': 24,
+                    }
+                ]
+            },
+        ),
+        TropicalProduct(
+            kind='advisory',
+            label='Public Advisory',
+            content='Representative official advisory text. ' * 12,
+        ),
+        TropicalProduct(
+            kind='discussion',
+            label='Forecast Discussion',
+            content='## Discussion\n\nRepresentative forecast reasoning. ' * 8,
+            content_format='markdown',
+        ),
+    ]
+
+
+def _tropical_centre_weather(latitude: float, longitude: float) -> dict[str, Any]:
+    return {
+        'latitude': latitude,
+        'longitude': longitude,
+        'current': {
+            'temperature_2m': 29.4,
+            'apparent_temperature': 33.1,
+            'precipitation_probability': 60,
+            'precipitation': 1.8,
+            'weather_code': 95,
+            'surface_pressure': 986.4,
+            'is_day': 1,
+            'wind_speed_10m': 55.4,
+            'wind_gusts_10m': 78.4,
+            'wind_direction_10m': 315,
+        },
+        'current_units': {
+            'temperature_2m': '°C',
+            'precipitation': 'mm',
+            'surface_pressure': 'hPa',
+            'wind_speed_10m': 'km/h',
+        },
+    }
+
+
 def _clear_geography_caches() -> None:
     for cached in (
         geography._map_units,
@@ -200,6 +257,7 @@ def _clear_geography_caches() -> None:
         geography.subunit,
         country_alerts_map._country_alerts_map_source,
         country_alerts_map.build_country_alerts_map_geometry,
+        tropical_track._native_scope_frame,
         tropical_track._visible_world_polygons,
         world_locations_map._projected_world_land,
         world_locations_map._world_frame,
@@ -294,8 +352,9 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
     app.country_alerts_service = service  # type: ignore[assignment]
     app.weather_screen._city_temperature_loader = AsyncMock(return_value={})
     app._tropical_system_cache = (time.monotonic(), tuple(systems))
-    app.load_tropical_products = AsyncMock(return_value=[])
-    app.load_tropical_centre_weather = AsyncMock(return_value={})
+    app.load_tropical_products = AsyncMock(side_effect=_tropical_products)
+    app.load_tropical_centre_weather = AsyncMock(side_effect=_tropical_centre_weather)
+    app.refresh_tropical_systems = AsyncMock(return_value=systems)
     runner = app.run_test(size=(140, 45))
 
     async def enter():
@@ -418,6 +477,17 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         tropical = app.screen
         assert isinstance(tropical, TropicalSystemsScreen)
 
+        async def storm_selection() -> None:
+            tropical.query_one('#tropical-storm-tabs', Tabs).active = (
+                'tropical-storm-1'
+            )
+            await _settle(pilot, 3)
+
+        await recorder.measure('tropical.storm_selection', storm_selection)
+
+        tropical.query_one('#tropical-storm-tabs', Tabs).active = 'tropical-storm-0'
+        await _settle(pilot, 3)
+
         async def source_selection() -> None:
             tropical.query_one('#tropical-source-tabs', Tabs).active = (
                 'tropical-screen-source-1'
@@ -425,7 +495,71 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
             await _settle(pilot, 3)
 
         await recorder.measure('tropical.source_selection', source_selection)
+
+        async def product_selection() -> None:
+            tropical.query_one('#tropical-product-tabs', Tabs).active = (
+                'tropical-product-2'
+            )
+            await _settle(pilot, 3)
+
+        await recorder.measure('tropical.product_selection', product_selection)
+
+        observation = tropical.selected_observation
+        assert observation is not None
+        observation_key = app._tropical_product_cache_key(observation)
+        screen_key = '\0'.join(observation_key)
+        tropical._products.pop(screen_key, None)
+        product_release = asyncio.Event()
+
+        async def delayed_products(system: TropicalSystem) -> list[TropicalProduct]:
+            await product_release.wait()
+            return _tropical_products(system)
+
+        tropical._product_loader = delayed_products
+        await tropical._show_observation()
+
+        async def lazy_product_completion() -> None:
+            product_release.set()
+            await _settle(pilot, 4)
+
+        await recorder.measure(
+            'tropical.lazy_product_completion',
+            lazy_product_completion,
+        )
+
+        centre_key = (
+            round(float(observation.center_lat), 4),
+            round(float(observation.center_lon), 4),
+        )
+        tropical._centre_weather.pop(centre_key, None)
+        weather_release = asyncio.Event()
+
+        async def delayed_centre_weather(
+            latitude: float,
+            longitude: float,
+        ) -> dict[str, Any]:
+            await weather_release.wait()
+            return _tropical_centre_weather(latitude, longitude)
+
+        tropical._centre_weather_loader = delayed_centre_weather
+        tropical._show_centre_weather(observation)
+
+        async def centre_weather_completion() -> None:
+            weather_release.set()
+            await _settle(pilot, 4)
+
+        await recorder.measure(
+            'tropical.centre_weather_completion',
+            centre_weather_completion,
+        )
+
         await recorder.measure('tropical.resize_burst', lambda: _resize_burst(pilot))
+
+        async def refresh_tropical() -> None:
+            tropical.action_refresh_systems()
+            await _settle(pilot, 5)
+
+        await recorder.measure('tropical.refresh', refresh_tropical)
 
         async def exit_tropical() -> None:
             await app.pop_screen()
@@ -588,7 +722,10 @@ def main() -> None:
                     'platform': platform.platform(),
                     'machine': platform.machine(),
                     'terminal_sizes': ['80x24', '100x30', '140x45', '180x55'],
-                    'provider_wait': 'excluded; all loaders are immediate fixtures',
+                    'provider_wait': (
+                        'excluded; immediate fixtures or controlled gates '
+                        'released at measurement start'
+                    ),
                     'warmup': args.warmup,
                     'repeat': args.repeat,
                     'tracemalloc': args.tracemalloc,

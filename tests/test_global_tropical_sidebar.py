@@ -225,8 +225,13 @@ class DisplayGeographyTests(unittest.TestCase):
 
         assert edinburgh_scope is not None and neutral_scope is not None
         self.assertEqual(edinburgh_scope, neutral_scope)
-        self.assertTrue(edinburgh_scope.land)
-        rendered = render_braille_scope(edinburgh_scope, width=68, height=13)
+        rendered = render_braille_scope(
+            edinburgh_scope,
+            width=68,
+            height=13,
+            palette=ScopePalette(land='red'),
+        )
+        self.assertTrue(any(span.style == 'red' for span in rendered.spans))
         self.assertNotIn('Hawaii', rendered.plain)
 
     def test_context_floor_reveals_nearby_land_and_major_cities(self) -> None:
@@ -251,10 +256,7 @@ class DisplayGeographyTests(unittest.TestCase):
         cma_scope = build_storm_scope_geometry(cma)
 
         assert jma_scope is not None and cma_scope is not None
-        self.assertTrue(jma_scope.land)
-        self.assertTrue(cma_scope.land)
         self.assertNotEqual(jma_scope.viewport, cma_scope.viewport)
-        self.assertNotEqual(jma_scope.land, cma_scope.land)
         self.assertIn('Tokyo', render_braille_scope(jma_scope, width=60, height=16).plain)
         self.assertIn('Hong Kong', render_braille_scope(cma_scope, width=60, height=16).plain)
 
@@ -288,7 +290,6 @@ class DisplayGeographyTests(unittest.TestCase):
         scope = build_storm_scope_geometry(reunion)
 
         assert scope is not None
-        self.assertTrue(scope.land)
         rendered = render_braille_scope(scope, width=60, height=16)
         self.assertIn('Port Louis', rendered.plain)
 
@@ -313,7 +314,6 @@ class DisplayGeographyTests(unittest.TestCase):
         scope = build_storm_scope_geometry(eastern_pacific)
 
         assert scope is not None
-        self.assertFalse(scope.land)
         rendered = render_braille_scope(
             scope,
             width=48,

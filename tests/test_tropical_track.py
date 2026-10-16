@@ -26,6 +26,7 @@ from wevva.widgets.tropical_track import (
     extract_storm_track,
     project_track_locally,
     render_braille_scope,
+    _native_scope_frame,
     _scope_frame,
 )
 
@@ -283,7 +284,7 @@ class TropicalTrackGeometryTests(unittest.TestCase):
             )
         )
 
-    def test_viewport_contains_global_land_and_complete_storm_track(self) -> None:
+    def test_viewport_contains_complete_storm_track(self) -> None:
         scope = build_storm_scope_geometry(
             _cphc_system(),
             location_latitude=19.7297,
@@ -295,16 +296,6 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         assert scope is not None
         self.assertTrue(all(scope.viewport.min_x <= point.x <= scope.viewport.max_x for point in scope.storm))
         self.assertTrue(all(scope.viewport.min_y <= point.y <= scope.viewport.max_y for point in scope.storm))
-        self.assertTrue(scope.land)
-        self.assertTrue(
-            any(
-                scope.viewport.min_x <= point.x <= scope.viewport.max_x
-                and scope.viewport.min_y <= point.y <= scope.viewport.max_y
-                for polygon in scope.land
-                for ring in polygon
-                for point in ring
-            )
-        )
         self.assertTrue(scope.places)
         self.assertEqual(scope.forecast_marker_indices, tuple(range(1, 9)))
         storm_width = max(point.x for point in scope.storm) - min(point.x for point in scope.storm)
@@ -350,7 +341,6 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         assert scope is not None
         self.assertGreaterEqual(scope.viewport.width, 14.39)
         self.assertGreaterEqual(scope.viewport.height, 14.39)
-        self.assertTrue(scope.land)
         rendered = render_braille_scope(scope, width=60, height=16)
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
 
@@ -444,7 +434,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
     def test_supplied_fixes_render_as_dots_without_an_interpolated_path(self) -> None:
         scope = StormScopeGeometry(
             viewport=GeographicViewport(0.0, -140.0, -5.0, -5.0, 5.0, 5.0),
-            land=(),
             storm=(
                 ProjectedPoint(-3.0, 0.0),
                 ProjectedPoint(0.0, 2.0),
@@ -463,7 +452,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
     def test_cone_uses_its_own_braille_palette_layer(self) -> None:
         scope = StormScopeGeometry(
             viewport=GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0),
-            land=(),
             storm=(ProjectedPoint(2.0, 5.0), ProjectedPoint(8.0, 5.0)),
             forecast_marker_indices=(),
             cone=(
@@ -503,7 +491,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
     def test_hiding_cone_does_not_move_or_clip_track_markers(self) -> None:
         scope = StormScopeGeometry(
             viewport=GeographicViewport(20.0, -150.0, 0.0, 0.0, 12.0, 8.0),
-            land=(),
             storm=(
                 ProjectedPoint(2.0, 2.0),
                 ProjectedPoint(5.0, 4.0),
@@ -580,7 +567,6 @@ class TropicalTrackRenderingTests(unittest.TestCase):
     def test_discrete_positions_have_balanced_frame_margins(self) -> None:
         scope = StormScopeGeometry(
             viewport=GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0),
-            land=(),
             storm=(ProjectedPoint(7.0, 5.0), ProjectedPoint(3.0, 5.0)),
             forecast_marker_indices=(1,),
         )
@@ -618,6 +604,35 @@ class _TropicalTrackApp(App[None]):
 
 
 class TropicalTrackWidgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_reflow_reuses_immutable_backdrop_frame(self) -> None:
+        _native_scope_frame.cache_clear()
+        app = _TropicalTrackApp()
+        async with app.run_test(size=(70, 24)) as pilot:
+            widget = app.query_one(LargeTropicalStormTrackScope)
+            widget.styles.width = 66
+            widget.set_layout(visible=True, height=18)
+            widget.update_system(_cphc_system())
+            for _ in range(3):
+                await pilot.pause()
+
+            backdrop = widget.query_one(
+                '.tropical-track-backdrop', Static
+            ).render().plain
+            placements = widget.placements
+            before = _native_scope_frame.cache_info()
+
+            widget._reflow()
+
+            after = _native_scope_frame.cache_info()
+            self.assertEqual(after.misses, before.misses)
+            self.assertEqual(after.hits, before.hits + 1)
+            self.assertEqual(
+                widget.query_one('.tropical-track-backdrop', Static).render().plain,
+                backdrop,
+            )
+            self.assertEqual(widget.placements, placements)
+        _native_scope_frame.cache_clear()
+
     async def test_cone_uses_subdued_theme_warning_colour(self) -> None:
         system = _cphc_system()
         system.geometries['cone'] = {

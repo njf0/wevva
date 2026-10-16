@@ -303,7 +303,6 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('970 hPa', _data_table_text(summary))
             self.assertNotIn('990 hPa', _data_table_text(summary))
             assert first_scope is not None
-            self.assertTrue(first_scope.land)
 
             screen.query_one('#tropical-source-tabs', Tabs).active = 'tropical-screen-source-1'
             await pilot.pause()
@@ -312,10 +311,9 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('990 hPa', _data_table_text(summary))
             self.assertNotIn('970 hPa', _data_table_text(summary))
             assert second_scope is not None
-            self.assertTrue(second_scope.land)
             self.assertEqual(first_scope.places, second_scope.places)
             self.assertNotEqual(first_scope.storm, second_scope.storm)
-            self.assertNotEqual(first_scope.land, second_scope.land)
+            self.assertNotEqual(first_scope.viewport, second_scope.viewport)
             self.assertEqual(
                 screen.query_one('#tropical-storm-tabs Tab').label.plain,
                 'Typhoon NANGKA',
@@ -583,7 +581,6 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             assert track._scope is not None
             self.assertTrue(track._scope.places)
-            self.assertTrue(track._scope.land)
 
     async def test_source_and_product_selection_survive_visiting_another_storm(self) -> None:
         async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
@@ -997,6 +994,61 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                 [tab.label.plain for tab in screen.query('#tropical-product-tabs Tab')],
                 ['Forecast', 'Public Advisory'],
             )
+
+    async def test_detached_lazy_results_are_retained_without_ui_work(self) -> None:
+        product = TropicalProduct(
+            kind='advisory',
+            label='Public Advisory',
+            content='Ready',
+        )
+
+        async def product_loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return [product]
+
+        async def weather_loader(latitude: float, longitude: float) -> dict:
+            return {'latitude': latitude, 'longitude': longitude, 'current': {}}
+
+        screen = TropicalSystemsScreen(
+            [self.nangka],
+            product_loader=product_loader,
+            centre_weather_loader=weather_loader,
+        )
+        observation_key = _observation_key(self.jma)
+        centre_key = (28.0, 135.0)
+
+        await screen._load_products(self.jma, observation_key)
+        await screen._load_centre_weather(centre_key)
+
+        self.assertEqual(screen._products[observation_key], (product,))
+        self.assertEqual(
+            screen._centre_weather[centre_key],
+            {'latitude': 28.0, 'longitude': 135.0, 'current': {}},
+        )
+
+    async def test_unchanged_layout_budget_skips_child_layout_reapplication(self) -> None:
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return []
+
+        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        app = _ScreenApp(screen)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            summary = screen.query_one(TropicalStormSummary)
+            weather = screen.query_one(TropicalCentreWeather)
+            track = screen.query_one(LargeTropicalStormTrackScope)
+
+            with (
+                patch.object(summary, 'set_layout', wraps=summary.set_layout) as summary_layout,
+                patch.object(weather, 'set_layout', wraps=weather.set_layout) as weather_layout,
+                patch.object(track, 'set_layout', wraps=track.set_layout) as track_layout,
+            ):
+                screen._apply_layout()
+                screen._apply_layout()
+
+            summary_layout.assert_not_called()
+            weather_layout.assert_not_called()
+            track_layout.assert_not_called()
 
     async def test_weather_binding_replaces_escape_and_location_bindings_are_hidden(self) -> None:
         async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
