@@ -12,6 +12,7 @@ from wevva_warnings import Alert
 from wevva.geography import map_unit
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry, country_alert_identity
+from wevva.widgets import country_alerts_map
 from wevva.widgets.country_alerts_map import (
     CountryAlertCityLabel,
     CountryAlertRegionLabel,
@@ -375,7 +376,7 @@ class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
     async def test_reflow_reuses_render_canvas_for_callout_placement(self) -> None:
         app = _MapApp()
         flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)
-        wind = _alert('wind', severity='Moderate', geometry=EAST_GERMANY)
+        wind = _alert('wind', severity='Moderate', geometry=WEST_GERMANY)
 
         async with app.run_test(size=(100, 32)) as pilot:
             widget = app.query_one(CountryAlertsMap)
@@ -430,6 +431,57 @@ class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(widget.geometry.viewport, geometry.viewport)
             self.assertEqual(widget.geometry.selected_alert_key, ('fixture', 'wind'))
             self.assertEqual(len(widget.alert_layers), 1)
+
+    async def test_alert_preview_changes_only_render_emphasis(self) -> None:
+        app = _MapApp()
+        flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)
+        wind = _alert('wind', severity='Moderate', geometry=WEST_GERMANY)
+
+        async with app.run_test(size=(100, 32)) as pilot:
+            widget = app.query_one(CountryAlertsMap)
+            widget.update_country(
+                'DE',
+                'Germany',
+                [flood, wind],
+                selected_alert_key=('fixture', 'flood'),
+            )
+            for _ in range(3):
+                await pilot.pause()
+            geometry = widget.geometry
+
+            with (
+                patch.object(
+                    widget,
+                    '_rebuild_view',
+                    wraps=widget._rebuild_view,
+                ) as rebuild,
+                patch.object(
+                    country_alerts_map,
+                    '_country_alerts_map_frame',
+                    wraps=country_alerts_map._country_alerts_map_frame,
+                ) as render_frame,
+            ):
+                widget.update_preview_alert(('fixture', 'wind'))
+                await pilot.pause()
+
+            rebuild.assert_not_called()
+            self.assertIs(widget.geometry, geometry)
+            self.assertEqual(widget._preview_alert_key, ('fixture', 'wind'))
+            render_kwargs = render_frame.call_args.kwargs
+            self.assertEqual(
+                render_kwargs['preview_alert_key'],
+                ('fixture', 'wind'),
+            )
+            self.assertFalse(
+                str(render_kwargs['alert_styles'][('fixture', 'wind')]).startswith('dim ')
+            )
+            self.assertFalse(
+                str(render_kwargs['alert_styles'][('fixture', 'flood')]).startswith('dim ')
+            )
+
+            widget.update_preview_alert(None)
+            await pilot.pause()
+            self.assertIsNone(widget._preview_alert_key)
 
     async def test_city_callouts_are_directional_interactive_name_only_and_capped(self) -> None:
         app = _MapApp()

@@ -284,6 +284,7 @@ def render_country_alerts_map(
     alert_styles: Mapping[AlertKey, str | None],
     alert_land_styles: Mapping[AlertKey, str | None],
     selected_alert_key: AlertKey | None,
+    preview_alert_key: AlertKey | None = None,
 ) -> Text:
     """Render warnings with distinct sea and true land-intersection styles."""
 
@@ -296,6 +297,7 @@ def render_country_alerts_map(
         alert_styles=alert_styles,
         alert_land_styles=alert_land_styles,
         selected_alert_key=selected_alert_key,
+        preview_alert_key=preview_alert_key,
     ).to_text()
 
 
@@ -309,14 +311,21 @@ def _country_alerts_map_frame(
     alert_styles: Mapping[AlertKey, str | None],
     alert_land_styles: Mapping[AlertKey, str | None],
     selected_alert_key: AlertKey | None,
+    preview_alert_key: AlertKey | None = None,
 ) -> GeographicFrame:
     """Build the rendered map while retaining its fitted placement canvas."""
 
     canvas = GeographicCanvas(max(1, width), max(1, height), scope.viewport)
     canvas.fill_polygons(scope.land, layer='land')
-    non_selected = [layer for layer in alert_layers if layer.key != selected_alert_key]
-    selected = [layer for layer in alert_layers if layer.key == selected_alert_key]
-    ordered_layers = [*non_selected, *selected]
+    emphasized_keys = {selected_alert_key, preview_alert_key} - {None}
+    context = [layer for layer in alert_layers if layer.key not in emphasized_keys]
+    selected = [
+        layer
+        for layer in alert_layers
+        if layer.key == selected_alert_key and layer.key != preview_alert_key
+    ]
+    previewed = [layer for layer in alert_layers if layer.key == preview_alert_key]
+    ordered_layers = [*context, *selected, *previewed]
     layers: list[tuple[str, str | None]] = [('land', land_style)]
     solid_layers = ['land']
     overlap_styles: dict[tuple[str, str], str | None] = {}
@@ -505,6 +514,7 @@ class CountryAlertsMap(Container):
         self._scope: CountryAlertsMapGeometry | None = None
         self._alert_layers: tuple[CountryAlertPolygonLayer, ...] = ()
         self._selected_alert_key: AlertKey | None = None
+        self._preview_alert_key: AlertKey | None = None
         self._labels: dict[PlaceKey, CountryAlertCityLabel] = {}
         self._region_labels: dict[RegionKey, CountryAlertRegionLabel] = {}
         self._placements: dict[PlaceKey, CountryAlertsMapPlacement] = {}
@@ -554,6 +564,7 @@ class CountryAlertsMap(Container):
         self._country_name = country_name.strip() or normalized_country
         self._alerts = tuple(alerts)
         self._selected_alert_key = selected_alert_key
+        self._preview_alert_key = None
         self._rebuild_view()
         self.border_title = f'Map of Alerts for {self._country_name}'
         if self.is_mounted:
@@ -571,6 +582,14 @@ class CountryAlertsMap(Container):
         if self.is_mounted:
             self._sync_label_widgets()
         self.refresh()
+        self._schedule_reflow()
+
+    def update_preview_alert(self, alert_key: AlertKey | None) -> None:
+        """Emphasize a row's polygon without changing selection or viewport."""
+
+        if alert_key == self._preview_alert_key:
+            return
+        self._preview_alert_key = alert_key
         self._schedule_reflow()
 
     def refresh_theme(self) -> None:
@@ -591,6 +610,7 @@ class CountryAlertsMap(Container):
         self._scope = None
         self._alert_layers = ()
         self._selected_alert_key = None
+        self._preview_alert_key = None
         self._placements = {}
         self.border_title = (
             f'Map of Alerts for {country_name}' if country_name else 'Map of Alerts'
@@ -686,15 +706,18 @@ class CountryAlertsMap(Container):
                 or theme.get('accent')
                 or colour
             )
-            selected = layer.key == self._selected_alert_key
+            emphasized = layer.key in {
+                self._selected_alert_key,
+                self._preview_alert_key,
+            }
             alert_styles[layer.key] = (
                 colour
-                if selected
+                if emphasized
                 else f'dim {colour}' if colour else 'dim'
             )
             alert_land_styles[layer.key] = (
                 land_colour
-                if selected
+                if emphasized
                 else f'dim {land_colour}' if land_colour else 'dim'
             )
         frame = _country_alerts_map_frame(
@@ -706,6 +729,7 @@ class CountryAlertsMap(Container):
             alert_styles=alert_styles,
             alert_land_styles=alert_land_styles,
             selected_alert_key=self._selected_alert_key,
+            preview_alert_key=self._preview_alert_key,
         )
         backdrop.update(
             frame.to_text(),

@@ -267,7 +267,9 @@ land raster use a darker shade from the matching semantic family
 coastline without borrowing a stronger severity colour, clipping, or inferring
 geometry. Geometry-less alerts remain readable without inferred shapes. Alert
 catalogue completion leaves the map at the country overview with no implicit
-list selection. Explicit alert selection fits the complete
+list selection. Pointer hover or focused keyboard highlighting transiently
+promotes that row's visible polygon to full severity without changing the
+viewport or detail document. Explicit alert selection fits the complete
 selected geometry, reprojects overlapping context, and reranks settlements
 locally without network work.
 

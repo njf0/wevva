@@ -369,6 +369,7 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
             self.assertEqual(service.calls, [('DE', False)])
+
             first_prompt = screen.alert_list.get_option_at_index(0).prompt
             self.assertEqual(
                 first_prompt.plain,
@@ -438,6 +439,55 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(empty.display)
             self.assertEqual(_rendered(empty).strip(), 'No matching alerts')
             self.assertEqual(service.calls, [('DE', False)])
+
+    async def test_hover_and_keyboard_highlight_preview_without_selecting(self) -> None:
+        flood = _alert(
+            'flood',
+            severity='Severe',
+            event='Flood Warning',
+            headline='Flooding expected',
+        )
+        wind = _alert(
+            'wind',
+            severity='Moderate',
+            event='Wind Warning',
+            headline='Strong winds expected',
+        )
+        screen = AlertsCentreScreen(
+            service=_FixtureService({'DE': [flood, wind]}),  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause()
+            self.assertTrue(await pilot.hover(screen.alert_list, offset=(2, 1)))
+            await pilot.pause()
+
+            self.assertEqual(
+                screen.country_map._preview_alert_key,
+                ('fixture-source', 'flood'),
+            )
+            self.assertIsNone(screen.selected_alert_key)
+            self.assertIsNone(screen.country_map.geometry.selected_alert_key)
+
+            self.assertTrue(await pilot.hover(screen.alert_filter_button))
+            await pilot.pause()
+            self.assertIsNone(screen.country_map._preview_alert_key)
+
+            screen.alert_list.focus()
+            await pilot.pause()
+            screen.alert_list.highlighted = 1
+            await pilot.pause()
+            self.assertEqual(
+                screen.country_map._preview_alert_key,
+                ('fixture-source', 'wind'),
+            )
+            self.assertIsNone(screen.selected_alert_key)
+
+            screen.alert_filter_button.focus()
+            await pilot.pause()
+            self.assertIsNone(screen.country_map._preview_alert_key)
 
     async def test_new_badge_and_new_first_sort_are_local_to_latest_refresh(self) -> None:
         severe = _alert(

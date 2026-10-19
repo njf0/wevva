@@ -9,10 +9,12 @@ from time import monotonic
 from typing import Any, ClassVar
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.events import Resize
+from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
@@ -68,6 +70,66 @@ PlaceWeatherLoader = Callable[
 _PLACE_WEATHER_CACHE_TTL_SECONDS = 15 * 60
 _PLACE_WEATHER_HOVER_DELAY_SECONDS = 0.15
 _ALERT_AREA_LABEL_MAX_LENGTH = 24
+
+
+class AlertOptionList(OptionList):
+    """Alert list which reports transient pointer and keyboard previews."""
+
+    class PreviewChanged(Message):
+        """The row currently being inspected changed without selection."""
+
+        def __init__(self, option_id: str | None) -> None:
+            super().__init__()
+            self.option_id = option_id
+
+    def __init__(self, *, id: str | None = None) -> None:
+        self._previewed_option_id: str | None = None
+        super().__init__(id=id)
+
+    def _preview_option_id(self) -> str | None:
+        index = self._mouse_hovering_over
+        if index is None and self.has_focus:
+            index = self.highlighted
+        if index is None or not 0 <= index < len(self.options):
+            return None
+        return self.options[index].id
+
+    def _post_preview_if_changed(self) -> None:
+        self._post_preview(self._preview_option_id())
+
+    def _post_preview(self, option_id: str | None) -> None:
+        if option_id == self._previewed_option_id:
+            return
+        self._previewed_option_id = option_id
+        if self.is_attached:
+            self.post_message(self.PreviewChanged(option_id))
+
+    def clear_preview(self) -> None:
+        """Clear transient row inspection while the list is unavailable."""
+
+        self._mouse_hovering_over = None
+        self._post_preview(None)
+
+    def _on_mouse_move(self, event: events.MouseMove) -> None:
+        super()._on_mouse_move(event)
+        self._post_preview_if_changed()
+
+    def _on_leave(self, event: events.Leave) -> None:
+        super()._on_leave(event)
+        self._post_preview_if_changed()
+
+    def on_focus(self, _event: events.Focus) -> None:
+        self._post_preview_if_changed()
+
+    def on_blur(self, _event: events.Blur) -> None:
+        if self._mouse_hovering_over is None:
+            self._post_preview(None)
+        else:
+            self._post_preview_if_changed()
+
+    def watch_highlighted(self, highlighted: int | None) -> None:
+        super().watch_highlighted(highlighted)
+        self._post_preview_if_changed()
 
 
 class AlertFilterDialog(ModalScreen[tuple[str, str, str] | None]):
@@ -543,7 +605,7 @@ class AlertsCentreScreen(Screen[None]):
                             show_eta=False,
                             id='alerts-centre-list-progress-bar',
                         )
-                    yield OptionList(id='alerts-centre-alert-list')
+                    yield AlertOptionList(id='alerts-centre-alert-list')
                 with Container(id='alerts-centre-right'):
                     yield Tabs(
                         Tab('Map', id='alerts-centre-workspace-map'),
@@ -577,8 +639,8 @@ class AlertsCentreScreen(Screen[None]):
         return self.query_one('#alerts-centre-filter-button', Button)
 
     @property
-    def alert_list(self) -> OptionList:
-        return self.query_one('#alerts-centre-alert-list', OptionList)
+    def alert_list(self) -> AlertOptionList:
+        return self.query_one('#alerts-centre-alert-list', AlertOptionList)
 
     @property
     def details(self) -> WeatherAlertDetailsPanel:
@@ -769,6 +831,18 @@ class AlertsCentreScreen(Screen[None]):
             alert = self._alert_by_option_id.get(option_id)
             if alert is not None:
                 self._select_alert(alert)
+
+    def on_alert_option_list_preview_changed(
+        self,
+        event: AlertOptionList.PreviewChanged,
+    ) -> None:
+        """Preview one list polygon without selecting it or changing viewport."""
+
+        event.stop()
+        alert = self._alert_by_option_id.get(event.option_id or '')
+        self.country_map.update_preview_alert(
+            country_alert_identity(alert) if alert is not None else None
+        )
 
     def on_country_alert_settlement_selected(
         self,
@@ -1060,6 +1134,7 @@ class AlertsCentreScreen(Screen[None]):
         return filtered_alerts
 
     def _render_alert_options(self) -> None:
+        self.country_map.update_preview_alert(None)
         self._alert_by_option_id.clear()
         self.alert_list.clear_options()
         options: list[Option | None] = []
@@ -1129,6 +1204,7 @@ class AlertsCentreScreen(Screen[None]):
 
     def _show_alert_list_progress(self) -> None:
         self._progress_items_total = None
+        self.alert_list.clear_preview()
         self.query_one('#alerts-centre-list-empty', Static).display = False
         self.query_one('#alerts-centre-list-progress', Container).display = True
         self.query_one('#alerts-centre-list-progress-bar', ProgressBar).update(

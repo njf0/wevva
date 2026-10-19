@@ -108,6 +108,8 @@ Press `g` from the weather screen to open the country Alerts Centre. It keeps
 country discovery separate from alerts applicable to the current forecast
 point, and combines a searchable active-alert list, complete provider
 documents, issued warning polygons, and locally selectable settlement labels.
+Hovering or keyboard-highlighting a warning row previews its polygon at full
+severity without selecting or zooming it.
 Hovering a settlement shows compact current conditions; clicking it opens that
 place's complete forecast on the main Weather screen. Returning with `g`
 restores the previous Alerts Centre context. Use `r` to refresh its independent
