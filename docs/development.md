@@ -52,6 +52,11 @@ unit and mounted-Textual smoke-test command:
 uv run python -m unittest tests.test_warning_cache tests.test_warning_textual_smoke
 ```
 
+The warning-cache tests use temporary directories and controlled UTC clocks to
+exercise the persistent alert codec, product namespace separation, atomic
+replacement, schema/corruption handling, clock skew, and unavailable storage;
+they do not read or modify the user's cache directory.
+
 The country Alerts Centre has deterministic service, screen, interactive-map,
 settlement-tooltip lifecycle, full-weather navigation, and responsive-budget
 coverage, including cache expiry, stale preview results, and country-switch

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import gzip
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, Mock, call, patch
 
@@ -19,8 +23,12 @@ from wevva.services.alerts import (
     match_alert_candidates,
     match_alert_candidates_async,
 )
+from wevva.services.warning_cache import (
+    WarningCache,
+    WarningCacheProduct,
+)
 from wevva.widgets.saved_locations import SavedLocationsSidebar
-from wevva_warnings import UnsupportedCountryError
+from wevva_warnings import UnsupportedCountryError, WarningSource
 
 
 class _WeatherScreen:
@@ -457,6 +465,206 @@ class AlertCandidateServiceTests(unittest.IsolatedAsyncioTestCase):
             alerts = await match_alert_candidates_async([], [], 51.5, -0.1)
 
         self.assertEqual(alerts, [])
+
+
+class PersistentWarningCacheTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.now = datetime(2030, 1, 2, 12, tzinfo=UTC)
+        self.temporary_directory = TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.cache_path = Path(self.temporary_directory.name)
+
+    def _cache(self) -> WarningCache:
+        return WarningCache(
+            self.cache_path,
+            clock=lambda: self.now,
+        )
+
+    def _complete_alert(self, *, source: str = 'fixture') -> Alert:
+        return Alert(
+            id='alert-1',
+            source=source,
+            event='Flood Warning',
+            headline='Flooding expected',
+            url='https://example.test/alert-1',
+            severity='Severe',
+            urgency='Immediate',
+            certainty='Likely',
+            description='Complete provider description.',
+            instruction='Move to higher ground.',
+            onset=self.now - timedelta(minutes=10),
+            expires=self.now + timedelta(hours=2),
+            area_names=['North district', 'River valley'],
+            geocodes={'SAME': ['012345'], 'UGC': ['ABC001']},
+            parameters={'response': ['Evacuate'], 'flag': ['α', 'β']},
+            geometry={
+                'type': 'GeometryCollection',
+                'geometries': [
+                    {
+                        'type': 'Polygon',
+                        'coordinates': [[[-1.0, 50.0], [0.0, 51.0], [-1.0, 50.0]]],
+                    },
+                    {'type': 'Point', 'coordinates': [-0.5, 50.5]},
+                ],
+            },
+        )
+
+    async def test_round_trip_preserves_every_alert_field_and_metadata(self) -> None:
+        source = WarningSource(
+            id='fixture',
+            name='Fixture warnings',
+            backend='fixture',
+            country_code='GB',
+            url='https://example.test',
+        )
+        cache = self._cache()
+        alert = self._complete_alert()
+
+        stored = await cache.store(
+            WarningCacheProduct.COUNTRY_CATALOGUE,
+            'gbr',
+            'en',
+            [alert],
+            fetched_at=self.now,
+            new_alert_identities={('fixture', 'alert-1')},
+        )
+        restarted = self._cache()
+        with patch(
+            'wevva.services.warning_cache.list_sources',
+            return_value=[source],
+        ):
+            entry = await restarted.load('country_catalogue', 'GB', 'en')
+
+        self.assertTrue(stored)
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        restored = entry.alerts[0]
+        for field_name in (
+            'id',
+            'source',
+            'event',
+            'headline',
+            'url',
+            'severity',
+            'urgency',
+            'certainty',
+            'description',
+            'instruction',
+            'onset',
+            'expires',
+            'area_names',
+            'geocodes',
+            'parameters',
+            'geometry',
+        ):
+            self.assertEqual(getattr(restored, field_name), getattr(alert, field_name))
+        self.assertIs(restored.source_info, source)
+        self.assertEqual(entry.fetched_at, self.now)
+        self.assertEqual(
+            entry.new_alert_identities,
+            frozenset({('fixture', 'alert-1')}),
+        )
+
+    async def test_product_and_language_namespaces_do_not_collide(self) -> None:
+        cache = self._cache()
+        catalogue = self._complete_alert(source='unknown-catalogue')
+        candidates = self._complete_alert(source='unknown-candidates')
+
+        await cache.store('country_catalogue', 'GB', 'auto', [catalogue])
+        await cache.store('reusable_candidates', 'GB', 'auto', [candidates])
+        await cache.store('country_catalogue', 'GB', 'en', [])
+        restarted = self._cache()
+
+        auto_catalogue = await restarted.load('country_catalogue', 'GB')
+        auto_candidates = await restarted.load('reusable_candidates', 'GB')
+        english_catalogue = await restarted.load('country_catalogue', 'GB', 'en')
+
+        assert auto_catalogue is not None
+        assert auto_candidates is not None
+        assert english_catalogue is not None
+        self.assertEqual(auto_catalogue.alerts[0].source, 'unknown-catalogue')
+        self.assertIsNone(auto_catalogue.alerts[0].source_info)
+        self.assertEqual(auto_candidates.alerts[0].source, 'unknown-candidates')
+        self.assertEqual(english_catalogue.alerts, ())
+        self.assertEqual(len(list(self.cache_path.glob('*.json.gz'))), 3)
+
+    async def test_incomplete_or_malformed_entries_do_not_replace_success(self) -> None:
+        cache = self._cache()
+        original = self._complete_alert()
+        self.assertTrue(
+            await cache.store('country_catalogue', 'GB', 'auto', [original])
+        )
+        malformed = self._complete_alert()
+        malformed.geometry = {'type': 'Point', 'coordinates': [float('nan'), 2.0]}
+
+        self.assertFalse(
+            await cache.store(
+                'country_catalogue',
+                'GB',
+                'auto',
+                [],
+                completed=False,
+            )
+        )
+        self.assertFalse(
+            await cache.store('country_catalogue', 'GB', 'auto', [malformed])
+        )
+        entry = await cache.load('country_catalogue', 'GB')
+
+        assert entry is not None
+        self.assertEqual([alert.id for alert in entry.alerts], ['alert-1'])
+
+    async def test_corrupt_incompatible_and_future_files_are_cache_misses(self) -> None:
+        cache = self._cache()
+        path = self.cache_path / 'country_catalogue-GB-auto.json.gz'
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        path.write_bytes(b'not gzip data')
+        self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
+
+        path.write_bytes(gzip.compress(json.dumps({'schema_version': 999}).encode()))
+        self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
+
+        future_writer = WarningCache(
+            self.cache_path,
+            clock=lambda: self.now + timedelta(minutes=6),
+        )
+        self.assertTrue(
+            await future_writer.store('country_catalogue', 'GB', 'auto', [])
+        )
+        self.assertIsNone(
+            await self._cache().load('country_catalogue', 'GB')
+        )
+
+    async def test_unwritable_path_keeps_validated_entry_in_memory(self) -> None:
+        blocked_path = self.cache_path / 'not-a-directory'
+        blocked_path.write_text('occupied')
+        cache = WarningCache(blocked_path, clock=lambda: self.now)
+
+        self.assertFalse(
+            await cache.store('reusable_candidates', 'GB', 'auto', [])
+        )
+        entry = await cache.load('reusable_candidates', 'GB')
+
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(entry.alerts, ())
+
+    async def test_atomic_replacement_leaves_no_temporary_file(self) -> None:
+        cache = self._cache()
+        await cache.store('country_catalogue', 'GB', 'auto', [])
+        await cache.store(
+            'country_catalogue',
+            'GB',
+            'auto',
+            [self._complete_alert()],
+            fetched_at=self.now + timedelta(minutes=1),
+        )
+
+        self.assertEqual(list(self.cache_path.glob('*.tmp')), [])
+        entry = await self._cache().load('country_catalogue', 'GB')
+        assert entry is not None
+        self.assertEqual([alert.id for alert in entry.alerts], ['alert-1'])
 
 
 class WarningProgressTests(unittest.TestCase):

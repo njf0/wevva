@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+In progress — Slice A implemented; Slices B–D remain
 
 ## Context
 
@@ -84,6 +84,22 @@ view while a real refresh runs in the background.
 - Guaranteeing that cached warnings are current after their freshness window;
   stale data is only a provisional bridge to an active refresh.
 - Adding a cache-management settings screen in the first implementation.
+
+## Implementation scale
+
+This is a best-effort optimization for a personal application, not an
+industrial cache subsystem. Keep the implementation small, direct, and easy to
+reason about. Prefer covering the common fresh-restart, stale-preview, forced-
+refresh, and corrupt-file cases with ordinary standard-library code over
+building a general framework or exhaustive machinery for every theoretical
+failure mode.
+
+Aim for roughly 95% of the useful behavior with 50% of the code an exhaustive
+solution might require. When an uncommon edge case would add substantial
+state, abstraction, or coordination, it is acceptable for persistence to
+degrade to an ordinary provider fetch. A little focused duplication is better
+than speculative layers, and later slices should simplify the Slice A boundary
+if integration shows that parts of it are unnecessary.
 
 ## Relevant code
 
@@ -221,7 +237,28 @@ check remains valuable but optional because provider timing is external.
 - Prefer standard-library serialization/compression and filesystem operations;
   SQLite or a new caching dependency is not justified for the expected number
   of country/language entries.
+- Optimize for clarity and the main user-visible wins rather than exhaustive
+  cache engineering; cache failure must remain equivalent to a cache miss.
 
 ## Outcome
 
-To be completed when implemented.
+Slice A introduces `wevva.services.warning_cache`, a focused asynchronous
+memory-and-disk boundary with distinct country-catalogue and reusable-candidate
+namespaces. It writes one versioned, gzip-compressed JSON file per normalized
+country/language/product key using same-directory atomic replacement. The
+codec preserves every normalized `Alert` field, uses timezone-explicit UTC
+datetimes, validates nested JSON data, and restores source presentation
+metadata from the installed warning-source registry. Corrupt, incompatible,
+incomplete, malformed, future-dated, and unavailable-storage cases degrade to
+cache misses or memory-only operation.
+
+Slice A was subsequently simplified in line with the implementation-scale
+guidance above: it uses one compressed format, a private tuple key, direct
+best-effort atomic replacement, and only the validation needed to keep bad
+files from reaching callers. It deliberately has no generic cache base class,
+pluggable codec, alternate storage format, or independent concurrency layer.
+
+The existing Alerts Centre and Weather call sites are intentionally unchanged
+until Slices B and C move their separate cache contracts onto this boundary.
+Pruning and the first-observed journal remain Slice D and Slice B work,
+respectively.

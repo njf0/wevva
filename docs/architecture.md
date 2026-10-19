@@ -94,6 +94,15 @@ from cached values and accept later results without issuing its own queries.
   owns a separate fifteen-minute session cache plus the latest successful
   per-country identity snapshot used for refresh-scoped `NEW` badges. It never
   reads or writes the weather screen's reusable-candidate cache.
+- `wevva/services/warning_cache.py` is the versioned persistence boundary being
+  introduced by Task 0028. It keeps complete country catalogues and reusable
+  Weather candidates in separate country/language/product namespaces, stores
+  normalized alerts in atomic per-key cache files, and restores source
+  presentation metadata from the installed warning registry. Its public disk
+  operations run in worker threads and unavailable or invalid cache storage is
+  treated as an optimization miss. Slice A supplies this storage and codec;
+  the current runtime cache owners remain in place until Slices B and C adopt
+  it.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
   `get_canonical_tropical_systems()` only for the dedicated tropical workspace
   and keeps them in a separate thirty-minute, session-only cache. Canonical
