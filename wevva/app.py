@@ -48,6 +48,7 @@ from wevva.services.alerts import (
     normalize_country_code,
 )
 from wevva.services.country_alerts import CountryAlertsService
+from wevva.services.warning_cache import WarningCache
 from wevva.services.tropical import (
     get_tropical_products_async,
     get_tropical_system_candidates_async,
@@ -148,7 +149,8 @@ class Wevva(App, inherit_bindings=False):
         self._alert_indicator_generation: int | None = None
         self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
         self._alert_cache_clock = time.monotonic
-        self.country_alerts_service = CountryAlertsService()
+        self.warning_cache = WarningCache()
+        self.country_alerts_service = CountryAlertsService(cache=self.warning_cache)
         self._alerts_centre_screen: AlertsCentreScreen | None = None
         self._tropical_system_cache: TropicalCacheEntry | None = None
         self._tropical_system_cache_clock = time.monotonic

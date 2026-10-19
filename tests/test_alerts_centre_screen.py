@@ -15,7 +15,10 @@ from textual.widgets import ProgressBar, Select, Static
 from wevva_warnings import Alert, WarningSource
 
 from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
-from wevva.services.country_alerts import SupportedAlertCountry
+from wevva.services.country_alerts import (
+    CountryAlertsCacheHit,
+    SupportedAlertCountry,
+)
 from wevva.widgets.country_alerts_map import CountryAlertsMap
 
 
@@ -148,7 +151,112 @@ class _RaceService(_FixtureService):
         return list(self.results[country_code])  # type: ignore[arg-type]
 
 
+class _CachedFixtureService:
+    last_country_code: str | None = None
+
+    def __init__(
+        self,
+        cached: CountryAlertsCacheHit,
+        refreshed: list[Alert],
+    ) -> None:
+        self.cached = cached
+        self.refreshed = refreshed
+        self.cache_calls = 0
+        self.refresh_calls = 0
+        self.refresh_started = asyncio.Event()
+        self.finish_refresh = asyncio.Event()
+
+    async def get_cached_alerts(self, *_args, **_kwargs) -> CountryAlertsCacheHit:
+        self.cache_calls += 1
+        return self.cached
+
+    async def refresh_alerts(self, _country_code, *, warning_language, progress):
+        del warning_language
+        self.refresh_calls += 1
+        progress('source_started', {'provider_name': 'Fixture Weather Service'})
+        self.refresh_started.set()
+        await self.finish_refresh.wait()
+        return list(self.refreshed)
+
+    def new_alert_identities(self, *_args, **_kwargs):
+        return frozenset()
+
+
 class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_persisted_hit_renders_without_fetch_progress(self) -> None:
+        alert = _alert(
+            'cached',
+            severity='Moderate',
+            event='Wind Warning',
+            headline='Cached wind warning',
+        )
+        service = _CachedFixtureService(
+            CountryAlertsCacheHit((alert,), frozenset(), provisional=False),
+            [],
+        )
+        screen = AlertsCentreScreen(
+            service=service,  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        with patch.object(
+            screen,
+            '_show_alert_list_progress',
+            wraps=screen._show_alert_list_progress,
+        ) as show_progress:
+            async with app.run_test(size=(100, 30)) as pilot:
+                await pilot.pause()
+
+                self.assertEqual([item.id for item in screen.alerts], ['cached'])
+                self.assertTrue(screen.alert_list.display)
+                self.assertFalse(
+                    screen.query_one('#alerts-centre-list-progress', Container).display
+                )
+
+        self.assertEqual(service.cache_calls, 1)
+        self.assertEqual(service.refresh_calls, 0)
+        show_progress.assert_not_called()
+
+    async def test_stale_hit_remains_visible_during_one_background_refresh(self) -> None:
+        stale = _alert(
+            'stale',
+            severity='Moderate',
+            event='Wind Warning',
+            headline='Stale wind warning',
+        )
+        refreshed = _alert(
+            'refreshed',
+            severity='Severe',
+            event='Flood Warning',
+            headline='Fresh flood warning',
+        )
+        service = _CachedFixtureService(
+            CountryAlertsCacheHit((stale,), frozenset(), provisional=True),
+            [refreshed],
+        )
+        screen = AlertsCentreScreen(
+            service=service,  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await service.refresh_started.wait()
+            progress = screen.query_one('#alerts-centre-list-progress', Container)
+            self.assertEqual([item.id for item in screen.alerts], ['stale'])
+            self.assertTrue(screen.alert_list.display)
+            self.assertTrue(progress.display)
+            self.assertTrue(progress.has_class('background'))
+            self.assertEqual(service.refresh_calls, 1)
+
+            service.finish_refresh.set()
+            await pilot.pause()
+
+            self.assertEqual([item.id for item in screen.alerts], ['refreshed'])
+            self.assertFalse(progress.display)
+            self.assertEqual(service.refresh_calls, 1)
+
     async def test_initial_result_keeps_country_overview_until_alert_selection(self) -> None:
         alert = _alert(
             'german-flood',

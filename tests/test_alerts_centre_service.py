@@ -16,6 +16,7 @@ from wevva.services.country_alerts import (
     list_supported_alert_countries,
     sort_country_alerts,
 )
+from wevva.services.warning_cache import WarningCache
 
 
 def _alert(
@@ -124,10 +125,11 @@ class CountryAlertOrderingTests(unittest.TestCase):
 
 class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_cache_hit_and_expiry_are_isolated_by_country_and_language(self) -> None:
-        now = [100.0]
+        now = [datetime(2030, 1, 1, 12, tzinfo=UTC)]
         service = CountryAlertsService(
             ttl_seconds=30,
-            clock=lambda: now[0],
+            wall_clock=lambda: now[0],
+            cache=WarningCache(None, clock=lambda: now[0]),
             observation_path=None,
         )
         fetched = [_alert('first', 'Moderate', expires_in_hours=1)]
@@ -140,7 +142,7 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
             fetched.clear()
             cached = await service.get_alerts('DE')
             await service.get_alerts('DE', warning_language='en')
-            now[0] = 131.0
+            now[0] += timedelta(seconds=31)
             await service.get_alerts('DE')
 
         self.assertEqual([alert.id for alert in first], ['first'])
@@ -149,9 +151,11 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.last_country_code, 'DE')
 
     async def test_refresh_bypasses_a_fresh_cache_entry(self) -> None:
+        now = datetime(2030, 1, 1, 12, tzinfo=UTC)
         service = CountryAlertsService(
             ttl_seconds=300,
-            clock=lambda: 10.0,
+            wall_clock=lambda: now,
+            cache=WarningCache(None, clock=lambda: now),
             observation_path=None,
         )
         results = [
@@ -170,7 +174,10 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetch.call_count, 2)
 
     async def test_failed_fetch_is_not_cached(self) -> None:
-        service = CountryAlertsService(observation_path=None)
+        service = CountryAlertsService(
+            cache=WarningCache(None),
+            observation_path=None,
+        )
 
         with patch(
             'wevva.services.country_alerts._fetch_country_alerts',
@@ -190,6 +197,7 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
             observation_path = Path(temporary_directory) / 'observations.json'
             service = CountryAlertsService(
                 ttl_seconds=300,
+                cache=WarningCache(None),
                 observation_path=observation_path,
             )
             with patch(
@@ -223,6 +231,7 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as temporary_directory:
             observation_path = Path(temporary_directory) / 'observations.json'
             initial_service = CountryAlertsService(
+                cache=WarningCache(None),
                 observation_path=observation_path,
             )
             with patch(
@@ -232,6 +241,7 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
                 await initial_service.get_alerts('DE')
 
             next_service = CountryAlertsService(
+                cache=WarningCache(None),
                 observation_path=observation_path,
             )
             with patch(
@@ -244,6 +254,136 @@ class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
                 next_service.new_alert_identities('DE'),
                 frozenset({('fixture', 'second')}),
             )
+
+    async def test_fresh_catalogue_survives_service_restart_without_fetch(self) -> None:
+        now = datetime(2030, 1, 1, 12, tzinfo=UTC)
+        first = _alert('first', 'Moderate', expires_in_hours=1)
+        second = _alert('second', 'Severe', expires_in_hours=2)
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_path = Path(temporary_directory) / 'cache'
+            first_service = CountryAlertsService(
+                wall_clock=lambda: now,
+                cache=WarningCache(cache_path, clock=lambda: now),
+                observation_path=None,
+            )
+            with patch(
+                'wevva.services.country_alerts._fetch_country_alerts',
+                side_effect=[[first], [second, first]],
+            ):
+                await first_service.get_alerts('DE')
+                await first_service.get_alerts('DE', refresh=True)
+
+            restarted = CountryAlertsService(
+                wall_clock=lambda: now + timedelta(minutes=5),
+                cache=WarningCache(
+                    cache_path,
+                    clock=lambda: now + timedelta(minutes=5),
+                ),
+                observation_path=None,
+            )
+            with patch(
+                'wevva.services.country_alerts._fetch_country_alerts',
+            ) as fetch:
+                alerts = await restarted.get_alerts('DE')
+
+        self.assertEqual([alert.id for alert in alerts], ['second', 'first'])
+        self.assertEqual(
+            restarted.new_alert_identities('DE'),
+            frozenset({('fixture', 'second')}),
+        )
+        fetch.assert_not_called()
+
+    async def test_stale_catalogue_is_provisional_and_filters_expired_alerts(self) -> None:
+        now = [datetime(2030, 1, 2, 0, 30, tzinfo=UTC)]
+        active = _alert('active', 'Moderate', expires_in_hours=2)
+        expired = _alert('expired', 'Moderate', expires_in_hours=1)
+        cache = WarningCache(None, clock=lambda: now[0])
+        service = CountryAlertsService(
+            ttl_seconds=30,
+            stale_grace_seconds=2 * 60 * 60,
+            wall_clock=lambda: now[0],
+            cache=cache,
+            observation_path=None,
+        )
+        with patch(
+            'wevva.services.country_alerts._fetch_country_alerts',
+            return_value=[active, expired],
+        ):
+            await service.get_alerts('DE')
+
+        now[0] = datetime(2030, 1, 2, 1, 30, tzinfo=UTC)
+        cached = await service.get_cached_alerts('DE')
+
+        self.assertIsNotNone(cached)
+        assert cached is not None
+        self.assertTrue(cached.provisional)
+        self.assertEqual([alert.id for alert in cached.alerts], ['active'])
+
+    async def test_failed_stale_refresh_keeps_the_last_successful_catalogue(self) -> None:
+        now = [datetime(2030, 1, 1, 12, tzinfo=UTC)]
+        cached_alert = _alert('cached', 'Moderate', expires_in_hours=2)
+        service = CountryAlertsService(
+            ttl_seconds=30,
+            stale_grace_seconds=300,
+            wall_clock=lambda: now[0],
+            cache=WarningCache(None, clock=lambda: now[0]),
+            observation_path=None,
+        )
+        with patch(
+            'wevva.services.country_alerts._fetch_country_alerts',
+            side_effect=[[cached_alert], RuntimeError('offline')],
+        ):
+            await service.get_alerts('DE')
+            now[0] += timedelta(seconds=31)
+            with self.assertRaisesRegex(RuntimeError, 'offline'):
+                await service.get_alerts('DE')
+
+        cached = await service.get_cached_alerts('DE')
+        assert cached is not None
+        self.assertEqual([alert.id for alert in cached.alerts], ['cached'])
+
+    async def test_cache_read_does_not_advance_first_observed_journal(self) -> None:
+        now = [datetime(2030, 1, 1, 12, tzinfo=UTC)]
+        first = _alert('first', 'Moderate', expires_in_hours=2)
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            observation_path = root / 'observations.json'
+            cache_path = root / 'cache'
+            service = CountryAlertsService(
+                wall_clock=lambda: now[0],
+                cache=WarningCache(cache_path, clock=lambda: now[0]),
+                observation_path=observation_path,
+            )
+            with patch(
+                'wevva.services.country_alerts._fetch_country_alerts',
+                return_value=[first],
+            ):
+                await service.get_alerts('DE')
+            initial = service.observation_journal()[0]
+
+            now[0] += timedelta(minutes=5)
+            restarted = CountryAlertsService(
+                wall_clock=lambda: now[0],
+                cache=WarningCache(cache_path, clock=lambda: now[0]),
+                observation_path=observation_path,
+            )
+            await restarted.get_alerts('DE')
+            cached = restarted.observation_journal()[0]
+
+            now[0] += timedelta(minutes=20)
+            with patch(
+                'wevva.services.country_alerts._fetch_country_alerts',
+                return_value=[first],
+            ):
+                await restarted.get_alerts('DE', refresh=True)
+            refreshed = restarted.observation_journal()[0]
+
+        self.assertEqual(cached.first_observed, initial.first_observed)
+        self.assertEqual(cached.last_observed, initial.last_observed)
+        self.assertEqual(refreshed.first_observed, initial.first_observed)
+        self.assertGreater(refreshed.last_observed, initial.last_observed)
 
 
 if __name__ == '__main__':

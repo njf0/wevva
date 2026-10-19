@@ -80,6 +80,12 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
     def test_country_candidate_cache_lasts_thirty_minutes(self) -> None:
         self.assertEqual(self.app.ALERT_CACHE_TTL_SECONDS, 30 * 60)
 
+    def test_alerts_centre_uses_the_application_warning_cache(self) -> None:
+        self.assertIs(
+            self.app.country_alerts_service.cache,
+            self.app.warning_cache,
+        )
+
     def _alert_updates(self) -> list[WeatherAlertsUpdated]:
         return [
             message

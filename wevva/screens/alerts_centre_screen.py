@@ -403,6 +403,11 @@ class AlertsCentreScreen(Screen[None]):
         align: center middle;
     }
 
+    #alerts-centre-list-progress.background {
+        height: 1;
+        padding: 0 1;
+    }
+
     #alerts-centre-list-progress-bar {
         width: 100%;
         height: 1;
@@ -938,8 +943,8 @@ class AlertsCentreScreen(Screen[None]):
                 (),
             )
             self._clear_document()
+            self._show_alert_list_state('')
         self.alert_filter_button.disabled = True
-        self._show_alert_list_progress()
         self._load_task = asyncio.create_task(self._load_country(self.selected_country_code, generation, refresh=refresh))
 
     async def _load_country(
@@ -950,20 +955,61 @@ class AlertsCentreScreen(Screen[None]):
         refresh: bool,
     ) -> None:
         progress = self._progress_callback(generation, country_code)
+        provisional = False
         try:
-            alerts = await self.service.get_alerts(
-                country_code,
-                warning_language=self.warning_language,
-                progress=progress,
-                refresh=refresh,
-            )
+            cached_loader = getattr(self.service, 'get_cached_alerts', None)
+            refresh_loader = getattr(self.service, 'refresh_alerts', None)
+            if (
+                not refresh
+                and callable(cached_loader)
+                and callable(refresh_loader)
+            ):
+                cached = await cached_loader(
+                    country_code,
+                    warning_language=self.warning_language,
+                )
+                if not self._request_is_current(generation, country_code):
+                    return
+                if cached is not None:
+                    self._publish_country_alerts(
+                        country_code,
+                        cached.alerts,
+                        cached.new_alert_identities,
+                    )
+                    if not cached.provisional:
+                        return
+                    provisional = True
+                    self._show_alert_list_progress(background=True)
+                else:
+                    self._show_alert_list_progress()
+                alerts = await refresh_loader(
+                    country_code,
+                    warning_language=self.warning_language,
+                    progress=progress,
+                )
+            else:
+                self._show_alert_list_progress()
+                alerts = await self.service.get_alerts(
+                    country_code,
+                    warning_language=self.warning_language,
+                    progress=progress,
+                    refresh=refresh,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             if not self._request_is_current(generation, country_code):
                 return
             self.alert_filter_button.disabled = False
-            self._show_alert_list_state('Alerts are temporarily unavailable. Press r to retry.')
+            if provisional:
+                self._apply_alert_filter(
+                    self.alert_filter_value,
+                    preferred_key=self.selected_alert_key,
+                )
+            else:
+                self._show_alert_list_state(
+                    'Alerts are temporarily unavailable. Press r to retry.'
+                )
             return
         finally:
             if self._load_task is asyncio.current_task():
@@ -971,12 +1017,6 @@ class AlertsCentreScreen(Screen[None]):
 
         if not self._request_is_current(generation, country_code):
             return
-        previous_key = self.selected_alert_key
-        self.alerts = list(alerts)
-        if self.alert_severity_filter not in {
-            value for _, value in _alert_severity_options(self.alerts)
-        }:
-            self.alert_severity_filter = ''
         new_alert_identities = getattr(
             self.service,
             'new_alert_identities',
@@ -992,6 +1032,25 @@ class AlertsCentreScreen(Screen[None]):
             if callable(new_alert_identities)
             else set()
         )
+        self._publish_country_alerts(
+            country_code,
+            alerts,
+            self.new_alert_keys,
+        )
+
+    def _publish_country_alerts(
+        self,
+        country_code: str,
+        alerts: Iterable[Alert],
+        new_alert_identities: Iterable[tuple[str, str]],
+    ) -> None:
+        previous_key = self.selected_alert_key
+        self.alerts = list(alerts)
+        self.new_alert_keys = set(new_alert_identities)
+        if self.alert_severity_filter not in {
+            value for _, value in _alert_severity_options(self.alerts)
+        }:
+            self.alert_severity_filter = ''
         filtered_alerts = self._matching_alerts(self.alert_filter_value)
         selected = next(
             (
@@ -1201,21 +1260,24 @@ class AlertsCentreScreen(Screen[None]):
     def _show_alert_list_state(self, message: str) -> None:
         empty = self.query_one('#alerts-centre-list-empty', Static)
         progress = self.query_one('#alerts-centre-list-progress', Container)
+        progress.remove_class('background')
         empty.update(message)
         empty.display = bool(message)
         progress.display = False
         self.alert_list.display = not bool(message)
 
-    def _show_alert_list_progress(self) -> None:
+    def _show_alert_list_progress(self, *, background: bool = False) -> None:
         self._progress_items_total = None
         self.alert_list.clear_preview()
         self.query_one('#alerts-centre-list-empty', Static).display = False
-        self.query_one('#alerts-centre-list-progress', Container).display = True
+        progress = self.query_one('#alerts-centre-list-progress', Container)
+        progress.set_class(background, 'background')
+        progress.display = True
         self.query_one('#alerts-centre-list-progress-bar', ProgressBar).update(
             total=None,
             progress=0,
         )
-        self.alert_list.display = False
+        self.alert_list.display = background
 
     def _country_name(self, country_code: str) -> str:
         return next(

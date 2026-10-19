@@ -90,19 +90,21 @@ from cached values and accept later results without issuing its own queries.
 - `wevva/services/country_alerts.py` is the independent country-discovery
   boundary for the Alerts Centre. It derives supported country choices from
   the warning library's public alert-source registry, calls the broad public
-  country query with active filtering, orders and deduplicates results, and
-  owns a separate fifteen-minute session cache plus the latest successful
-  per-country identity snapshot used for refresh-scoped `NEW` badges. It never
-  reads or writes the weather screen's reusable-candidate cache.
+  country query with active filtering, and orders and deduplicates results.
+  Complete catalogues use the shared warning-cache boundary with a fifteen-
+  minute fresh lifetime and six-hour provisional grace period. Only successful
+  provider refreshes update the separate durable identity snapshot used for
+  refresh-scoped `NEW` badges and the bounded first/last-observed journal.
+  Cache reads do neither. It never reads the Weather screen's reusable-
+  candidate namespace.
 - `wevva/services/warning_cache.py` is the versioned persistence boundary being
   introduced by Task 0028. It keeps complete country catalogues and reusable
   Weather candidates in separate country/language/product namespaces, stores
   normalized alerts in atomic per-key cache files, and restores source
   presentation metadata from the installed warning registry. Its public disk
   operations run in worker threads and unavailable or invalid cache storage is
-  treated as an optimization miss. Slice A supplies this storage and codec;
-  the current runtime cache owners remain in place until Slices B and C adopt
-  it.
+  treated as an optimization miss. The Alerts Centre catalogue uses this
+  boundary; the Weather candidate owner remains in place until Slice C.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
   `get_canonical_tropical_systems()` only for the dedicated tropical workspace
   and keeps them in a separate thirty-minute, session-only cache. Canonical

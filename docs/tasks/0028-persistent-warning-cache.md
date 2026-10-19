@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slice A implemented; Slices B–D remain
+In progress — Slices A–B implemented; Slices C–D remain
 
 ## Context
 
@@ -258,7 +258,17 @@ best-effort atomic replacement, and only the validation needed to keep bad
 files from reaching callers. It deliberately has no generic cache base class,
 pluggable codec, alternate storage format, or independent concurrency layer.
 
-The existing Alerts Centre and Weather call sites are intentionally unchanged
-until Slices B and C move their separate cache contracts onto this boundary.
-Pruning and the first-observed journal remain Slice D and Slice B work,
-respectively.
+Slice A intentionally left both runtime cache owners unchanged until their
+respective integration slices.
+
+Slice B moves the Alerts Centre catalogue onto the shared cache. A fresh
+persisted hit renders without provider work or transient progress. A catalogue
+older than fifteen minutes but within a six-hour grace period is filtered for
+expired alerts and shown provisionally while one ordinary, generation-guarded
+provider refresh runs with compact background progress. Explicit refresh skips
+the cache. Only successful provider refreshes update the durable `NEW` baseline
+and the bounded 500-entry first/last-observed journal; cache reads restore the
+stored badges without counting as observations.
+
+The Weather reusable-candidate cache remains unchanged until Slice C. File
+pruning remains Slice D work.

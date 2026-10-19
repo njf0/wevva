@@ -29,6 +29,10 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         app = Wevva(initial_location=BERLIN)
         app.action_refresh = AsyncMock()
         app.country_alerts_service.get_alerts = AsyncMock(return_value=[])
+        app.country_alerts_service.get_cached_alerts = AsyncMock(
+            return_value=None
+        )
+        app.country_alerts_service.refresh_alerts = AsyncMock(return_value=[])
         app.load_location_map_temperatures = AsyncMock(return_value={})
         app.load_alert_place_weather = AsyncMock(
             return_value={
@@ -54,10 +58,12 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(alerts_screen, AlertsCentreScreen)
             self.assertTrue(app.is_screen_installed(alerts_screen))
             self.assertIs(alerts_screen.service, app.country_alerts_service)
-            first_call = app.country_alerts_service.get_alerts.await_args
-            self.assertEqual(first_call.args, ('DE',))
-            self.assertEqual(first_call.kwargs['warning_language'], 'auto')
-            self.assertFalse(first_call.kwargs['refresh'])
+            cache_call = app.country_alerts_service.get_cached_alerts.await_args
+            self.assertEqual(cache_call.args, ('DE',))
+            self.assertEqual(cache_call.kwargs['warning_language'], 'auto')
+            refresh_call = app.country_alerts_service.refresh_alerts.await_args
+            self.assertEqual(refresh_call.args, ('DE',))
+            self.assertEqual(refresh_call.kwargs['warning_language'], 'auto')
 
             await pilot.press('w')
             await pilot.pause()
@@ -277,7 +283,9 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(screen.warning_language, 'en')
             self.assertEqual(
-                app.country_alerts_service.get_alerts.await_args.kwargs['warning_language'],
+                app.country_alerts_service.refresh_alerts.await_args.kwargs[
+                    'warning_language'
+                ],
                 'en',
             )
             screen._start_place_weather_preview(label)
@@ -333,7 +341,9 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 ('fahrenheit', 'mph', 'inch'),
             )
             self.assertEqual(
-                app.country_alerts_service.get_alerts.await_args.kwargs['warning_language'],
+                app.country_alerts_service.refresh_alerts.await_args.kwargs[
+                    'warning_language'
+                ],
                 'en',
             )
 
