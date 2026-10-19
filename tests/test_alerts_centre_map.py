@@ -616,7 +616,8 @@ def _current_weather(temperature: float = 18.0) -> dict:
             'precipitation': 0.2,
             'weather_code': 1,
             'is_day': 1,
-            'wind_speed_10m': 14,
+            'wind_speed_10m': 14.4,
+            'wind_gusts_10m': 21.6,
             'wind_direction_10m': 270,
         },
         'current_units': {
@@ -684,10 +685,21 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             )
             assert label.tooltip is not None
             self.assertIn(label.place.name, label.tooltip.plain)
-            self.assertIn('18°C', label.tooltip.plain)
-            self.assertIn('Rain 25%', label.tooltip.plain)
-            self.assertIn('Wind 14 km/h', label.tooltip.plain)
+            lines = label.tooltip.plain.splitlines()
+            self.assertTrue(lines[1].endswith('Mainly clear'))
+            self.assertEqual(
+                lines[2],
+                '18°C · 25% (0.2 mm) · 14 (22) km/h W →',
+            )
             self.assertIn('Click for full forecast', label.tooltip.plain)
+
+            condition_offset = label.tooltip.plain.index('Mainly clear')
+            condition_span = next(
+                span
+                for span in label.tooltip.spans
+                if span.start <= condition_offset < span.end
+            )
+            self.assertEqual(str(condition_span.style), 'italic')
 
             await pilot.resize_terminal(80, 24)
             await pilot.pause()

@@ -1420,23 +1420,19 @@ class AlertsCentreScreen(Screen[None]):
 
         theme = self.app.theme_variables
         tooltip = _place_tooltip_heading(place, theme.get('primary'))
-        weather_line = Text()
+        condition_line = Text()
 
         code = current.get('weather_code')
         condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
         if condition is not None:
             if getattr(self.app, 'emoji_enabled', True):
                 emoji = condition.day_emoji if current.get('is_day') != 0 else condition.night_emoji
-                weather_line.append(f'{emoji} ')
-            weather_line.append(
-                condition.name,
-                style=theme.get(condition.color_var or 'text-primary'),
-            )
+                condition_line.append(f'{emoji} ', style='italic')
+            condition_line.append(condition.name, style='italic')
 
+        measurements: list[Text] = []
         temperature = _number(current.get('temperature_2m'))
         if temperature is not None:
-            if weather_line:
-                weather_line.append('  ')
             colour = temp_colour(
                 temperature,
                 scale='theme_temperature',
@@ -1444,17 +1440,17 @@ class AlertsCentreScreen(Screen[None]):
                 unit=getattr(self.app, 'temperature_unit', 'celsius'),
                 theme_colours=theme,
             )
-            weather_line.append(f'{round(temperature):g}', style=f'bold {colour}')
-            weather_line.append(
+            temperature_text = Text(f'{round(temperature):g}', style=f'bold {colour}')
+            temperature_text.append(
                 str(units.get('temperature_2m') or '°C'),
                 style=str(colour),
             )
+            measurements.append(temperature_text)
 
-        details = Text()
         probability = _number(current.get('precipitation_probability'))
         amount = _number(current.get('precipitation'))
         if probability is not None or amount is not None:
-            details.append('Rain ', style='dim')
+            precipitation_text = Text()
             if probability is not None:
                 colour = rain_colour(
                     probability,
@@ -1462,42 +1458,50 @@ class AlertsCentreScreen(Screen[None]):
                     min_colour=theme.get('foreground', '#ffffff'),
                     max_colour=theme.get('primary', '#0178d4'),
                 )
-                details.append(f'{probability:g}%', style=f'bold {colour}')
+                precipitation_text.append(f'{probability:g}%', style=f'bold {colour}')
             if amount is not None:
                 if probability is not None:
-                    details.append(' · ')
-                details.append(
-                    f'{amount:g} {units.get("precipitation") or "mm"}',
+                    precipitation_text.append(' ')
+                precipitation_text.append(
+                    f'({amount:g} {units.get("precipitation") or "mm"})',
                     style=theme.get('text-primary'),
                 )
+            measurements.append(precipitation_text)
 
         speed = _number(current.get('wind_speed_10m'))
+        gust = _number(current.get('wind_gusts_10m'))
         direction = _number(current.get('wind_direction_10m'))
         if speed is not None:
-            if details:
-                details.append('  ')
-            details.append('Wind ', style='dim')
             colour = wind_colour(
                 speed,
                 hex=True,
                 min_colour=theme.get('foreground', '#ffffff'),
                 max_colour=theme.get('secondary', '#00a0a0'),
             )
-            details.append(f'{speed:g}', style=f'bold {colour}')
-            details.append(
+            wind_text = Text(f'{round(speed):g}', style=f'bold {colour}')
+            if gust is not None:
+                wind_text.append(f' ({round(gust):g})', style=f'bold {colour}')
+            wind_text.append(
                 f' {units.get("wind_speed_10m") or "km/h"}',
                 style=str(colour),
             )
             if direction is not None:
-                details.append(f' {bearing_to_direction(direction)}')
+                wind_text.append(f' {bearing_to_direction(direction)}')
+            measurements.append(wind_text)
 
-        if weather_line:
+        details = Text()
+        for measurement in measurements:
+            if details:
+                details.append(' · ', style='dim')
+            details.append_text(measurement)
+
+        if condition_line:
             tooltip.append('\n')
-            tooltip.append_text(weather_line)
+            tooltip.append_text(condition_line)
         if details:
             tooltip.append('\n')
             tooltip.append_text(details)
-        if not weather_line and not details:
+        if not condition_line and not details:
             tooltip.append('\nNo current observations', style='dim italic')
         tooltip.append('\nClick for full forecast', style='dim')
         return tooltip
