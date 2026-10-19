@@ -271,7 +271,8 @@ list selection. Pointer hover or focused keyboard highlighting transiently
 promotes that row's visible polygon to full severity without changing the
 viewport or detail document. Explicit alert selection fits the complete
 selected geometry, reprojects overlapping context, and reranks settlements
-locally without network work.
+locally without network work. Activating the committed row again clears it and
+restores the country overview and empty detail prompt.
 
 The Alerts Centre draws candidates from the complete, denser Natural Earth
 1:10m Populated Places layer, ranks points inside selected alert geometry first,

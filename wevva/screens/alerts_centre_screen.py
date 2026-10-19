@@ -830,7 +830,11 @@ class AlertsCentreScreen(Screen[None]):
         if event.option_list.id == 'alerts-centre-alert-list':
             alert = self._alert_by_option_id.get(option_id)
             if alert is not None:
-                self._select_alert(alert)
+                if country_alert_identity(alert) == self.selected_alert_key:
+                    self.alert_list.highlighted = None
+                    self._clear_document()
+                else:
+                    self._select_alert(alert)
 
     def on_alert_option_list_preview_changed(
         self,
@@ -1098,7 +1102,6 @@ class AlertsCentreScreen(Screen[None]):
             self.alert_list.highlighted = selected_index
             self._show_alert_list_state('')
         else:
-            self.selected_alert_key = None
             self.alert_list.highlighted = None
             self._clear_document()
             if self.filtered_alerts:
@@ -1181,6 +1184,7 @@ class AlertsCentreScreen(Screen[None]):
         pane.set_styles(f'border: round {frame_color}; border-title-color: {frame_color};')
 
     def _clear_document(self) -> None:
+        self.selected_alert_key = None
         if not self.is_mounted:
             return
         self._cancel_place_weather_preview()

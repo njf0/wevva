@@ -414,6 +414,8 @@ responsive topology changes, and a refresh when it remains present.
 - Complete: pointer hover and focused keyboard highlighting transiently show a
   row's visible polygon at full severity without selecting, zooming, or
   replacing the detail document; leaving the list restores normal emphasis.
+- Complete: activating the selected alert again clears its selection and
+  returns the map and detail pane to their full-country overview states.
 - Complete: added `Severity` and `New first` local sorting plus primary-backed
   `NEW` badges based on the preceding successful country/language snapshot.
 
@@ -553,6 +555,8 @@ Task 0019 should land first so this screen reuses one alert document component.
   explicit selection.
 - Selecting an alert updates full text and map emphasis together by stable
   identity.
+- Activating the selected alert again clears it, removes the committed list
+  highlight, restores the country viewport, and shows the detail prompt.
 - Hovering or keyboard-highlighting a list row temporarily gives its visible
   polygon full semantic emphasis without changing selection or viewport.
 - Alerts without geometry remain fully readable and never receive an inferred

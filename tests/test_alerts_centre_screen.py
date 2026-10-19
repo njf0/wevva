@@ -235,6 +235,41 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.alert_list.highlighted, 0)
             self.assertEqual(service.calls, [('DE', False), ('DE', True)])
 
+    async def test_reactivating_selected_alert_returns_to_country_overview(self) -> None:
+        alert = _alert(
+            'german-flood',
+            severity='Severe',
+            event='Flood Warning',
+            headline='Flooding in Germany',
+        )
+        screen = AlertsCentreScreen(
+            service=_FixtureService({'DE': [alert]}),  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            screen.alert_list.highlighted = 0
+            screen.alert_list.action_select()
+            await pilot.pause()
+            self.assertEqual(
+                screen.selected_alert_key,
+                ('fixture-source', 'german-flood'),
+            )
+            self.assertTrue(screen.details.display)
+
+            screen.alert_list.action_select()
+            await pilot.pause()
+
+            self.assertIsNone(screen.selected_alert_key)
+            self.assertIsNone(screen.alert_list.highlighted)
+            self.assertIsNone(screen.country_map.geometry.selected_alert_key)
+            self.assertFalse(screen.details.display)
+            self.assertTrue(
+                screen.query_one('#alerts-centre-document-empty', Static).display
+            )
+
     async def test_country_select_changes_the_loaded_country(self) -> None:
         service = _FixtureService({'DE': [], 'FR': []})
         screen = AlertsCentreScreen(
