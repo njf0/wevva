@@ -149,7 +149,7 @@ class _RaceService(_FixtureService):
 
 
 class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
-    async def test_initial_result_builds_only_empty_and_final_selected_maps(self) -> None:
+    async def test_initial_result_keeps_country_overview_until_alert_selection(self) -> None:
         alert = _alert(
             'german-flood',
             severity='Severe',
@@ -173,6 +173,14 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
 
+                self.assertIsNone(screen.selected_alert_key)
+                self.assertIsNone(screen.alert_list.highlighted)
+                self.assertIsNone(screen.country_map.geometry.selected_alert_key)
+                self.assertFalse(screen.details.display)
+                self.assertTrue(
+                    screen.query_one('#alerts-centre-document-empty', Static).display
+                )
+
         self.assertEqual(rebuilds, 2)
 
     async def test_unchanged_layout_budget_skips_child_reapplication(self) -> None:
@@ -195,6 +203,37 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             set_label_limit.assert_not_called()
+
+    async def test_refresh_preserves_an_explicit_alert_selection(self) -> None:
+        alert = _alert(
+            'german-flood',
+            severity='Severe',
+            event='Flood Warning',
+            headline='Flooding in Germany',
+        )
+        service = _FixtureService({'DE': [alert]})
+        screen = AlertsCentreScreen(
+            service=service,  # type: ignore[arg-type]
+            countries=[GERMANY],
+        )
+        app = _ScreenApp(screen)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            self.assertIsNone(screen.selected_alert_key)
+            screen.alert_list.highlighted = 0
+            screen.alert_list.action_select()
+            await pilot.pause()
+
+            screen.action_refresh_alerts()
+            await pilot.pause()
+
+            self.assertEqual(
+                screen.selected_alert_key,
+                ('fixture-source', 'german-flood'),
+            )
+            self.assertEqual(screen.alert_list.highlighted, 0)
+            self.assertEqual(service.calls, [('DE', False), ('DE', True)])
 
     async def test_country_select_changes_the_loaded_country(self) -> None:
         service = _FixtureService({'DE': [], 'FR': []})
@@ -294,11 +333,12 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(screen.selected_country_code, 'FR')
             self.assertEqual([alert.id for alert in screen.alerts], ['french-wind'])
-            self.assertEqual(screen.selected_alert_key, ('fixture-source', 'french-wind'))
+            self.assertIsNone(screen.selected_alert_key)
+            self.assertIsNone(screen.alert_list.highlighted)
             self.assertFalse(progress.display)
             self.assertTrue(screen.alert_list.display)
-            self.assertIn('Strong winds in France', _rendered(screen.details.content))
-            self.assertNotIn('Flooding in Germany', _rendered(screen.details.content))
+            self.assertFalse(screen.details.display)
+            self.assertIsNone(screen.country_map.geometry.selected_alert_key)
 
     async def test_filter_is_local_searches_metadata_and_has_distinct_empty_state(self) -> None:
         flood = _alert(
@@ -336,7 +376,7 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(first_prompt.no_wrap)
             self.assertEqual(first_prompt.overflow, 'ellipsis')
-            self.assertEqual(screen.alert_list.highlighted, 0)
+            self.assertIsNone(screen.alert_list.highlighted)
             self.assertIsNotNone(
                 screen.alert_list.get_component_rich_style(
                     'option-list--option-highlighted',
@@ -373,10 +413,17 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             screen._on_alert_filter_result(('north district', '', 'severity'))
             await pilot.pause()
             self.assertEqual([alert.id for alert in screen.filtered_alerts], ['flood'])
+            self.assertIsNone(screen.selected_alert_key)
+            self.assertIsNone(screen.alert_list.highlighted)
 
             screen._on_alert_filter_result(('', 'moderate', 'severity'))
             await pilot.pause()
             self.assertEqual([alert.id for alert in screen.filtered_alerts], ['wind'])
+            self.assertIsNone(screen.selected_alert_key)
+
+            screen.alert_list.highlighted = 0
+            screen.alert_list.action_select()
+            await pilot.pause()
 
             screen._on_alert_filter_result(('likely', 'moderate', 'severity'))
             await pilot.pause()
@@ -498,6 +545,9 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
         app = _ScreenApp(screen)
 
         async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause()
+            screen.alert_list.highlighted = 0
+            screen.alert_list.action_select()
             await pilot.pause()
             details = _rendered(screen.details.content)
             self.assertIn('Flooding expected\n\nActive from ', details)

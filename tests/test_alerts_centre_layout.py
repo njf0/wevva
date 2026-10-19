@@ -98,10 +98,7 @@ class AlertsCentreResponsiveScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.alert_filter_button.region.height, 1)
             self.assertEqual(screen.alert_filter_button.variant, 'primary')
             self.assertEqual(screen.country_map.max_city_labels, 2)
-            self.assertEqual(
-                screen.selected_alert_key,
-                ('fixture', 'responsive-warning'),
-            )
+            self.assertIsNone(screen.selected_alert_key)
             self.assertEqual(document.border_title, 'Alert Detail')
             self.assertEqual(
                 screen.country_map.border_title,
@@ -148,10 +145,7 @@ class AlertsCentreResponsiveScreenTests(unittest.IsolatedAsyncioTestCase):
                 ).styles.hatch
             )
             self.assertEqual(tuple(map(id, (navigation, map_pane, document))), pane_ids)
-            self.assertEqual(
-                screen.selected_alert_key,
-                ('fixture', 'responsive-warning'),
-            )
+            self.assertIsNone(screen.selected_alert_key)
 
 
 if __name__ == '__main__':

@@ -115,8 +115,10 @@ text across:
 - urgency/certainty when present.
 
 Filtering never issues a network request. Preserve the selected alert if it
-still matches; otherwise select the first visible alert or show a clear empty
-filter state.
+still matches; otherwise clear selection and restore the country overview or
+show a clear empty-filter state. Loading a country's alerts likewise leaves the
+list unselected until the user chooses a warning; a refresh may preserve a
+still-present explicit selection.
 
 ## Alert list labels and ordering
 
@@ -543,6 +545,9 @@ Task 0019 should land first so this screen reuses one alert document component.
 - Search is immediate/local and matches severity, condition, location,
   headline, and source metadata.
 - List rows use a severity/condition first line and a cropped area second line.
+- Loading or changing country populates the list without selecting its first
+  alert, so the map and detail pane retain their country-overview prompts until
+  explicit selection.
 - Selecting an alert updates full text and map emphasis together by stable
   identity.
 - Alerts without geometry remain fully readable and never receive an inferred

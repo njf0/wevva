@@ -266,7 +266,8 @@ land raster use a darker shade from the matching semantic family
 (`warning-darken-2` rather than `text-warning`, for example), preserving the
 coastline without borrowing a stronger severity colour, clipping, or inferring
 geometry. Geometry-less alerts remain readable without inferred shapes. Alert
-selection fits the complete
+catalogue completion leaves the map at the country overview with no implicit
+list selection. Explicit alert selection fits the complete
 selected geometry, reprojects overlapping context, and reranks settlements
 locally without network work.
 

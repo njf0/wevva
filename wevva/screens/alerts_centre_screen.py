@@ -921,7 +921,7 @@ class AlertsCentreScreen(Screen[None]):
                 for alert in filtered_alerts
                 if country_alert_identity(alert) == previous_key
             ),
-            filtered_alerts[0] if filtered_alerts else None,
+            None,
         )
         self.country_map.update_country(
             country_code,
@@ -1012,7 +1012,7 @@ class AlertsCentreScreen(Screen[None]):
         current_key = preferred_key or self.selected_alert_key
         selected = next(
             (alert for alert in self.filtered_alerts if country_alert_identity(alert) == current_key),
-            self.filtered_alerts[0] if self.filtered_alerts else None,
+            None,
         )
         self._render_alert_options()
         if selected is not None:
@@ -1025,8 +1025,14 @@ class AlertsCentreScreen(Screen[None]):
             self._show_alert_list_state('')
         else:
             self.selected_alert_key = None
+            self.alert_list.highlighted = None
             self._clear_document()
-            self._show_alert_list_state('No matching alerts' if self.alerts else 'No active alerts')
+            if self.filtered_alerts:
+                self._show_alert_list_state('')
+            else:
+                self._show_alert_list_state(
+                    'No matching alerts' if self.alerts else 'No active alerts'
+                )
 
     def _matching_alerts(self, query: str) -> list[Alert]:
         """Return locally filtered alerts in their requested stable order."""
