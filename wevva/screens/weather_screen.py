@@ -18,6 +18,7 @@ from textual.widgets import Footer, Header, Static
 
 from wevva.alerts import Alert
 from wevva.config import location_key
+from wevva.geography import short_location_name
 from wevva.layout import (
     AuxiliaryPresentation,
     ContextPresentation,
@@ -119,6 +120,8 @@ class WeatherScreen(Screen[None]):
         self._local_alert_details_has_content = False
         self._alerts: list[Alert] = []
         self._layout_budget: WeatherLayoutBudget | None = None
+        self._forecast_loading = False
+        self._warning_checking = False
 
     DEFAULT_CSS = """
     #main-panel {
@@ -347,10 +350,10 @@ class WeatherScreen(Screen[None]):
         return self.query_one(HourlyForecast)
 
     def on_mount(self) -> None:
-        # Hide content until weather data arrives
-        self.sub_title = 'Powered by Open-Meteo'
-        self.app.sub_title = 'Powered by Open-Meteo'
-        self.query_one('#main-panel').display = False
+        # Hide empty content unless the initial request is already loading.
+        self.main_panel.display = self._forecast_loading
+        self.weather_workspace.loading = self._forecast_loading
+        self._sync_activity_subtitle()
         self.warnings_row.display = False
         self.weather_warnings.display = False
         self.update_saved_locations_sidebar()
@@ -363,7 +366,29 @@ class WeatherScreen(Screen[None]):
     def set_warning_checking(self, checking: bool) -> None:
         """Show transient warning-query activity in the header subtitle."""
 
-        subtitle = 'Checking warnings…' if checking else 'Powered by Open-Meteo'
+        self._warning_checking = checking
+        self._sync_activity_subtitle()
+
+    def set_forecast_loading(self, loading: bool) -> None:
+        """Cover stale forecast content while a new forecast is requested."""
+
+        self._forecast_loading = loading
+        if hasattr(self, 'weather_workspace'):
+            if loading:
+                self.main_panel.display = True
+            self.weather_workspace.loading = loading
+        self._sync_activity_subtitle()
+
+    def _sync_activity_subtitle(self) -> None:
+        """Render the highest-priority weather-screen activity in the header."""
+
+        if self._forecast_loading:
+            place = short_location_name(getattr(self.app, 'location', None))
+            subtitle = f'Fetching forecast for {place}…'
+        elif self._warning_checking:
+            subtitle = 'Checking warnings…'
+        else:
+            subtitle = 'Powered by Open-Meteo'
         self.sub_title = subtitle
         self.app.sub_title = subtitle
 
@@ -682,6 +707,7 @@ class WeatherScreen(Screen[None]):
         main_panel.display = True
         self.error_banner.update('')
         self.error_banner.display = False
+        self.set_forecast_loading(False)
 
         # Start time refresh timer after data arrives (updates every second)
         if self._time_refresh_timer is None:

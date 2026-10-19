@@ -212,6 +212,7 @@ class Wevva(App, inherit_bindings=False):
             forecast_cache_key = self._forecast_cache_key()
             event = None if force_alert_refresh else self._cached_forecast(forecast_cache_key)
             if event is None:
+                self._set_forecast_loading(True)
                 event = await self.controller.fetch(
                     lat=self.location.latitude,
                     lon=self.location.longitude,
@@ -224,8 +225,12 @@ class Wevva(App, inherit_bindings=False):
                 refresh_generation,
                 force_refresh=force_alert_refresh,
             )
+        except asyncio.CancelledError:
+            self._set_forecast_loading(False)
+            raise
         except Exception as e:
             # Forward error to the weather screen to surface it
+            self._set_forecast_loading(False)
             self.weather_screen.post_message(WeatherFetchFailed(e))
         finally:
             self._refresh_in_flight = False
@@ -756,6 +761,13 @@ class Wevva(App, inherit_bindings=False):
         setter = getattr(self.weather_screen, 'set_warning_checking', None)
         if callable(setter):
             setter(checking)
+
+    def _set_forecast_loading(self, loading: bool) -> None:
+        """Update the weather workspace when a full forecast request is pending."""
+
+        setter = getattr(self.weather_screen, 'set_forecast_loading', None)
+        if callable(setter):
+            setter(loading)
 
     def _schedule_alert_refresh(
         self,

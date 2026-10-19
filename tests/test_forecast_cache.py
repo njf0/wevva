@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -16,6 +17,7 @@ class _WeatherScreen:
     def __init__(self) -> None:
         self.messages = []
         self.summaries = {}
+        self.loading_states = []
 
     def post_message(self, message) -> None:
         self.messages.append(message)
@@ -25,6 +27,9 @@ class _WeatherScreen:
 
     def update_saved_location_weather(self, location: LocationMetadata, summary) -> None:
         self.summaries[(location.latitude, location.longitude)] = summary
+
+    def set_forecast_loading(self, loading: bool) -> None:
+        self.loading_states.append(loading)
 
 
 class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
@@ -55,6 +60,7 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         await self._refresh()
 
         self.app.controller.fetch.assert_awaited_once_with(lat=52.52, lon=13.405, country_code='DE')
+        self.assertEqual(self.app.weather_screen.loading_states, [True])
         first, cached = self.app.weather_screen.messages
         self.assertIs(first, self.event)
         self.assertIsNot(cached, self.event)
@@ -83,7 +89,17 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         await self._refresh()
 
         self.assertEqual(self.app._forecast_cache, {})
+        self.assertEqual(self.app.weather_screen.loading_states, [True, False])
         self.assertIsInstance(self.app.weather_screen.messages[0], WeatherFetchFailed)
+
+    async def test_cancelled_forecast_clears_loading_and_propagates(self) -> None:
+        self.app.controller.fetch = AsyncMock(side_effect=asyncio.CancelledError)
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self._refresh()
+
+        self.assertEqual(self.app.weather_screen.loading_states, [True, False])
+        self.assertEqual(self.app.weather_screen.messages, [])
 
 
 class SavedWeatherSummaryTests(unittest.IsolatedAsyncioTestCase):

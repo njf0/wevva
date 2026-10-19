@@ -340,6 +340,26 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
             self.assertEqual(screen.header.icon, weather_icon)
 
+    async def test_forecast_loading_covers_workspace_and_precedes_warning_status(self) -> None:
+        app = _ResponsiveWeatherApp(emoji_enabled=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            screen = await _load_weather(app, pilot, warnings=False)
+
+            screen.set_warning_checking(True)
+            screen.set_forecast_loading(True)
+            await pilot.pause()
+
+            self.assertTrue(screen.weather_workspace.loading)
+            self.assertEqual(app.sub_title, 'Fetching forecast for Chicago…')
+
+            await screen.on_weather_updated(weather_update(with_warnings=False))
+            await pilot.pause()
+            self.assertFalse(screen.weather_workspace.loading)
+            self.assertEqual(app.sub_title, 'Checking warnings…')
+
+            screen.set_warning_checking(False)
+            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+
     async def test_very_wide_hourly_columns_stop_at_readable_width(self) -> None:
         app = _ResponsiveWeatherApp()
         async with app.run_test(size=(240, 24)) as pilot:

@@ -139,6 +139,15 @@ borders, tabs, padding, and gutters. `WeatherScreen` applies one result to
 stable widget instances after weather updates, warning changes, sidebar
 changes, and terminal resizes.
 
+When a full forecast requires network work, the central weather workspace uses
+one native loading cover and the header names the location being fetched. The
+cover preserves the surrounding screen and replaces the stale forecast as one
+unit rather than putting every child widget into a loading state. Cache hits do
+not show it. Successful completion removes it only after the new widgets are
+populated; failure also restores the ordinary header state. The existing
+warning-check subtitle then takes precedence until the background warning task
+finishes.
+
 The main panel retains `1 2` padding, centres the complete visible forecast
 stack vertically, and does not scroll vertically. Summary,
 warning, current-condition, and hourly frames share a centred 98-cell maximum.
