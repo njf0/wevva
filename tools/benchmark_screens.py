@@ -18,6 +18,7 @@ import time
 import tracemalloc
 from typing import Any
 from unittest.mock import AsyncMock, patch
+import weakref
 
 from textual.widgets import Tabs
 from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
@@ -54,6 +55,8 @@ BERLIN = LocationMetadata(
     latitude=52.52,
     longitude=13.405,
 )
+
+LIFECYCLE_CYCLES = 5
 
 
 class _CountryService:
@@ -835,6 +838,162 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         )
         await app.pop_screen()
         await _settle(pilot)
+
+        transient_refs: list[weakref.ReferenceType[object]] = []
+        weather_timer = weather._time_refresh_timer
+        weather_stack_depth = len(app.screen_stack)
+
+        async def search_cycles() -> None:
+            for _ in range(LIFECYCLE_CYCLES):
+                app.action_search()
+                await _settle(pilot, 2)
+                transient = app.screen
+                assert isinstance(transient, SearchScreen)
+                transient_refs.append(weakref.ref(transient))
+                transient.dismiss()
+                del transient
+                await _settle(pilot, 2)
+
+        await recorder.measure('lifecycle.weather_search_5_cycles', search_cycles)
+
+        alerts_screen = app._alerts_centre_screen
+        assert alerts_screen is not None
+        if alerts_screen.selected_country_code != 'DE':
+            alerts_screen._choose_country('DE')
+            await _settle(pilot, 4)
+        alerts_calls = service.calls
+
+        async def alerts_cycles() -> None:
+            for _ in range(LIFECYCLE_CYCLES):
+                app.open_alerts_centre_screen()
+                await _settle(pilot, 2)
+                assert app.screen is alerts_screen
+                await app.pop_screen()
+                await _settle(pilot, 2)
+
+        await recorder.measure('lifecycle.weather_alerts_5_cycles', alerts_cycles)
+
+        async def tropical_cycles() -> None:
+            for _ in range(LIFECYCLE_CYCLES):
+                await app.open_tropical_systems_screen()
+                await _settle(pilot, 3)
+                transient = app.screen
+                assert isinstance(transient, TropicalSystemsScreen)
+                transient_refs.append(weakref.ref(transient))
+                await app.pop_screen()
+                del transient
+                await _settle(pilot, 2)
+
+        await recorder.measure('lifecycle.weather_tropical_5_cycles', tropical_cycles)
+
+        async def world_cycles() -> None:
+            for _ in range(LIFECYCLE_CYCLES):
+                app.open_world_locations_screen()
+                await _settle(pilot, 3)
+                transient = app.screen
+                assert isinstance(transient, WorldLocationsScreen)
+                transient_refs.append(weakref.ref(transient))
+                await app.pop_screen()
+                del transient
+                await _settle(pilot, 2)
+
+        await recorder.measure('lifecycle.weather_world_5_cycles', world_cycles)
+
+        search_started = asyncio.Event()
+        search_release = asyncio.Event()
+
+        async def delayed_search(*_args: Any, **_kwargs: Any) -> list[dict[str, object]]:
+            search_started.set()
+            await search_release.wait()
+            return _places(10)
+
+        with patch('wevva.screens.search_screen.search_places', new=delayed_search):
+            app.action_search()
+            await _settle(pilot, 2)
+            pending_search = app.screen
+            assert isinstance(pending_search, SearchScreen)
+            pending_search.post_message(SearchQueryReady('pending'))
+            await search_started.wait()
+            pending_search_ref = weakref.ref(pending_search)
+
+            async def exit_pending_search() -> None:
+                pending_search.dismiss()
+                search_release.set()
+                await _settle(pilot, 3)
+
+            await recorder.measure('lifecycle.search_pending_exit', exit_pending_search)
+            transient_refs.append(pending_search_ref)
+            del pending_search
+
+        tropical_started = asyncio.Event()
+        tropical_release = asyncio.Event()
+        tropical_calls = 0
+
+        async def delayed_systems() -> tuple[list[CanonicalTropicalSystem], bool]:
+            nonlocal tropical_calls
+            tropical_calls += 1
+            tropical_started.set()
+            await tropical_release.wait()
+            return systems, True
+
+        cache_now = time.monotonic()
+        app._tropical_system_cache = (
+            cache_now - app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS,
+            tuple(systems),
+        )
+        app._tropical_system_cache_clock = lambda: cache_now
+        with patch('wevva.app.get_tropical_system_candidates_async', new=delayed_systems):
+            await app.open_tropical_systems_screen()
+            await tropical_started.wait()
+            pending_tropical = app.screen
+            assert isinstance(pending_tropical, TropicalSystemsScreen)
+            pending_tropical_ref = weakref.ref(pending_tropical)
+
+            async def exit_pending_tropical() -> None:
+                await app.pop_screen()
+                await _settle(pilot, 2)
+
+            await recorder.measure(
+                'lifecycle.tropical_expired_cache_pending_exit',
+                exit_pending_tropical,
+            )
+
+            async def complete_tropical_while_hidden() -> None:
+                tropical_release.set()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'lifecycle.tropical_completion_while_hidden',
+                complete_tropical_while_hidden,
+            )
+            transient_refs.append(pending_tropical_ref)
+            del pending_tropical
+
+            await recorder.measure(
+                'lifecycle.tropical_reentry_after_hidden_completion',
+                open_tropical,
+            )
+            await app.pop_screen()
+            await _settle(pilot, 3)
+
+        app._tropical_system_cache_clock = time.monotonic
+        gc.collect()
+        await _settle(pilot, 3)
+        gc.collect()
+
+        assert app.screen is weather
+        assert len(app.screen_stack) == weather_stack_depth, [
+            type(screen).__name__ for screen in app.screen_stack
+        ]
+        assert app._alerts_centre_screen is alerts_screen
+        assert service.calls == alerts_calls
+        assert alerts_screen._load_task is None
+        assert alerts_screen._place_hourly_task is None
+        assert app._tropical_system_fetch_task is None
+        assert not app._tropical_product_tasks
+        assert tropical_calls == 1
+        assert weather._time_refresh_timer is weather_timer
+        assert all(reference() is None for reference in transient_refs)
     finally:
         await runner.__aexit__(None, None, None)
 
@@ -916,6 +1075,7 @@ def main() -> None:
                     'tropical': {'systems': 2, 'source_observations': 3},
                     'world_locations': {'ordinary': 3, 'stress': 40},
                     'resize_events_per_burst': 4,
+                    'lifecycle_cycles': LIFECYCLE_CYCLES,
                 },
                 'scenarios': scenarios,
             },

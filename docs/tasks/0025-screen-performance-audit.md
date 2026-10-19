@@ -2,8 +2,7 @@
 
 ## Status
 
-In progress — screen Slices A–F complete through 16 October 2026; only
-cross-screen lifecycle and consolidation Slice G remains
+Complete — Slices A–G completed 16 October 2026
 
 ## Context
 
@@ -1426,3 +1425,133 @@ font, colour, Braille-glyph, or manual mouse check was performed.
 The recommended remaining order is Slice G only: repeated cross-screen
 lifecycle measurement, then consolidation solely where at least two completed
 screen slices prove the same ownership can be simplified.
+
+### Slice G — cross-screen lifecycle and consolidation
+
+Slice G began from the clean committed Slice D state at `ac3dcf3`. It retained
+the same CPython 3.13.0, Textual 8.0.0, macOS 26.7.1 x86_64 environment,
+terminal sizes, deterministic fixtures, one discarded complete warm-up, and
+three samples. Provider wait remained excluded. The existing checkout-only
+harness now adds five complete cycles each for Weather/Search, `w/g/w`,
+`w/t/w`, and `w/m/w`, plus controlled pending Search, pending Alerts Centre,
+and expired Tropical-cache paths.
+
+The transition samples include entry, Textual settling, exit, and return to
+the already-mounted Weather screen. They are aggregate lifecycle observations,
+not five times the individual warm-entry scenarios recorded by the owning
+slices.
+
+#### Repeated-transition results
+
+| Lifecycle scenario | Median [minimum–maximum] | Finding |
+|---|---:|---|
+| Weather/Search/Weather, five fresh modals | 1,835 [1,803–1,872] ms | about 367 ms per complete cycle including settling; every modal was collectible |
+| `w/g/w`, five retained Alerts visits | 1,609 [1,604–1,881] ms | about 322 ms per cycle; one installed screen and no repeat country request |
+| `w/t/w`, five fresh Tropical screens with cached systems | 3,616 [3,541–4,719] ms | about 723 ms per cycle; fresh presentation construction remains the largest repeated cost |
+| `w/m/w`, five fresh World screens | 2,849 [2,841–2,898] ms | about 570 ms per cycle; bounded frame reuse avoids raster growth but not widget reconstruction |
+| dismiss Search with provider request pending | 166 [166–171] ms | framework worker cancellation owns the request; no stale result or retained modal |
+| leave Alerts with country request pending | 133 [127–139] ms | persistent screen intentionally continues the request while hidden |
+| hidden Alerts completion | 150 [150–168] ms | result applies once to the retained workspace |
+| Alerts re-entry after completion | 769 [706–776] ms | current-country restoration and complete map presentation remain necessary |
+| leave Tropical after expired-cache fetch starts | 169 [167–182] ms | screen task cancels; shielded application fetch remains owned by the app |
+| hidden Tropical fetch completion | 42 [34–43] ms | one result enters the application cache without touching detached widgets |
+| Tropical re-entry after hidden completion | 478 [476–510] ms | one cached result constructs a fresh screen; no second provider request |
+
+The mounted regression repeats each transient transition three times and then
+forces collection. All Search, Tropical, and World weak references clear. The
+screen stack returns to its original depth and Weather identity, Weather keeps
+the same one-second timer object, and Alerts retains the same single installed
+screen with no country or hourly task handle left behind. The warm Alerts
+cycles issue no additional country-service call. After the expired Tropical
+experiment, the one application fetch handle is cleared, its result is cached,
+re-entry does not fetch again, and the product-task mapping is empty.
+
+One separately traced pass covered the same lifecycle matrix. Its per-scenario
+values describe transient allocation churn, not retained memory. Collection
+and the dead transient-screen weak references are the direct retention check.
+Beyond the deliberately persistent Weather and Alerts screens, only the
+previously documented bounded World and Tropical frame LRUs retain
+presentation data across visits. Navigation does not grow forecast, warning,
+country, hourly, product, or summary cache cardinality after the relevant
+identity is warm. Cache expiry preserves its existing owner and does not
+produce a second in-flight request.
+
+#### Final common matrix compared with Slice A
+
+Times below use the final complete three-sample run. Slice A values are shown
+only where its ordinary fixture is comparable. Scheduler variation and the
+richer Tropical product fixture mean the structural findings in each owning
+slice remain the attribution evidence.
+
+| Screen | Slice A | Final common run | Final finding |
+|---|---:|---:|---|
+| Search | cold 99 ms; warm 75 ms; resize 253 ms | cold 94 ms; warm 72 ms; resize 240 ms | ordinary presentation was already small; exclusive worker removed obsolete provider wait instead |
+| Weather | forecast 2,287 ms; resize 1,958 ms | forecast 599 ms; resize 1,824 ms | duplicate message fan-out is gone; complete resizes remain Textual-dominated |
+| Alerts Centre | cold 1,231 ms; warm 208 ms; selection 396 ms; resize 3,154 ms | cold 1,087 ms; warm 195 ms; selection 318 ms; resize 2,578 ms | fewer map builds, layout writes, and raster passes; installed-screen lifecycle remains effective |
+| Tropical Systems | cold 758 ms; warm 475 ms; source 408 ms; resize 2,128 ms | cold 784 ms; warm 461 ms; source 437 ms; resize 2,193 ms | richer final fixture prevents a wall-time claim; unused projection deletion and frame/build counts prove less work |
+| World Locations | cold 709 ms; warm 536 ms; focus 84 ms; resize 1,923 ms | cold 753 ms; warm 351 ms; focus 61 ms; resize 1,874 ms | bounded cross-screen frame reuse helps re-entry; cold mount remains the feature cost |
+
+The strongest complete-path result is Weather's 72-hour update, reduced from
+about 2.29 seconds to 0.60 seconds by fixing message ownership. The final run
+also preserves the per-slice structural reductions: one Weather map update
+instead of 11, Alerts map rebuilds from 23 to 14, Tropical native frame builds
+from 19 to four in its comparable profile, and World repeated-frame cache
+hits without backdrop rewrites. No provider speed is credited.
+
+#### Consolidation, deletion, and remaining cost review
+
+1. No shared production extraction reduces total complexity. Weather,
+   Tropical, and Alerts each use the same small immutable-budget equality
+   idiom, but their invalidation inputs and child writes differ; a generic
+   state adapter would add more machinery than the three local checks. World,
+   Tropical, and Alerts all retain geographic work, but their global/fitted,
+   storm/product, and selected-alert cache keys have different truth and
+   invalidation rules. They already share `GeographicFrame` and the map-callout
+   planner at the useful boundary.
+2. Task ownership must remain distinct. Search uses an exclusive framework
+   worker that dies with its modal; Weather owns a persistent timer and one
+   stale-guarded map task; Alerts intentionally completes work on its installed
+   hidden screen; Tropical cancels screen presentation tasks while shielding
+   application cache fills; World owns no provider task. One lifecycle helper
+   would obscure rather than simplify those contracts.
+3. The completed deletion findings stand together without exposing another
+   safe shared deletion: Search's unused `clear_all()`, Weather's duplicate
+   message fan-out and layout schedules, World's unused `set_locations()`, and
+   Tropical's unread projected-land field were removed in their owning slices.
+   Alerts removed duplicate map construction and land raster work but retained
+   all live compatibility paths. Standalone widget compatibility methods and
+   documented public tropical helpers remain intentionally untouched.
+4. The disproportionate candidates are product decisions, not hidden
+   optimisations: the eager import graph for cold startup; the separate World
+   map; Tropical's core track and auxiliary centre weather; and Alerts'
+   settlement-hourly expansion. Textual styling/layout/compositing still owns
+   much of every full resize. Removing a user-visible feature or redesigning
+   imports requires a separately scoped decision with its own compatibility
+   baseline.
+
+Tasks 0021 and 0024 continue to own denser Alerts detail/query work and
+navigation-driven rendering respectively. No result cache, lifecycle manager,
+screen pool, resize debounce, spatial index, runtime telemetry, dependency, or
+general map framework was added.
+
+#### Slice G change accounting and verification
+
+- Production: `+0/-0` lines. This is an evidence-backed negative production
+  finding, not an unfinished optimisation.
+- Tests: `+248/-0` lines in one focused two-test lifecycle module; no elapsed
+  time assertion.
+- Audit tooling: `+160/-0` lines (929 to 1,089) in the existing script for eight
+  transition/pending scenarios and structural assertions. It remains one
+  checkout-only command with no package import or runtime instrumentation.
+- Documentation: this final lifecycle/consolidation record and status update.
+- Public APIs, provider/service semantics, cache keys/TTLs, screen retention,
+  visual design, responsive behavior, and dependencies: unchanged.
+
+Compilation, the expanded timing and allocation harness, and two focused
+lifecycle tests passed. The complete suite passed 334 tests in 286.560
+seconds. Tests emitted asyncio slow-task diagnostics but no failures. No live
+provider, interactive terminal, font, colour, emoji, Braille-glyph, or manual
+mouse check was performed.
+
+Task 0025 is complete. Further work should begin as a new, explicitly scoped
+task rather than extending this audit.
