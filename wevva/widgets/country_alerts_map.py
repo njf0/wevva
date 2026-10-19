@@ -11,7 +11,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
-from textual.events import Click, Resize
+from textual.events import Click, Enter, Leave, Resize
 from textual.message import Message
 from textual.widgets import Static
 from wevva_warnings import Alert
@@ -367,19 +367,36 @@ class CountryAlertRegionLabel(Static):
 
 
 class CountryAlertSettlementSelected(Message):
-    """A focused-map settlement was activated without changing app location."""
+    """A focused-map settlement was activated for full weather navigation."""
 
     def __init__(self, *, place: PopulatedPlace) -> None:
         super().__init__()
         self.place = place
 
 
+class CountryAlertSettlementPreviewRequested(Message):
+    """A focused-map settlement needs compact current weather for its tooltip."""
+
+    def __init__(self, *, label: CountryAlertCityLabel) -> None:
+        super().__init__()
+        self.label = label
+        self.place = label.place
+
+
+class CountryAlertSettlementPreviewCancelled(Message):
+    """The pointer left a settlement before its preview was useful."""
+
+    def __init__(self, *, label: CountryAlertCityLabel) -> None:
+        super().__init__()
+        self.label = label
+
+
 class CountryAlertCityLabel(Static, can_focus=True):
     """Native directional callout for one Alerts Centre settlement."""
 
     BINDINGS = [
-        Binding('enter', 'select_settlement', 'Forecast', show=False),
-        Binding('space', 'select_settlement', 'Forecast', show=False),
+        Binding('enter', 'select_settlement', 'Weather', show=False),
+        Binding('space', 'select_settlement', 'Weather', show=False),
     ]
 
     DEFAULT_CSS = """
@@ -408,6 +425,7 @@ class CountryAlertCityLabel(Static, can_focus=True):
         self._marker_on_right = False
         self.label_text = ''
         self.set_marker_on_right(False)
+        self.reset_tooltip()
 
     def set_marker_on_right(self, marker_on_right: bool) -> None:
         self._marker_on_right = marker_on_right
@@ -423,8 +441,27 @@ class CountryAlertCityLabel(Static, can_focus=True):
         self.focus()
         self.action_select_settlement()
 
+    def on_enter(self, event: Enter) -> None:
+        if event.node is self:
+            self.post_message(CountryAlertSettlementPreviewRequested(label=self))
+
+    def on_leave(self, event: Leave) -> None:
+        if event.node is self:
+            self.post_message(CountryAlertSettlementPreviewCancelled(label=self))
+
+    def reset_tooltip(self) -> None:
+        """Restore the lightweight state shown before current weather arrives."""
+
+        tooltip = Text()
+        tooltip.append(self.place.name, style='bold')
+        if self.place.region_name:
+            tooltip.append(f', {self.place.region_name}', style='dim')
+        tooltip.append('\nLoading current weather…', style='dim italic')
+        tooltip.append('\nClick for full forecast', style='dim')
+        self.tooltip = tooltip
+
     def action_select_settlement(self) -> None:
-        """Request a local hourly forecast without global place navigation."""
+        """Request the complete weather view for this settlement."""
 
         self.post_message(CountryAlertSettlementSelected(place=self.place))
 
@@ -540,6 +577,12 @@ class CountryAlertsMap(Container):
         """Reapply theme-derived map and polygon colours in place."""
 
         self._schedule_reflow()
+
+    def reset_city_tooltips(self) -> None:
+        """Discard rendered previews after unit or theme changes."""
+
+        for label in self._labels.values():
+            label.reset_tooltip()
 
     def clear(self, *, country_name: str = '') -> None:
         self._country_code = ''
@@ -848,6 +891,8 @@ __all__ = [
     'CountryAlertRegionAnnotation',
     'CountryAlertRegionLabel',
     'CountryAlertCityLabel',
+    'CountryAlertSettlementPreviewCancelled',
+    'CountryAlertSettlementPreviewRequested',
     'CountryAlertSettlementSelected',
     'CountryAlertPolygonLayer',
     'CountryAlertsMap',

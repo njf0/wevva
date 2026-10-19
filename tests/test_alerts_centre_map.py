@@ -10,7 +10,6 @@ from textual.app import App, ComposeResult
 from wevva_warnings import Alert
 
 from wevva.geography import map_unit
-from wevva.alerts_centre_layout import alerts_centre_layout_for
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry, country_alert_identity
 from wevva.widgets.country_alerts_map import (
@@ -29,7 +28,6 @@ from wevva.widgets.weather_alerts import (
     alert_severity_color,
     alert_severity_surface_color,
 )
-from tests.weather_fixtures import hourly_forecast
 
 
 GERMANY = SupportedAlertCountry('DE', 'Germany')
@@ -558,93 +556,106 @@ class _ScreenApp(App[None]):
         await self.push_screen(self.test_screen)
 
 
-class CountryAlertPlaceHourlyLoadingTests(unittest.IsolatedAsyncioTestCase):
+def _current_weather(temperature: float = 18.0) -> dict:
+    return {
+        'current': {
+            'temperature_2m': temperature,
+            'precipitation_probability': 25,
+            'precipitation': 0.2,
+            'weather_code': 1,
+            'is_day': 1,
+            'wind_speed_10m': 14,
+            'wind_direction_10m': 270,
+        },
+        'current_units': {
+            'temperature_2m': '°C',
+            'precipitation_probability': '%',
+            'precipitation': 'mm',
+            'wind_speed_10m': 'km/h',
+        },
+    }
+
+
+class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
-    def _visible_places(screen: AlertsCentreScreen) -> list:
+    def _visible_labels(screen: AlertsCentreScreen) -> list[CountryAlertCityLabel]:
         visible_keys = {placement.key for placement in screen.country_map.placements}
         return [
-            label.place
+            label
             for label in screen.country_map.query(CountryAlertCityLabel)
             if (label.place.latitude, label.place.longitude) in visible_keys
         ]
 
-    async def test_selection_loads_once_and_resize_and_cache_hit_do_not_refetch(self) -> None:
+    async def test_hover_loads_compact_weather_once_and_cache_survives_resize(self) -> None:
         requests = []
-        forecast = hourly_forecast()
 
-        async def loader(latitude, longitude, temperature_unit, wind_speed_unit):
-            requests.append((latitude, longitude, temperature_unit, wind_speed_unit))
-            return forecast
+        async def loader(latitude, longitude, temperature_unit, wind_speed_unit, precipitation_unit):
+            requests.append(
+                (
+                    latitude,
+                    longitude,
+                    temperature_unit,
+                    wind_speed_unit,
+                    precipitation_unit,
+                )
+            )
+            return _current_weather()
 
         screen = AlertsCentreScreen(
             service=_FixtureCountryService({'DE': []}),  # type: ignore[arg-type]
             countries=[GERMANY],
-            place_hourly_loader=loader,
+            place_weather_loader=loader,
+            place_weather_hover_delay_seconds=0,
         )
         app = _ScreenApp(screen)
 
-        async with app.run_test(size=(120, 36)) as pilot:
+        async with app.run_test(size=(120, 36), tooltips=True) as pilot:
             for _ in range(3):
                 await pilot.pause()
             self.assertEqual(requests, [])
-            place = self._visible_places(screen)[0]
-            screen._select_settlement(place)
+            label = self._visible_labels(screen)[0]
+            self.assertTrue(await pilot.hover(label))
             for _ in range(2):
                 await pilot.pause()
 
             self.assertEqual(
                 requests,
-                [(place.latitude, place.longitude, 'celsius', 'kmh')],
+                [
+                    (
+                        label.place.latitude,
+                        label.place.longitude,
+                        'celsius',
+                        'kmh',
+                        'mm',
+                    )
+                ],
             )
-            self.assertIs(screen.selected_place_forecast, forecast)
-            self.assertEqual(screen.place_forecast_state, 'ready')
-            strip = screen.place_forecast
-            self.assertTrue(strip.display)
-            self.assertEqual(strip.state, 'ready')
-            self.assertEqual(strip.border_title, f'Hourly forecast — {place.name}')
-            self.assertGreater(strip.hour_count, 0)
+            assert label.tooltip is not None
+            self.assertIn(label.place.name, label.tooltip.plain)
+            self.assertIn('18°C', label.tooltip.plain)
+            self.assertIn('Rain 25%', label.tooltip.plain)
+            self.assertIn('Wind 14 km/h', label.tooltip.plain)
+            self.assertIn('Click for full forecast', label.tooltip.plain)
 
-            expected_heights = {
-                (80, 24): 4,
-                (100, 30): 0,
-                (140, 40): 9,
-                (180, 50): 9,
-                (220, 50): 9,
-            }
-            for size, expected_height in expected_heights.items():
-                await pilot.resize_terminal(*size)
-                await pilot.pause()
-                self.assertEqual(
-                    strip.region.height if strip.display else 0,
-                    expected_height,
-                    size,
-                )
-                self.assertLessEqual(
-                    expected_height,
-                    alerts_centre_layout_for(
-                        *size,
-                        place_forecast_state='ready',
-                        place_forecast_has_data=True,
-                    ).map_workspace_height
-                    // 4,
-                )
-            screen._select_settlement(place)
+            await pilot.resize_terminal(80, 24)
             await pilot.pause()
+            screen._start_place_weather_preview(label)
             self.assertEqual(len(requests), 1)
 
     async def test_expired_cache_and_unit_change_refetch(self) -> None:
         now = [100.0]
         requests = []
 
-        async def loader(latitude, longitude, temperature_unit, wind_speed_unit):
-            requests.append((temperature_unit, wind_speed_unit))
-            return hourly_forecast()
+        async def loader(_latitude, _longitude, temperature_unit, wind_speed_unit, precipitation_unit):
+            requests.append((temperature_unit, wind_speed_unit, precipitation_unit))
+            return _current_weather()
 
         screen = AlertsCentreScreen(
             service=_FixtureCountryService({'DE': []}),  # type: ignore[arg-type]
             countries=[GERMANY],
-            place_hourly_loader=loader,
-            place_hourly_cache_ttl_seconds=10,
+            place_weather_loader=loader,
+            place_weather_cache_ttl_seconds=10,
+            place_weather_hover_delay_seconds=0,
             clock=lambda: now[0],
         )
         app = _ScreenApp(screen)
@@ -652,116 +663,87 @@ class CountryAlertPlaceHourlyLoadingTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(120, 36)) as pilot:
             for _ in range(3):
                 await pilot.pause()
-            place = self._visible_places(screen)[0]
-            screen._select_settlement(place)
+            label = self._visible_labels(screen)[0]
+            screen._start_place_weather_preview(label)
             await pilot.pause()
             now[0] += 10
-            screen._select_settlement(place)
+            screen._start_place_weather_preview(label)
             await pilot.pause()
             app.temperature_unit = 'fahrenheit'
             app.wind_speed_unit = 'mph'
+            app.precipitation_unit = 'inch'
             screen.apply_preferences(
                 warning_language='auto',
                 units_changed=True,
                 appearance_changed=False,
             )
             await pilot.pause()
+            screen._start_place_weather_preview(label)
+            await pilot.pause()
 
             self.assertEqual(
                 requests,
-                [('celsius', 'kmh'), ('celsius', 'kmh'), ('fahrenheit', 'mph')],
+                [
+                    ('celsius', 'kmh', 'mm'),
+                    ('celsius', 'kmh', 'mm'),
+                    ('fahrenheit', 'mph', 'inch'),
+                ],
             )
 
-    async def test_second_settlement_load_keeps_the_rendered_strip_height(self) -> None:
-        release_second = asyncio.Event()
-        requests = 0
-
-        async def loader(*_args):
-            nonlocal requests
-            requests += 1
-            if requests == 2:
-                await release_second.wait()
-            return hourly_forecast()
-
-        screen = AlertsCentreScreen(
-            service=_FixtureCountryService({'DE': []}),  # type: ignore[arg-type]
-            countries=[GERMANY],
-            place_hourly_loader=loader,
-        )
-        app = _ScreenApp(screen)
-
-        async with app.run_test(size=(180, 50)) as pilot:
-            for _ in range(3):
-                await pilot.pause()
-            first, second = self._visible_places(screen)[:2]
-            screen._select_settlement(first)
-            for _ in range(2):
-                await pilot.pause()
-            established_height = screen.place_forecast.region.height
-            self.assertEqual(established_height, 9)
-
-            screen._select_settlement(second)
-            await pilot.pause()
-
-            self.assertEqual(screen.place_forecast_state, 'loading')
-            self.assertEqual(screen.place_forecast.region.height, established_height)
-            self.assertTrue(screen.place_forecast.loading_indicator.display)
-            self.assertFalse(screen.place_forecast.content.display)
-
-            release_second.set()
-            await pilot.pause()
-            self.assertEqual(screen.place_forecast_state, 'ready')
-
-    async def test_rapid_selection_rejects_a_cancelled_stale_result(self) -> None:
+    async def test_rapid_hover_rejects_a_cancelled_stale_result(self) -> None:
         releases: dict[str, asyncio.Event] = {}
-        results = {}
+        temperatures: dict[str, float] = {}
 
-        async def loader(latitude, longitude, _temperature_unit, _wind_speed_unit):
+        async def loader(latitude, longitude, *_units):
             key = f'{latitude},{longitude}'
             release = releases.setdefault(key, asyncio.Event())
+            temperatures.setdefault(key, 11 if not temperatures else 22)
             try:
                 await release.wait()
             except asyncio.CancelledError:
                 await release.wait()
-            result = hourly_forecast()
-            results[key] = result
-            return result
+            return _current_weather(temperatures[key])
 
         screen = AlertsCentreScreen(
             service=_FixtureCountryService({'DE': []}),  # type: ignore[arg-type]
             countries=[GERMANY],
-            place_hourly_loader=loader,
+            place_weather_loader=loader,
+            place_weather_hover_delay_seconds=0,
         )
         app = _ScreenApp(screen)
 
         async with app.run_test(size=(120, 36)) as pilot:
             for _ in range(3):
                 await pilot.pause()
-            first, second = self._visible_places(screen)[:2]
-            screen._select_settlement(first)
+            first, second = self._visible_labels(screen)[:2]
+            screen._start_place_weather_preview(first)
             await pilot.pause()
-            screen._select_settlement(second)
+            screen._start_place_weather_preview(second)
             await pilot.pause()
-            second_key = f'{second.latitude},{second.longitude}'
+            second_key = f'{second.place.latitude},{second.place.longitude}'
             releases[second_key].set()
             await pilot.pause()
-            selected_result = results[second_key]
-            first_key = f'{first.latitude},{first.longitude}'
+            assert second.tooltip is not None
+            self.assertIn('22°C', second.tooltip.plain)
+            first_key = f'{first.place.latitude},{first.place.longitude}'
             releases[first_key].set()
             await pilot.pause()
 
-            self.assertEqual(screen.selected_place, second)
-            self.assertIs(screen.selected_place_forecast, selected_result)
+            assert first.tooltip is not None
+            self.assertNotIn('11°C', first.tooltip.plain)
 
-    async def test_alert_change_clears_selection_and_failure_is_retryable(self) -> None:
+    async def test_failure_is_retryable_and_alert_change_cancels_preview(self) -> None:
         attempts = 0
+        pending = asyncio.Event()
 
         async def loader(*_args):
             nonlocal attempts
             attempts += 1
             if attempts == 1:
                 raise RuntimeError('offline')
-            return hourly_forecast()
+            if attempts == 3:
+                await pending.wait()
+            return _current_weather()
 
         flood = _alert('flood', severity='Severe', geometry=WEST_GERMANY)
         wind = _alert('wind', severity='Moderate', geometry=EAST_GERMANY)
@@ -769,44 +751,32 @@ class CountryAlertPlaceHourlyLoadingTests(unittest.IsolatedAsyncioTestCase):
         screen = AlertsCentreScreen(
             service=service,  # type: ignore[arg-type]
             countries=[GERMANY, FRANCE],
-            place_hourly_loader=loader,
+            place_weather_loader=loader,
+            place_weather_hover_delay_seconds=0,
         )
         app = _ScreenApp(screen)
 
         async with app.run_test(size=(120, 36)) as pilot:
             for _ in range(4):
                 await pilot.pause()
-            place = self._visible_places(screen)[0]
-            screen._select_settlement(place)
+            label = self._visible_labels(screen)[0]
+            screen._start_place_weather_preview(label)
             await pilot.pause()
-            self.assertEqual(screen.place_forecast_state, 'failed')
-            self.assertTrue(screen.place_forecast.display)
-            self.assertIn(
-                'unavailable',
-                screen.place_forecast.content.render().plain,
-            )
+            assert label.tooltip is not None
+            self.assertIn('unavailable', label.tooltip.plain)
 
-            screen.action_refresh_alerts()
-            for _ in range(3):
-                await pilot.pause()
-            self.assertEqual(screen.place_forecast_state, 'ready')
+            screen._start_place_weather_preview(label)
+            await pilot.pause()
             self.assertEqual(attempts, 2)
+            assert label.tooltip is not None
+            self.assertIn('18°C', label.tooltip.plain)
 
+            screen._place_weather_cache.clear()
+            screen._start_place_weather_preview(label)
+            await pilot.pause()
             screen._select_alert(wind)
             await pilot.pause()
-            self.assertIsNone(screen.selected_place)
-            self.assertIsNone(screen.selected_place_forecast)
-            self.assertEqual(screen.place_forecast_state, 'idle')
-
-            for _ in range(2):
-                await pilot.pause()
-            screen._select_settlement(self._visible_places(screen)[0])
-            await pilot.pause()
-            screen._choose_country('FR')
-            await pilot.pause()
-            self.assertIsNone(screen.selected_place)
-            self.assertIsNone(screen.selected_place_forecast)
-            self.assertEqual(screen.place_forecast_state, 'idle')
+            self.assertIsNone(screen._place_weather_task)
 
 
 if __name__ == '__main__':

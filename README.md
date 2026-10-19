@@ -108,9 +108,10 @@ Press `g` from the weather screen to open the country Alerts Centre. It keeps
 country discovery separate from alerts applicable to the current forecast
 point, and combines a searchable active-alert list, complete provider
 documents, issued warning polygons, and locally selectable settlement labels.
-Settlement selection retrieves a compact hourly forecast without replacing the
-main weather location. Use `r` to refresh its independent data and `w` to
-return to weather.
+Hovering a settlement shows compact current conditions; clicking it opens that
+place's complete forecast on the main Weather screen. Returning with `g`
+restores the previous Alerts Centre context. Use `r` to refresh its independent
+alert data and `w` to return to weather.
 
 ## Tropical Systems
 
@@ -201,8 +202,8 @@ On the saved-locations world map, use left/right to move between city labels,
 then Enter or Space to open the focused forecast; mouse selection works too.
 Location-map city labels can likewise be clicked or focused and activated to
 open their ordinary weather forecast. Activating an Alerts Centre settlement
-instead opens its compact hourly forecast below the warning map without
-changing the primary weather location.
+also opens its ordinary full forecast; hovering first shows a compact current-
+weather tooltip without leaving the warning map.
 
 ## Config
 

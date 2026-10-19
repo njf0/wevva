@@ -54,7 +54,6 @@ from wevva.services.tropical import (
 )
 from wevva.geography import short_location_name
 from wevva.services.weather import (
-    fetch_alert_place_hourly_forecast,
     fetch_city_temperatures,
     fetch_current_weather,
     fetch_weather_summary,
@@ -279,7 +278,7 @@ class Wevva(App, inherit_bindings=False):
                 service=self.country_alerts_service,
                 initial_country_code=self.location.country_code,
                 warning_language=self.warning_language,
-                place_hourly_loader=self.load_alert_place_hourly_forecast,
+                place_weather_loader=self.load_alert_place_weather,
             )
             self.install_screen(self._alerts_centre_screen, 'alerts-centre')
         else:
@@ -338,20 +337,22 @@ class Wevva(App, inherit_bindings=False):
             temperature_unit=temperature_unit,
         )
 
-    async def load_alert_place_hourly_forecast(
+    async def load_alert_place_weather(
         self,
         latitude: float,
         longitude: float,
         temperature_unit: str,
         wind_speed_unit: str,
-    ):
-        """Fetch the small hourly model for one Alerts Centre settlement."""
+        precipitation_unit: str,
+    ) -> dict:
+        """Fetch compact current weather for one Alerts Centre settlement."""
 
-        return await fetch_alert_place_hourly_forecast(
+        return await fetch_current_weather(
             lat=latitude,
             lon=longitude,
             temperature_unit=temperature_unit,
             wind_speed_unit=wind_speed_unit,
+            precipitation_unit=precipitation_unit,
         )
 
     def open_world_locations_screen(self) -> None:
@@ -693,6 +694,10 @@ class Wevva(App, inherit_bindings=False):
         Adopts selected location first so widgets see correct context on WeatherUpdated.
         """
         self.location = message.location
+        if self._alerts_centre_screen is not None:
+            self._alerts_centre_screen.preserve_country_on_next_resume(
+                message.preserve_alerts_context
+            )
         if self.screen is not self.weather_screen:
             self.push_screen(self.weather_screen)
         await self.action_refresh()
@@ -700,6 +705,8 @@ class Wevva(App, inherit_bindings=False):
     async def on_saved_location_selected(self, message: SavedLocationSelected) -> None:
         """Switch to a saved location."""
         self.location = message.location
+        if self._alerts_centre_screen is not None:
+            self._alerts_centre_screen.preserve_country_on_next_resume(False)
         if isinstance(self.screen, WorldLocationsScreen):
             await self.pop_screen()
         else:

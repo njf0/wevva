@@ -16,8 +16,8 @@ reader but should remain a modal rather than grow into a country browser.
 A separate alerts centre can answer a different question: which active alerts
 are available for a country, where are their issued polygons, and what do their
 full provider documents say? The application already has most of the visual
-primitives: country geometry, ranked Natural Earth cities, compact hourly
-forecast formatting, semantic alert colours, full provider prose, and Braille
+primitives: country geometry, ranked Natural Earth cities, compact current
+weather formatting, semantic alert colours, full provider prose, and Braille
 polygon rendering.
 
 ## Problem
@@ -42,9 +42,9 @@ A dedicated `Alerts Centre` screen presents a country picker and searchable
 alert list on the left, a square-ish country map in the middle, and the selected
 alert's complete document on the right. Selecting an alert fits the map to its
 real provider geometry, updates the document, and chooses useful settlements
-from that focused area. Settlement labels contain names only. Activating one
-keeps the user in the Alerts Centre and opens a compact, non-scrolling hourly
-forecast strip directly below the map.
+from that focused area. Settlement labels contain names only. Hovering one
+shows compact current conditions; activating one opens its complete forecast
+on the Weather screen. Returning with `g` restores the Alerts Centre context.
 
 The screen is a persistent workspace, not a modal. It has its own loading,
 empty, partial-provider, and error states, while leaving the weather screen's
@@ -58,7 +58,7 @@ local alert refresh untouched.
 │ Filter button      │ country outline       │ document          │
 │ Sort select        │ warning polygons      │ independently     │
 │ severity/event/    │ focused settlements   │ scrollable        │
-│ short area list    │ hourly forecast strip │                    │
+│ short area list    │ hover weather preview│                    │
 │                    │                       │ official link      │
 └────────────────────┴──────────────────────┴──────────────────┘
 ```
@@ -77,13 +77,12 @@ Use a pure row/column budget rather than one desktop breakpoint.
   right workspace when enough height exists.
 - **80x24:** keep the country picker/filter/list at a restrained left width and
   use native `Map` / `Details` tabs for the right pane, showing one useful peer
-  at a time. The Map tab may divide its own height between the map and a compact
-  selected-settlement forecast. Selection and scroll state survive tab changes.
+  at a time. Selection and scroll state survive tab changes.
 - **Below the supported baseline:** collapse to one pane at a time rather than
   clip all three columns or introduce full-page scrolling.
 
-Only the alert list and provider document scroll vertically. The country map,
-settlement forecast, and screen itself do not.
+Only the alert list and provider document scroll vertically. The country map
+and screen itself do not.
 
 ## Country picker and alert search
 
@@ -207,9 +206,9 @@ The map uses the same layered Textual pattern as the location maps:
   and place name, for example `• Berlin` or `Berlin •`;
 - labels use normal theme text rather than temperature-derived colour, and the
   selected/focused settlement uses ordinary hover/focus/reverse treatment;
-- mouse click, Enter, or Space emits an Alerts-Centre-specific settlement
-  selection message; it must not emit the global `PlaceSelected` navigation
-  message or replace the main weather location.
+- hovering a settlement requests a compact current-weather preview; mouse
+  click, Enter, or Space emits an Alerts-Centre-specific activation message
+  which the screen converts into ordinary Weather-screen navigation.
 
 The whole-country fallback remains geographically truthful, including
 disconnected map-unit components. An alert-focused view may naturally exclude
@@ -242,49 +241,27 @@ works for any provider today and benefits automatically from later
 `wevva-warnings` improvements such as resolving NWS `affectedZones`; it must not
 contain provider-specific geometry logic in Wevva.
 
-## Selected-settlement hourly forecast
+## Settlement weather preview and navigation
 
-Activating a visible settlement opens a peer forecast directly below the map.
-This is a local inspection surface, not navigation to the primary weather
-screen.
+Hovering a visible settlement is a lightweight inspection surface; activating
+it navigates to the application's complete Weather screen.
 
-- Add a focused Open-Meteo request for only the hourly fields needed here:
-  temperature, precipitation probability, wind speed/direction, and timezone
-  metadata. Do not route it through `WeatherController`, fetch air quality, or
-  mutate the application's active location.
-- Normalize the response into the existing `HourlyOpenMeteoForecast` model (or
-  an equally small compatible model) so value formatting and unit semantics
-  remain shared with the main hourly forecast.
-- Cache successful results briefly by rounded coordinates plus temperature and
-  wind units. Rapid settlement changes use a generation guard and cancellation
-  so an older response cannot replace the latest city.
-- A country change or selected-alert identity change clears the selected
-  settlement and hides its forecast. Unit changes invalidate/refetch the
-  visible forecast; theme changes rerender it in place. An explicit Alerts
-  Centre refresh bypasses its cache only when the same settlement forecast
-  remains visible.
-- Loading, empty, and retryable failure states remain inside the forecast peer;
-  they never suppress or resize away the selected alert map.
-
-Build a dedicated `AlertPlaceHourlyForecast` from the existing hourly widget's
-four-cell columns, colour scales, block builders, and row formatting, rather
-than embedding the full `HourlyForecast` widget:
-
-- fill the available width with the next consecutive hours that fit, capped at
-  24; distribute spare cells across those columns rather than introducing an
-  internal horizontal viewport;
-- do not mount day tabs, a horizontal scrollbar/position indicator, or a
-  highlight cursor, and do not respond to Left/Right scrolling;
-- title the frame `Hourly forecast — <settlement>`;
-- always show a time row and temperature values when usable data exists;
-- admit rain and wind values next, followed by complete temperature, rain, and
-  wind bar rows as height permits—never show a bar without its associated value
-  row;
-- allocate no more than one quarter of the Map workspace's available height,
-  including the forecast border. If that quarter cannot hold the minimum
-  complete forecast, leave the peer hidden and keep the settlement selected;
-- hide the peer entirely until a settlement is selected, returning all
-  available height to the map.
+- Lazily request only current conditions after a short hover delay. Do not
+  fetch weather for every displayed settlement or in response to resize.
+- Render a compact, non-interactive Rich tooltip containing place/region,
+  condition, temperature, rain, wind, units, and a full-forecast hint. Loading
+  and retryable-unavailable states occupy the same tooltip.
+- Cache successful responses briefly by rounded coordinates and temperature,
+  wind, and precipitation units. Rapid hover changes use cancellation plus a
+  generation guard so an older response cannot update another label.
+- Unit changes invalidate the preview cache and reset visible label tooltips;
+  theme changes rerender through normal semantic Rich styles.
+- Click, Enter, or Space converts the source-neutral settlement into ordinary
+  location metadata and opens its full Weather-screen forecast. The persistent
+  Alerts Centre retains country, selected alert, filters, map viewport, and
+  document state so `g` returns to the same context.
+- The preview must not change map allocation or require an additional forecast
+  widget. Failure leaves the map, alert list, and document intact.
 
 ## Selected alert document
 
@@ -314,9 +291,9 @@ responsive topology changes, and a refresh when it remains present.
   sources if the public warning API exposes that status.
 - Complete failure uses an inline retryable state; it does not navigate away or
   flood notifications.
-- Settlement-hourly loading/failure stays below the map and cannot replace the
-  alert-list progress or error state.
-- Alerts without geometry or prose, settlement forecasts without weather data,
+- Settlement-preview loading/failure stays in its tooltip and cannot replace
+  the alert-list progress or error state.
+- Alerts without geometry or prose, settlements without current-weather data,
   and documents without official links degrade independently.
 
 ## Scope
@@ -329,8 +306,8 @@ responsive topology changes, and a refresh when it remains present.
   multi-alert layers.
 - Dynamically ranked, interactive settlement labels without current
   temperatures.
-- A cached, stale-safe selected-settlement hourly request and non-scrolling
-  forecast peer below the map.
+- Cached, stale-safe current-weather tooltips and full Weather-screen
+  navigation for settlements.
 - Passive Natural Earth Admin-1 labels for every region represented in the
   focused viewport, independent of provider area descriptions.
 - Reused full alert document reader.
@@ -348,8 +325,9 @@ responsive topology changes, and a refresh when it remains present.
   workflows, or user-defined alert subscriptions.
 - User-controlled map pan/zoom, selectable projections, or custom spatial
   keyboard navigation; viewport changes are driven only by alert selection.
-- Day tabs, manually scrollable 24-hour tables, daily forecasts, current
-  conditions, or air quality inside the Alerts Centre.
+- Hourly/daily forecast tables, air quality, or a persistent weather panel
+  inside the Alerts Centre; current conditions exist only in transient
+  settlement tooltips.
 - Treating a derived area label or settlement as authoritative evidence of an
   alert's applicability; provider geometry remains authoritative.
 - New warning providers or provider-specific UI branches.
@@ -399,10 +377,9 @@ responsive topology changes, and a refresh when it remains present.
   without displacing the local `i` warning-details action.
 - Complete: the application owns one isolated country-alert service and one
   reusable Alerts Centre screen, preserving session caches across visits.
-- Complete, then refined in Slice F: `r` bypasses country and any visible
-  selected-settlement hourly cache; `w` returns to weather; and live unit,
-  language, theme, and emoji
-  settings are applied to the existing workspace.
+- Complete, then refined: `r` bypasses the country cache; `w` returns to
+  weather; and live unit, language, theme, and emoji settings are applied to
+  the existing workspace.
 
 ### Post-implementation UI refinement
 
@@ -463,7 +440,7 @@ responsive topology changes, and a refresh when it remains present.
   ranking inside/outside the selected geometry, label-budget stability, and
   multi-region label provenance. No weather request belongs in this slice.
 
-### Slice F — interactive settlements and hourly data lifecycle
+### Slice F — interactive settlements and hourly data lifecycle (superseded)
 
 - Complete: removed temperature text/colour and the Alerts Centre's batch city
   temperature loader/cache while leaving other location-map temperature users
@@ -482,7 +459,10 @@ responsive topology changes, and a refresh when it remains present.
   focus retention, cache hit/expiry, rapid-city stale results, country/alert
   invalidation, unit changes, retry, and failure that leaves the map intact.
 
-### Slice G — fixed hourly strip and responsive integration
+This slice records the original implementation. The later settlement UX
+revision below replaced its hourly-loader and local-selection behavior.
+
+### Slice G — fixed hourly strip and responsive integration (superseded)
 
 - Complete: introduced `AlertPlaceHourlyForecast`, sharing the main hourly
   forecast's formatting utilities while deliberately omitting tabs, cursor,
@@ -506,6 +486,27 @@ responsive topology changes, and a refresh when it remains present.
   complete-row admission, fitted hour counts, hidden insufficient-height state,
   and zero resize-triggered network requests.
 
+This slice records the original implementation. Its dedicated hourly widget,
+service path, layout budget, and tests were removed by the following revision.
+
+### Post-completion settlement UX revision
+
+- Complete: settlement hover now requests compact current conditions after a
+  short delay and renders condition, temperature, rain, and wind in a Rich
+  tooltip with loading and unavailable states.
+- Complete: successful previews use a brief coordinate/all-unit cache; rapid
+  hover changes, country/alert changes, and navigation cancel or
+  supersede stale results. Resize performs no weather work.
+- Complete: click, Enter, or Space now opens the settlement's full forecast on
+  the Weather screen. The reusable Alerts Centre preserves its country,
+  selected alert, filters, and map/document context for the next `g` return.
+- Complete: removed the fixed hourly strip and its hourly-only Open-Meteo,
+  service, layout, widget, and test paths, returning all map-workspace height to
+  the map at every terminal size.
+- Verified: deterministic tests exercise native hover, cache hit/expiry,
+  all-unit keys, stale/cancelled results, retry, alert invalidation, activation,
+  Weather-screen navigation, and context-preserving return.
+
 Task 0019 should land first so this screen reuses one alert document component.
 
 ## Relevant code
@@ -513,8 +514,6 @@ Task 0019 should land first so this screen reuses one alert document component.
 - `wevva/widgets/weather_alerts.py`
 - `wevva/widgets/warning_area.py`
 - `wevva/widgets/location_map.py`
-- `wevva/widgets/hourly_forecast.py` (shared rendering behavior, not direct
-  embedding)
 - `wevva/widgets/country_alerts_map.py`
 - `wevva/widgets/geographic_scope.py`
 - `wevva/alerts_centre_layout.py`
@@ -555,20 +554,20 @@ Task 0019 should land first so this screen reuses one alert document component.
   their visible count follows map dimensions and collision constraints rather
   than a fixed cap.
 - Settlement labels contain no temperature text or temperature-derived colour,
-  are operable by mouse and keyboard, and never navigate away from the Alerts
-  Centre.
+  are operable by mouse and keyboard, and expose compact current conditions on
+  hover without changing map layout.
 - Focused maps show passive italic Natural Earth Admin-1 names for every region
   represented in the viewport, without marker dots or provider-text parsing.
-- Activating a settlement starts one stale-safe hourly request and shows its
-  forecast below the map without changing the application's primary location.
-- The hourly peer fills its width with only complete visible hour columns,
-  never scrolls, never exceeds one quarter of the Map workspace height, and
-  admits temperature/rain/wind values and bars only as complete budget units.
-- Settlement-hourly failure does not suppress the map, alert list, or document.
+- Hovering a settlement starts at most one stale-safe current-weather request;
+  successful previews are cached by coordinates and all display units.
+- Activating a settlement opens its full Weather-screen forecast. Returning
+  with `g` restores the prior Alerts Centre country and workspace context.
+- Settlement-preview failure does not suppress the map, alert list, or
+  document.
 - Wide terminals use the three-pane composition; 80x24 uses alert navigation
   plus Map/Details workspace tabs with no full-page vertical scrolling.
-- Alert-list, document, and settlement selection state survive resize and pane
-  switching; resize changes no alert or weather request count.
+- Alert-list and document selection state survive resize and pane switching;
+  resize changes no alert or weather request count.
 - Local weather-screen alert fetching and caching remain behaviorally and
   structurally independent.
 
@@ -588,17 +587,18 @@ uv run python -m unittest discover -s tests
 Cover country switching races, cache hit/expiry, partial and total failures,
 empty country/filter states, alerts with and without geometry/area names,
 severity ordering, whole-country/disconnected geography, selected-geometry
-viewport fitting, focused settlement ranking, settlement activation, hourly
-cache/stale/failure behavior, and rendered 80x24, 100x30, 140x40, 180x50, and
+viewport fitting, focused settlement ranking, settlement activation, weather-
+preview cache/stale/failure behavior, and rendered 80x24, 100x30, 140x40,
+180x50, and
 very-wide topologies. Exercise alert loading, stale, successful-empty,
-filtered-empty, partial-provider, total failure, and settlement-hourly
+filtered-empty, partial-provider, total failure, and settlement-preview
 loading/failure states at representative compact and wide sizes. Assert that
 resize initiates neither country-alert nor settlement-weather requests.
 
 Manual checks remain necessary for live provider coverage, long localized
 country and region names, very large or very small alert geometry, dense
 settlement clusters, Braille density, hover/focus colours, terminal fonts, and
-official links. Record which country feeds and settlement forecasts were
+official links. Record which country feeds and settlement previews were
 actually exercised; do not claim national completeness from a small sample.
 
 ## Decisions and notes
@@ -609,10 +609,10 @@ actually exercised; do not claim national completeness from a small sample.
 - Search/filter state is local presentation state and never refetches.
 - Alert selection alone controls automatic map fitting; there is no independent
   pan/zoom state to reconcile.
-- Settlement selection is local Alerts Centre state and never changes or
-  refreshes the primary weather location.
-- The selected-settlement forecast has its own cache and request generation;
-  it does not enter the main forecast/controller or air-quality paths.
+- Settlement hover is local Alerts Centre state; activation intentionally
+  changes the primary weather location and opens the complete Weather screen.
+- Current-weather previews have their own cache and request generation; they do
+  not enter the main forecast/controller or air-quality paths.
 - Provider source metadata, not Wevva conditionals, determines supported
   countries and coverage limitations.
 - Task 0019 supplies the reusable selected-document presentation.

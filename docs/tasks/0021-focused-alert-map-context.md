@@ -17,8 +17,7 @@ viewport produced by pan and zoom controls. Task 0021 owns the label policy for
 either form of viewport—including scale-adaptive density—but does not own the
 controls, viewport state, scale bar, or polygon-rendering performance.
 
-Slices F and G of Task 0020 are complete. Their settlement selection and
-hourly-forecast work consume a stable place identity
+Task 0020's settlement weather interaction consumes a stable place identity
 and coordinates rather than depending on Natural-Earth-specific rank fields;
 preserve that boundary when replacing the candidate source.
 
@@ -187,10 +186,10 @@ the shared Task 0023 collision planner still decides what fits. Zooming out
 must reduce clutter. Sparse source coverage remains sparse rather than being
 filled with invented or remote labels.
 
-Settlement widgets should receive source-neutral records. A future selected
-settlement must still have a stable key, name, and coordinates for the hourly
-forecast flow; changing label datasets must not change the application's main
-weather location.
+Settlement widgets should receive source-neutral records. A settlement must
+still have a stable key, name, region, and coordinates for the current-weather
+tooltip and full Weather-screen navigation; changing label datasets must not
+change activation semantics.
 
 ## Provider-area fallback
 

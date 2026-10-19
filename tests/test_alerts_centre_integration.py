@@ -12,7 +12,7 @@ from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
 from wevva.screens.weather_screen import WeatherScreen
-from tests.weather_fixtures import hourly_forecast
+from wevva.widgets.country_alerts_map import CountryAlertCityLabel
 
 
 BERLIN = LocationMetadata(
@@ -30,8 +30,11 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         app.action_refresh = AsyncMock()
         app.country_alerts_service.get_alerts = AsyncMock(return_value=[])
         app.load_location_map_temperatures = AsyncMock(return_value={})
-        app.load_alert_place_hourly_forecast = AsyncMock(
-            return_value=hourly_forecast()
+        app.load_alert_place_weather = AsyncMock(
+            return_value={
+                'current': {'temperature_2m': 18},
+                'current_units': {'temperature_2m': '°C'},
+            }
         )
         return app
 
@@ -123,6 +126,36 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(alerts_screen.alert_filter_value, '')
             self.assertEqual(alerts_screen.alert_sort_value, 'new')
 
+    async def test_settlement_activation_opens_weather_and_preserves_alert_context(self) -> None:
+        app = self._app()
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press('g')
+            for _ in range(3):
+                await pilot.pause()
+            alerts_screen = app.screen
+            self.assertIsInstance(alerts_screen, AlertsCentreScreen)
+            selected_country = alerts_screen.selected_country_code
+            label = next(iter(alerts_screen.country_map.query(CountryAlertCityLabel)))
+            refresh_count = app.action_refresh.await_count
+
+            label.action_select_settlement()
+            for _ in range(3):
+                await pilot.pause()
+
+            self.assertIs(app.screen, app.weather_screen)
+            self.assertEqual(app.location.name, label.place.name)
+            self.assertEqual(app.location.latitude, label.place.latitude)
+            self.assertEqual(app.location.longitude, label.place.longitude)
+            self.assertEqual(app.action_refresh.await_count, refresh_count + 1)
+
+            await pilot.press('g')
+            for _ in range(2):
+                await pilot.pause()
+            self.assertIs(app.screen, alerts_screen)
+            self.assertEqual(alerts_screen.selected_country_code, selected_country)
+
     async def test_late_provider_progress_does_not_block_reopening_workspace(self) -> None:
         class LingeringProgressService:
             last_country_code: str | None = None
@@ -187,7 +220,7 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app.screen, alerts_screen)
             self.assertEqual(service.calls, 1)
 
-    async def test_alert_refresh_does_not_fetch_hourly_without_a_selected_place(self) -> None:
+    async def test_alert_refresh_does_not_fetch_place_weather_without_hover(self) -> None:
         app = self._app()
 
         async with app.run_test(size=(100, 30)) as pilot:
@@ -209,7 +242,7 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 app.country_alerts_service.get_alerts.await_args.kwargs['refresh']
             )
             self.assertEqual(app.load_location_map_temperatures.await_count, 0)
-            self.assertEqual(app.load_alert_place_hourly_forecast.await_count, 0)
+            self.assertEqual(app.load_alert_place_weather.await_count, 0)
             self.assertEqual(app.action_refresh.await_count, 1)
 
     async def test_open_workspace_tracks_unit_and_language_setting_changes(self) -> None:
@@ -222,8 +255,9 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
             screen = app.screen
             self.assertIsInstance(screen, AlertsCentreScreen)
-            assert screen.country_map.geometry is not None
-            screen._select_settlement(screen.country_map.geometry.places[0][0])
+            screen._place_weather_hover_delay_seconds = 0
+            label = next(iter(screen.country_map.query(CountryAlertCityLabel)))
+            screen._start_place_weather_preview(label)
             await pilot.pause()
 
             await app._on_settings_result(
@@ -246,13 +280,11 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 app.country_alerts_service.get_alerts.await_args.kwargs['warning_language'],
                 'en',
             )
+            screen._start_place_weather_preview(label)
+            await pilot.pause()
             self.assertEqual(
-                app.load_alert_place_hourly_forecast.await_args.args[2],
-                'fahrenheit',
-            )
-            self.assertEqual(
-                app.load_alert_place_hourly_forecast.await_args.args[3],
-                'mph',
+                app.load_alert_place_weather.await_args.args[2:],
+                ('fahrenheit', 'mph', 'inch'),
             )
 
     async def test_closed_workspace_applies_settings_when_reopened(self) -> None:
@@ -265,10 +297,11 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
             alerts_screen = app.screen
             assert isinstance(alerts_screen, AlertsCentreScreen)
-            assert alerts_screen.country_map.geometry is not None
-            alerts_screen._select_settlement(
-                alerts_screen.country_map.geometry.places[0][0]
+            alerts_screen._place_weather_hover_delay_seconds = 0
+            label = next(
+                iter(alerts_screen.country_map.query(CountryAlertCityLabel))
             )
+            alerts_screen._start_place_weather_preview(label)
             await pilot.pause()
             await pilot.press('w')
             await pilot.pause()
@@ -290,13 +323,14 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
             self.assertIs(app.screen, alerts_screen)
-            self.assertEqual(
-                app.load_alert_place_hourly_forecast.await_args.args[2],
-                'fahrenheit',
+            label = next(
+                iter(alerts_screen.country_map.query(CountryAlertCityLabel))
             )
+            alerts_screen._start_place_weather_preview(label)
+            await pilot.pause()
             self.assertEqual(
-                app.load_alert_place_hourly_forecast.await_args.args[3],
-                'mph',
+                app.load_alert_place_weather.await_args.args[2:],
+                ('fahrenheit', 'mph', 'inch'),
             )
             self.assertEqual(
                 app.country_alerts_service.get_alerts.await_args.kwargs['warning_language'],

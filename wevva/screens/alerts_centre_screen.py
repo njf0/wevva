@@ -6,7 +6,7 @@ import asyncio
 import threading
 from collections.abc import Awaitable, Callable
 from time import monotonic
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -34,8 +34,10 @@ from wevva.alerts_centre_layout import (
     AlertsCentrePresentation,
     alerts_centre_layout_for,
 )
+from wevva.conditions import get_condition
 from wevva.geography import PopulatedPlace
-from wevva.openmeteo import HourlyOpenMeteoForecast
+from wevva.location_metadata import LocationMetadata
+from wevva.messages import PlaceSelected
 from wevva.services.alerts import normalize_country_code
 from wevva.services.country_alerts import (
     CountryAlertsService,
@@ -45,10 +47,13 @@ from wevva.services.country_alerts import (
     list_supported_alert_countries,
 )
 from wevva.widgets.country_alerts_map import (
+    CountryAlertCityLabel,
+    CountryAlertSettlementPreviewCancelled,
+    CountryAlertSettlementPreviewRequested,
     CountryAlertSettlementSelected,
     CountryAlertsMap,
 )
-from wevva.widgets.alert_place_hourly_forecast import AlertPlaceHourlyForecast
+from wevva.utils import bearing_to_direction, rain_colour, temp_colour, wind_colour
 from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsPanel,
     alert_condition_name,
@@ -56,11 +61,12 @@ from wevva.widgets.weather_alerts import (
     alert_severity_color,
 )
 
-PlaceHourlyLoader = Callable[
-    [float, float, str, str],
-    Awaitable[HourlyOpenMeteoForecast],
+PlaceWeatherLoader = Callable[
+    [float, float, str, str, str],
+    Awaitable[dict[str, Any]],
 ]
-_PLACE_HOURLY_CACHE_TTL_SECONDS = 15 * 60
+_PLACE_WEATHER_CACHE_TTL_SECONDS = 15 * 60
+_PLACE_WEATHER_HOVER_DELAY_SECONDS = 0.15
 _ALERT_AREA_LABEL_MAX_LENGTH = 24
 
 
@@ -452,8 +458,9 @@ class AlertsCentreScreen(Screen[None]):
         countries: list[SupportedAlertCountry] | None = None,
         initial_country_code: str | None = None,
         warning_language: str = 'auto',
-        place_hourly_loader: PlaceHourlyLoader | None = None,
-        place_hourly_cache_ttl_seconds: float = _PLACE_HOURLY_CACHE_TTL_SECONDS,
+        place_weather_loader: PlaceWeatherLoader | None = None,
+        place_weather_cache_ttl_seconds: float = _PLACE_WEATHER_CACHE_TTL_SECONDS,
+        place_weather_hover_delay_seconds: float = _PLACE_WEATHER_HOVER_DELAY_SECONDS,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         super().__init__()
@@ -461,21 +468,20 @@ class AlertsCentreScreen(Screen[None]):
         self.countries = list(list_supported_alert_countries() if countries is None else countries)
         self.initial_country_code = normalize_country_code(initial_country_code)
         self.warning_language = warning_language
-        self._place_hourly_loader = place_hourly_loader
-        self._place_hourly_cache_ttl_seconds = max(
+        self._place_weather_loader = place_weather_loader
+        self._place_weather_cache_ttl_seconds = max(
             0.0,
-            float(place_hourly_cache_ttl_seconds),
+            float(place_weather_cache_ttl_seconds),
+        )
+        self._place_weather_hover_delay_seconds = max(
+            0.0,
+            float(place_weather_hover_delay_seconds),
         )
         self._clock = clock
-        self._place_hourly_cache: dict[
-            tuple[float, float, str, str],
-            tuple[float, HourlyOpenMeteoForecast],
+        self._place_weather_cache: dict[
+            tuple[float, float, str, str, str],
+            tuple[float, dict[str, Any]],
         ] = {}
-        self.selected_place: PopulatedPlace | None = None
-        self.selected_place_forecast: HourlyOpenMeteoForecast | None = None
-        self.place_forecast_state = 'idle'
-        self.place_forecast_error: Exception | None = None
-        self._place_forecast_retained_height = 0
         self.alert_filter_value = ''
         self.alert_severity_filter = ''
         self.alert_sort_value = 'severity'
@@ -489,8 +495,9 @@ class AlertsCentreScreen(Screen[None]):
         self._ui_thread_id: int | None = None
         self._progress_items_total: int | None = None
         self._load_task: asyncio.Task[None] | None = None
-        self._place_hourly_generation = 0
-        self._place_hourly_task: asyncio.Task[None] | None = None
+        self._place_weather_generation = 0
+        self._place_weather_task: asyncio.Task[None] | None = None
+        self._place_weather_label: CountryAlertCityLabel | None = None
         self._layout_budget: AlertsCentreLayoutBudget | None = None
         self._presentation: AlertsCentrePresentation | None = None
         self._workspace_tab = 'map'
@@ -499,6 +506,7 @@ class AlertsCentreScreen(Screen[None]):
         self._pending_appearance_changed = False
         self._pending_language_changed = False
         self._filter_dialog_open = False
+        self._preserve_country_on_resume = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -546,9 +554,6 @@ class AlertsCentreScreen(Screen[None]):
                     with Container(id='alerts-centre-right-content'):
                         with Container(id='alerts-centre-map-pane'):
                             yield CountryAlertsMap(id='alerts-centre-map')
-                            yield AlertPlaceHourlyForecast(
-                                id='alerts-centre-place-forecast'
-                            )
                         with Container(id='alerts-centre-document-pane') as document_pane:
                             document_pane.border_title = 'Alert Detail'
                             yield Static(
@@ -583,13 +588,6 @@ class AlertsCentreScreen(Screen[None]):
     def country_map(self) -> CountryAlertsMap:
         return self.query_one('#alerts-centre-map', CountryAlertsMap)
 
-    @property
-    def place_forecast(self) -> AlertPlaceHourlyForecast:
-        return self.query_one(
-            '#alerts-centre-place-forecast',
-            AlertPlaceHourlyForecast,
-        )
-
     async def on_mount(self) -> None:
         self._ui_thread_id = threading.get_ident()
         self.title = 'Alerts Centre'
@@ -608,11 +606,18 @@ class AlertsCentreScreen(Screen[None]):
             # Returning from our child modal must retain the country being
             # filtered rather than reapplying the weather location's country.
             self._filter_dialog_open = False
+        elif self._preserve_country_on_resume:
+            self._preserve_country_on_resume = False
         else:
             country_code = self._initial_country()
             if country_code is not None and country_code != self.selected_country_code:
                 self._choose_country(country_code)
         self._apply_pending_preferences()
+
+    def preserve_country_on_next_resume(self, preserve: bool) -> None:
+        """Retain alert context after map navigation, unless superseded."""
+
+        self._preserve_country_on_resume = preserve
 
     def on_unmount(self) -> None:
         # ``asyncio.to_thread`` cancellation cannot stop the provider thread.
@@ -622,7 +627,7 @@ class AlertsCentreScreen(Screen[None]):
         if self._load_task is not None:
             self._load_task.cancel()
             self._load_task = None
-        self._cancel_place_hourly_request()
+        self._cancel_place_weather_preview()
 
     def on_resize(self, event: Resize) -> None:
         self._apply_responsive_layout(event.size.width, event.size.height)
@@ -646,16 +651,7 @@ class AlertsCentreScreen(Screen[None]):
     def _apply_responsive_layout(self, width: int, height: int) -> None:
         self._layout_width = width
         self._layout_height = height
-        budget = alerts_centre_layout_for(
-            width,
-            height,
-            place_forecast_state=self.place_forecast_state,
-            place_forecast_has_data=bool(
-                self.selected_place_forecast is not None
-                and self.selected_place_forecast.forecast_timeseries
-            ),
-            place_forecast_retained_height=self._place_forecast_retained_height,
-        )
+        budget = alerts_centre_layout_for(width, height)
         if budget == self._layout_budget:
             return
         self._layout_budget = budget
@@ -678,17 +674,6 @@ class AlertsCentreScreen(Screen[None]):
         }
         self.country_select.compact = compact_controls
         self.country_map.set_max_city_labels(budget.settlement_label_limit)
-        self.place_forecast.set_layout(
-            budget.place_forecast_height,
-            budget.place_forecast_rows,
-        )
-        if (
-            self.place_forecast_state == 'ready'
-            and self.selected_place_forecast is not None
-            and self.selected_place_forecast.forecast_timeseries
-            and budget.place_forecast_height > 0
-        ):
-            self._place_forecast_retained_height = budget.place_forecast_height
         self._presentation = budget.presentation
         self._update_responsive_visibility()
 
@@ -789,10 +774,43 @@ class AlertsCentreScreen(Screen[None]):
         self,
         event: CountryAlertSettlementSelected,
     ) -> None:
-        """Load a local forecast without changing the app's weather location."""
+        """Open the application's complete weather view for a map settlement."""
 
         event.stop()
-        self._select_settlement(event.place)
+        self._cancel_place_weather_preview()
+        country_code = event.place.country_code or self.selected_country_code or ''
+        self.post_message(
+            PlaceSelected(
+                location=LocationMetadata(
+                    latitude=event.place.latitude,
+                    longitude=event.place.longitude,
+                    name=event.place.name,
+                    admin=event.place.region_name,
+                    country=self._country_name(country_code) if country_code else '',
+                    country_code=country_code,
+                ),
+                preserve_alerts_context=True,
+            )
+        )
+
+    def on_country_alert_settlement_preview_requested(
+        self,
+        event: CountryAlertSettlementPreviewRequested,
+    ) -> None:
+        """Start or reuse the hovered settlement's compact weather preview."""
+
+        event.stop()
+        self._start_place_weather_preview(event.label)
+
+    def on_country_alert_settlement_preview_cancelled(
+        self,
+        event: CountryAlertSettlementPreviewCancelled,
+    ) -> None:
+        """Cancel a request which is no longer associated with the pointer."""
+
+        event.stop()
+        if event.label is self._place_weather_label:
+            self._cancel_place_weather_preview()
 
     def _choose_country(self, country_code: str) -> None:
         country = next(
@@ -807,7 +825,7 @@ class AlertsCentreScreen(Screen[None]):
         if self.country_select.value != country.code:
             self.country_select.value = country.code
         if previous_country != country.code:
-            self._clear_selected_settlement()
+            self._cancel_place_weather_preview()
             self.alert_filter_value = country_alert_default_filter(
                 country.code,
                 country.name,
@@ -913,8 +931,6 @@ class AlertsCentreScreen(Screen[None]):
                 country_alert_identity(selected) if selected is not None else None
             ),
         )
-        if self.selected_place is not None and not self._selected_place_is_available():
-            self._clear_selected_settlement()
         self.alert_filter_button.disabled = False
         self._apply_alert_filter(
             self.alert_filter_value,
@@ -1070,7 +1086,7 @@ class AlertsCentreScreen(Screen[None]):
     def _select_alert(self, alert: Alert) -> None:
         next_key = country_alert_identity(alert)
         if next_key != self.selected_alert_key:
-            self._clear_selected_settlement()
+            self._cancel_place_weather_preview()
         self.selected_alert_key = next_key
         self.country_map.update_selected_alert(self.selected_alert_key)
         self.query_one('#alerts-centre-document-empty', Static).display = False
@@ -1086,7 +1102,7 @@ class AlertsCentreScreen(Screen[None]):
     def _clear_document(self) -> None:
         if not self.is_mounted:
             return
-        self._clear_selected_settlement()
+        self._cancel_place_weather_preview()
         self.details.display = False
         self.country_map.update_selected_alert(None)
         empty = self.query_one('#alerts-centre-document-empty', Static)
@@ -1122,14 +1138,7 @@ class AlertsCentreScreen(Screen[None]):
         )
 
     def action_refresh_alerts(self) -> None:
-        selected_place = (
-            self.selected_place
-            if self.selected_place is not None and self._selected_place_is_available()
-            else None
-        )
         self._start_country_load(refresh=True, preserve_existing=True)
-        if selected_place is not None:
-            self._start_place_hourly_load(selected_place, refresh=True)
 
     def apply_preferences(
         self,
@@ -1184,167 +1193,237 @@ class AlertsCentreScreen(Screen[None]):
             if selected is not None:
                 self._select_alert(selected)
             self.country_map.refresh_theme()
-            self.place_forecast.refresh_theme()
+            self.country_map.reset_city_tooltips()
+            self._cancel_place_weather_preview()
 
         if units_changed:
-            selected_place = self.selected_place
-            self._cancel_place_hourly_request()
-            self.selected_place_forecast = None
-            if selected_place is not None:
-                self._start_place_hourly_load(selected_place, refresh=False)
+            self.country_map.reset_city_tooltips()
+            self._cancel_place_weather_preview()
 
         if language_changed:
             self._start_country_load(refresh=False, preserve_existing=True)
 
     def action_back(self) -> None:
+        self._cancel_place_weather_preview()
         self.app.pop_screen()
 
     def action_block_app_binding(self) -> None:
         """Prevent hidden weather-screen location actions in this workspace."""
 
-    def _select_settlement(self, place: PopulatedPlace) -> None:
-        self.selected_place = place
-        self._start_place_hourly_load(place, refresh=False)
-
-    def _start_place_hourly_load(
+    def _start_place_weather_preview(
         self,
-        place: PopulatedPlace,
-        *,
-        refresh: bool,
+        label: CountryAlertCityLabel,
     ) -> None:
+        place = label.place
         temperature_unit = getattr(self.app, 'temperature_unit', 'celsius')
         wind_speed_unit = getattr(self.app, 'wind_speed_unit', 'kmh')
-        cache_key = _place_hourly_cache_key(
+        precipitation_unit = getattr(self.app, 'precipitation_unit', 'mm')
+        cache_key = _place_weather_cache_key(
             place,
             temperature_unit=temperature_unit,
             wind_speed_unit=wind_speed_unit,
+            precipitation_unit=precipitation_unit,
         )
-        cached = self._place_hourly_cache.get(cache_key)
+        cached = self._place_weather_cache.get(cache_key)
         if (
-            not refresh
-            and cached is not None
-            and self._clock() - cached[0] < self._place_hourly_cache_ttl_seconds
+            cached is not None
+            and self._clock() - cached[0] < self._place_weather_cache_ttl_seconds
         ):
-            self._cancel_place_hourly_request()
-            self.selected_place_forecast = cached[1]
-            self.place_forecast_state = 'ready'
-            self.place_forecast_error = None
-            self._update_place_forecast_status()
+            self._cancel_place_weather_preview()
+            label.tooltip = self._place_weather_tooltip(place, cached[1])
             return
 
-        self._cancel_place_hourly_request()
-        self._place_hourly_generation += 1
-        generation = self._place_hourly_generation
-        self.selected_place_forecast = None
-        self.place_forecast_error = None
-        if self._place_hourly_loader is None:
-            self.place_forecast_state = 'failed'
-            self.place_forecast_error = RuntimeError('Hourly forecast loader unavailable')
-            self._update_place_forecast_status()
+        if (
+            label is self._place_weather_label
+            and self._place_weather_task is not None
+            and not self._place_weather_task.done()
+        ):
             return
-        self.place_forecast_state = 'loading'
-        self._update_place_forecast_status()
-        self._place_hourly_task = asyncio.create_task(
-            self._load_place_hourly_forecast(
+        self._cancel_place_weather_preview()
+        label.reset_tooltip()
+        if self._place_weather_loader is None:
+            label.tooltip = self._place_weather_unavailable_tooltip(place)
+            return
+        self._place_weather_generation += 1
+        generation = self._place_weather_generation
+        self._place_weather_label = label
+        self._place_weather_task = asyncio.create_task(
+            self._load_place_weather_preview(
                 generation,
-                place,
+                label,
                 cache_key,
                 temperature_unit,
                 wind_speed_unit,
+                precipitation_unit,
             )
         )
 
-    async def _load_place_hourly_forecast(
+    async def _load_place_weather_preview(
         self,
         generation: int,
-        place: PopulatedPlace,
-        cache_key: tuple[float, float, str, str],
+        label: CountryAlertCityLabel,
+        cache_key: tuple[float, float, str, str, str],
         temperature_unit: str,
         wind_speed_unit: str,
+        precipitation_unit: str,
     ) -> None:
-        assert self._place_hourly_loader is not None
+        assert self._place_weather_loader is not None
         task = asyncio.current_task()
         try:
-            forecast = await self._place_hourly_loader(
-                place.latitude,
-                place.longitude,
+            if self._place_weather_hover_delay_seconds:
+                await asyncio.sleep(self._place_weather_hover_delay_seconds)
+            response = await self._place_weather_loader(
+                label.place.latitude,
+                label.place.longitude,
                 temperature_unit,
                 wind_speed_unit,
+                precipitation_unit,
             )
         except asyncio.CancelledError:
             raise
-        except Exception as error:
-            if self._place_hourly_request_is_current(generation, place, cache_key):
-                self.selected_place_forecast = None
-                self.place_forecast_state = 'failed'
-                self.place_forecast_error = error
-                self._update_place_forecast_status()
+        except Exception:
+            if self._place_weather_request_is_current(generation, label, cache_key):
+                label.tooltip = self._place_weather_unavailable_tooltip(label.place)
             return
         finally:
-            if self._place_hourly_task is task:
-                self._place_hourly_task = None
+            if self._place_weather_task is task:
+                self._place_weather_task = None
 
-        if not self._place_hourly_request_is_current(generation, place, cache_key):
+        if not self._place_weather_request_is_current(generation, label, cache_key):
             return
-        self._place_hourly_cache[cache_key] = (self._clock(), forecast)
-        self.selected_place_forecast = forecast
-        self.place_forecast_state = 'ready'
-        self.place_forecast_error = None
-        self._update_place_forecast_status()
+        self._place_weather_cache[cache_key] = (self._clock(), response)
+        label.tooltip = self._place_weather_tooltip(label.place, response)
 
-    def _place_hourly_request_is_current(
+    def _place_weather_request_is_current(
         self,
         generation: int,
-        place: PopulatedPlace,
-        cache_key: tuple[float, float, str, str],
+        label: CountryAlertCityLabel,
+        cache_key: tuple[float, float, str, str, str],
     ) -> bool:
-        if not self.is_attached or generation != self._place_hourly_generation:
+        if not self.is_attached or generation != self._place_weather_generation:
             return False
-        if self.selected_place is None or _place_identity(self.selected_place) != _place_identity(place):
+        if label is not self._place_weather_label or not label.is_attached:
             return False
-        return cache_key == _place_hourly_cache_key(
-            self.selected_place,
+        return cache_key == _place_weather_cache_key(
+            label.place,
             temperature_unit=getattr(self.app, 'temperature_unit', 'celsius'),
             wind_speed_unit=getattr(self.app, 'wind_speed_unit', 'kmh'),
+            precipitation_unit=getattr(self.app, 'precipitation_unit', 'mm'),
         )
 
-    def _cancel_place_hourly_request(self) -> None:
-        if self._place_hourly_task is not None:
-            self._place_hourly_task.cancel()
-            self._place_hourly_task = None
+    def _cancel_place_weather_preview(self) -> None:
+        self._place_weather_generation += 1
+        if self._place_weather_task is not None:
+            self._place_weather_task.cancel()
+            self._place_weather_task = None
+        self._place_weather_label = None
 
-    def _clear_selected_settlement(self) -> None:
-        self._place_hourly_generation += 1
-        self._cancel_place_hourly_request()
-        self.selected_place = None
-        self.selected_place_forecast = None
-        self.place_forecast_state = 'idle'
-        self.place_forecast_error = None
-        self._place_forecast_retained_height = 0
-        self._update_place_forecast_status()
+    def _place_weather_tooltip(
+        self,
+        place: PopulatedPlace,
+        response: dict[str, Any],
+    ) -> Text:
+        """Build a compact, non-interactive current-weather preview."""
 
-    def _selected_place_is_available(self) -> bool:
-        if self.selected_place is None:
-            return False
-        key = (self.selected_place.latitude, self.selected_place.longitude)
-        geometry = self.country_map.geometry
-        return geometry is not None and any(
-            (place.latitude, place.longitude) == key
-            for place, _point in geometry.places
-        )
+        current = response.get('current')
+        units = response.get('current_units')
+        if not isinstance(current, dict):
+            return self._place_weather_unavailable_tooltip(place)
+        if not isinstance(units, dict):
+            units = {}
 
-    def _update_place_forecast_status(self) -> None:
-        if not self.is_mounted:
-            return
-        self.place_forecast.set_state(
-            place_name=self.selected_place.name if self.selected_place is not None else None,
-            state=self.place_forecast_state,
-            forecast=self.selected_place_forecast,
+        theme = self.app.theme_variables
+        tooltip = _place_tooltip_heading(place, theme.get('primary'))
+        weather_line = Text()
+
+        code = current.get('weather_code')
+        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+        if condition is not None:
+            if getattr(self.app, 'emoji_enabled', True):
+                emoji = condition.day_emoji if current.get('is_day') != 0 else condition.night_emoji
+                weather_line.append(f'{emoji} ')
+            weather_line.append(
+                condition.name,
+                style=theme.get(condition.color_var or 'text-primary'),
+            )
+
+        temperature = _number(current.get('temperature_2m'))
+        if temperature is not None:
+            if weather_line:
+                weather_line.append('  ')
+            colour = temp_colour(
+                temperature,
+                scale='theme_temperature',
+                hex=True,
+                unit=getattr(self.app, 'temperature_unit', 'celsius'),
+                theme_colours=theme,
+            )
+            weather_line.append(f'{round(temperature):g}', style=f'bold {colour}')
+            weather_line.append(
+                str(units.get('temperature_2m') or '°C'),
+                style=str(colour),
+            )
+
+        details = Text()
+        probability = _number(current.get('precipitation_probability'))
+        amount = _number(current.get('precipitation'))
+        if probability is not None or amount is not None:
+            details.append('Rain ', style='dim')
+            if probability is not None:
+                colour = rain_colour(
+                    probability,
+                    hex=True,
+                    min_colour=theme.get('foreground', '#ffffff'),
+                    max_colour=theme.get('primary', '#0178d4'),
+                )
+                details.append(f'{probability:g}%', style=f'bold {colour}')
+            if amount is not None:
+                if probability is not None:
+                    details.append(' · ')
+                details.append(
+                    f'{amount:g} {units.get("precipitation") or "mm"}',
+                    style=theme.get('text-primary'),
+                )
+
+        speed = _number(current.get('wind_speed_10m'))
+        direction = _number(current.get('wind_direction_10m'))
+        if speed is not None:
+            if details:
+                details.append('  ')
+            details.append('Wind ', style='dim')
+            colour = wind_colour(
+                speed,
+                hex=True,
+                min_colour=theme.get('foreground', '#ffffff'),
+                max_colour=theme.get('secondary', '#00a0a0'),
+            )
+            details.append(f'{speed:g}', style=f'bold {colour}')
+            details.append(
+                f' {units.get("wind_speed_10m") or "km/h"}',
+                style=str(colour),
+            )
+            if direction is not None:
+                details.append(f' {bearing_to_direction(direction)}')
+
+        if weather_line:
+            tooltip.append('\n')
+            tooltip.append_text(weather_line)
+        if details:
+            tooltip.append('\n')
+            tooltip.append_text(details)
+        if not weather_line and not details:
+            tooltip.append('\nNo current observations', style='dim italic')
+        tooltip.append('\nClick for full forecast', style='dim')
+        return tooltip
+
+    def _place_weather_unavailable_tooltip(self, place: PopulatedPlace) -> Text:
+        tooltip = _place_tooltip_heading(
+            place,
+            self.app.theme_variables.get('primary'),
         )
-        self._apply_responsive_layout(
-            getattr(self, '_layout_width', self.size.width),
-            getattr(self, '_layout_height', self.size.height),
-        )
+        tooltip.append('\nCurrent weather unavailable', style='dim italic')
+        tooltip.append('\nClick for full forecast', style='dim')
+        return tooltip
 
 
 def _alert_area_label(alert: Alert) -> str:
@@ -1381,18 +1460,28 @@ def _ellipsize_area_label(label: str) -> str:
     return f'{shortened}…'
 
 
-def _place_identity(place: PopulatedPlace) -> tuple[str, float, float]:
-    """Return a stable in-session identity for one map settlement."""
+def _place_tooltip_heading(place: PopulatedPlace, colour: str | None) -> Text:
+    heading = Text()
+    heading.append(place.name, style=f'bold {colour}' if colour else 'bold')
+    region = ' '.join(place.region_name.split())
+    if region and region.casefold() != place.name.casefold():
+        heading.append(f', {region}', style='dim')
+    return heading
 
-    return place.name.casefold(), place.latitude, place.longitude
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
-def _place_hourly_cache_key(
+def _place_weather_cache_key(
     place: PopulatedPlace,
     *,
     temperature_unit: str,
     wind_speed_unit: str,
-) -> tuple[float, float, str, str]:
+    precipitation_unit: str,
+) -> tuple[float, float, str, str, str]:
     """Bound cache cardinality while retaining neighbourhood-level precision."""
 
     return (
@@ -1400,6 +1489,7 @@ def _place_hourly_cache_key(
         round(place.longitude, 4),
         temperature_unit,
         wind_speed_unit,
+        precipitation_unit,
     )
 
 

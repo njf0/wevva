@@ -53,13 +53,13 @@ uv run python -m unittest tests.test_warning_cache tests.test_warning_textual_sm
 ```
 
 The country Alerts Centre has deterministic service, screen, interactive-map,
-selected-settlement hourly-lifecycle, and responsive-budget coverage, including
-cache expiry, stale hourly results, and country-switch races:
+settlement-tooltip lifecycle, full-weather navigation, and responsive-budget
+coverage, including cache expiry, stale preview results, and country-switch
+races:
 
 ```bash
 uv run python -m unittest tests.test_alerts_centre_service tests.test_alerts_centre_screen
 uv run python -m unittest tests.test_alerts_centre_map tests.test_alerts_centre_layout
-uv run python -m unittest tests.test_alert_place_hourly_forecast
 uv run python -m unittest tests.test_alerts_centre_integration
 ```
 

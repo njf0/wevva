@@ -8,8 +8,8 @@ implementation not started
 ## Depends on
 
 - Task 0020 supplies the Alerts Centre, selected-alert automatic viewport,
-  warning layers, settlements, administrative labels, and hourly-forecast
-  interaction.
+  warning layers, settlements, administrative labels, current-weather
+  tooltips, and full Weather-screen activation.
 - Task 0021 owns all contextual map-detail policy: label data sources,
   categories, ranking, candidate/display density, and any response to geographic
   scale. This task supplies an effective viewport and zoom ratio to that policy
@@ -103,7 +103,7 @@ map or reusable GIS framework.
   precomputed geographic bounds, cheap visibility rejection, merged raster
   layers, duplicate-polygon elimination, and one scheduled redraw for a burst
   of input.
-- Keep settlement activation and the hourly forecast behavior from Task 0020.
+- Keep settlement hover previews and activation behavior from Task 0020.
 
 ## Non-goals
 
@@ -229,7 +229,7 @@ enough horizontal space; never overlap focusable controls.
 ### Slice D — integration and performance hardening
 
 - Exercise rapid control input, warning selection during a pending reflow,
-  country changes, refreshes, theme changes, hourly-forecast expansion, pane
+  country changes, refreshes, theme changes, settlement hover/activation, pane
   tabs, and terminal resize.
 - Compare representative selection and navigation profiles with the Slice A
   baseline and record structural improvements plus indicative local timings.
@@ -258,7 +258,7 @@ enough horizontal space; never overlap focusable controls.
 - Settlement and administrative candidates follow the pre-task label policy
   for the effective viewport; Task 0024 does not alter their ranking or
   density. Settlement markers remain on their projected cells and keep their
-  hourly forecast interaction.
+  tooltip and full-forecast activation interaction.
 - The graphical scale uses a rounded distance, responds to pan/zoom/resize, and
   stays within the documented calculation tolerance.
 - No control action performs network access, reloads packaged geography, or
@@ -303,8 +303,8 @@ speed.
 Manually inspect at least one large US warning collection and representative
 small-country, island, cross-border, and marine alerts. Check mouse and
 keyboard activation, held controls, focus return to the alert list, existing
-label stability while moving, scale plausibility, reset behavior, hourly forecast
-selection, and compact layouts. Record terminal dimensions and indicative
+label stability while moving, scale plausibility, reset behavior, settlement
+preview/activation, and compact layouts. Record terminal dimensions and indicative
 timings without claiming universal live-provider performance from one run.
 
 ## Decisions and notes

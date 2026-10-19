@@ -150,7 +150,7 @@ class ScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app._alerts_centre_screen, alerts)
             self.assertIs(weather._time_refresh_timer, timer)
             self.assertIsNone(alerts._load_task)
-            self.assertIsNone(alerts._place_hourly_task)
+            self.assertIsNone(alerts._place_weather_task)
             self.assertTrue(all(reference() is None for reference in transient_refs))
 
     async def test_pending_transient_work_and_hidden_alerts_keep_their_owners(self) -> None:

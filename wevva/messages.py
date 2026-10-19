@@ -11,10 +11,16 @@ from wevva.location_metadata import LocationMetadata
 class PlaceSelected(Message):
     """Sent when the user picks a place in search."""
 
-    def __init__(self, *, location: LocationMetadata):
+    def __init__(
+        self,
+        *,
+        location: LocationMetadata,
+        preserve_alerts_context: bool = False,
+    ):
         """Create the message with the chosen location."""
         super().__init__()
         self.location = location
+        self.preserve_alerts_context = preserve_alerts_context
 
 
 class SearchQueryReady(Message):

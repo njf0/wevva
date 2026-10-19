@@ -1555,3 +1555,12 @@ mouse check was performed.
 
 Task 0025 is complete. Further work should begin as a new, explicitly scoped
 task rather than extending this audit.
+
+### Later Task 0020 settlement UX revision (19 October 2026)
+
+Task 0020 later replaced the Alerts Centre's selected-settlement hourly strip
+with a lazy current-weather tooltip and full Weather-screen navigation. The
+historical Slice D/G measurements above remain accurate for the code measured
+at the time. The obsolete `AlertPlaceHourlyForecast` and its dedicated hourly
+request/layout paths were subsequently removed, and `tools/benchmark_screens.py`
+now exercises settlement preview loading and activation instead.

@@ -13,7 +13,6 @@ from wevva.alerts_centre_layout import (
     AlertsCentrePresentation,
     alerts_centre_layout_for,
 )
-from wevva.layout import HourlyRow
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry
 
@@ -51,93 +50,6 @@ class AlertsCentreLayoutBudgetTests(unittest.TestCase):
                     alerts_centre_layout_for(*size).navigation_width,
                     navigation_width,
                 )
-
-    def test_forecast_peer_obeys_quarter_height_and_complete_row_priority(self) -> None:
-        expected = {
-            (180, 50): (
-                9,
-                (
-                    HourlyRow.TEMPERATURE_BAR,
-                    HourlyRow.TEMPERATURE,
-                    HourlyRow.RAIN_BAR,
-                    HourlyRow.RAIN,
-                    HourlyRow.WIND_BAR,
-                    HourlyRow.WIND,
-                    HourlyRow.TIME,
-                ),
-            ),
-            (140, 40): (
-                9,
-                (
-                    HourlyRow.TEMPERATURE_BAR,
-                    HourlyRow.TEMPERATURE,
-                    HourlyRow.RAIN_BAR,
-                    HourlyRow.RAIN,
-                    HourlyRow.WIND_BAR,
-                    HourlyRow.WIND,
-                    HourlyRow.TIME,
-                ),
-            ),
-            (100, 30): (0, ()),
-            (80, 24): (
-                4,
-                (HourlyRow.TEMPERATURE, HourlyRow.TIME),
-            ),
-        }
-        for size, forecast_budget in expected.items():
-            with self.subTest(size=size):
-                budget = alerts_centre_layout_for(
-                    *size,
-                    place_forecast_state='ready',
-                    place_forecast_has_data=True,
-                )
-                self.assertEqual(
-                    (budget.place_forecast_height, budget.place_forecast_rows),
-                    forecast_budget,
-                )
-                self.assertLessEqual(
-                    budget.place_forecast_height,
-                    budget.map_workspace_height // 4,
-                )
-
-    def test_loading_and_empty_states_require_one_complete_content_row(self) -> None:
-        loading = alerts_centre_layout_for(
-            80,
-            24,
-            place_forecast_state='loading',
-        )
-        empty = alerts_centre_layout_for(
-            80,
-            24,
-            place_forecast_state='ready',
-            place_forecast_has_data=False,
-        )
-        hidden = alerts_centre_layout_for(
-            100,
-            30,
-            place_forecast_state='loading',
-        )
-        self.assertEqual(loading.place_forecast_height, 3)
-        self.assertEqual(empty.place_forecast_height, 3)
-        self.assertEqual(hidden.place_forecast_height, 3)
-
-    def test_loading_preserves_an_established_forecast_height_within_the_cap(self) -> None:
-        preserved = alerts_centre_layout_for(
-            180,
-            50,
-            place_forecast_state='loading',
-            place_forecast_retained_height=9,
-        )
-        compact = alerts_centre_layout_for(
-            80,
-            24,
-            place_forecast_state='loading',
-            place_forecast_retained_height=9,
-        )
-        self.assertEqual(preserved.place_forecast_height, 9)
-        self.assertEqual(compact.place_forecast_height, 4)
-        self.assertEqual(preserved.place_forecast_rows, ())
-
 
 class _EmptyService:
     last_country_code: str | None = None

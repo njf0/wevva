@@ -26,7 +26,7 @@ from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSys
 from tests.test_alerts_centre_map import EAST_GERMANY, WEST_GERMANY, _alert
 from tests.test_tropical_systems_screen import _observation
 from tests.test_world_locations_map import LONDON, NEW_YORK, TOKYO
-from tests.weather_fixtures import hourly_forecast, weather_update
+from tests.weather_fixtures import weather_update
 from wevva import geography
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
@@ -43,6 +43,7 @@ from wevva.screens.search_screen import SearchScreen
 from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
+from wevva.widgets.country_alerts_map import CountryAlertCityLabel
 from wevva.widgets import country_alerts_map, tropical_track, world_locations_map
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 from wevva.widgets.world_locations_map import WorldLocationLabel
@@ -395,13 +396,13 @@ async def _search_scenarios(recorder: _Recorder) -> None:
 async def _workspace_scenarios(recorder: _Recorder) -> None:
     service = _CountryService()
     systems = _tropical_systems()
-    hourly_started = asyncio.Event()
-    hourly_release = asyncio.Event()
+    preview_started = asyncio.Event()
+    preview_release = asyncio.Event()
 
-    async def load_place_hourly(*_args: Any):
-        hourly_started.set()
-        await hourly_release.wait()
-        return hourly_forecast()
+    async def load_place_weather(latitude: float, longitude: float, *_args: Any):
+        preview_started.set()
+        await preview_release.wait()
+        return _tropical_centre_weather(latitude, longitude)
 
     async def construct() -> Wevva:
         return Wevva(
@@ -413,7 +414,7 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
     app = await recorder.measure('startup.construct_with_location', construct)
     app.action_refresh = AsyncMock()
     app.country_alerts_service = service  # type: ignore[assignment]
-    app.load_alert_place_hourly_forecast = load_place_hourly  # type: ignore[method-assign]
+    app.load_alert_place_weather = load_place_weather  # type: ignore[method-assign]
     app.weather_screen._city_temperature_loader = AsyncMock(return_value={})
     app._tropical_system_cache = (time.monotonic(), tuple(systems))
     app.load_tropical_products = AsyncMock(side_effect=_tropical_products)
@@ -565,28 +566,33 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         geometry = alerts.country_map.geometry
         assert geometry is not None and geometry.places
         place = geometry.places[0][0]
+        place_label = next(
+            label
+            for label in alerts.country_map.query(CountryAlertCityLabel)
+            if label.place == place
+        )
 
-        async def settlement_selection() -> None:
-            alerts._select_settlement(place)
-            await hourly_started.wait()
+        async def settlement_preview() -> None:
+            alerts._start_place_weather_preview(place_label)
+            await preview_started.wait()
             await _settle(pilot, 2)
 
         await recorder.measure(
-            'alerts.settlement_selection_loading',
-            settlement_selection,
+            'alerts.settlement_preview_loading',
+            settlement_preview,
         )
 
-        async def hourly_completion() -> None:
-            hourly_release.set()
+        async def preview_completion() -> None:
+            preview_release.set()
             await _settle(pilot, 4)
 
-        await recorder.measure('alerts.hourly_completion_72h', hourly_completion)
+        await recorder.measure('alerts.settlement_preview_completion', preview_completion)
 
-        async def hourly_cache_hit() -> None:
-            alerts._select_settlement(place)
+        async def preview_cache_hit() -> None:
+            alerts._start_place_weather_preview(place_label)
             await _settle(pilot, 2)
 
-        await recorder.measure('alerts.hourly_cache_hit_72h', hourly_cache_hit)
+        await recorder.measure('alerts.settlement_preview_cache_hit', preview_cache_hit)
         await recorder.measure('alerts.resize_burst', lambda: _resize_burst(pilot))
 
         async def exit_alerts() -> None:
@@ -988,7 +994,7 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         assert app._alerts_centre_screen is alerts_screen
         assert service.calls == alerts_calls
         assert alerts_screen._load_task is None
-        assert alerts_screen._place_hourly_task is None
+        assert alerts_screen._place_weather_task is None
         assert app._tropical_system_fetch_task is None
         assert not app._tropical_product_tasks
         assert tropical_calls == 1

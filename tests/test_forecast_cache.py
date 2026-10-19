@@ -10,7 +10,6 @@ from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import WeatherFetchFailed, WeatherUpdated
 from wevva.openmeteo import OpenMeteoForecast
-from wevva.services.weather import fetch_alert_place_hourly_forecast
 
 
 class _WeatherScreen:
@@ -176,6 +175,29 @@ class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
             precipitation_unit='inch',
         )
 
+    async def test_application_forwards_alert_place_preview_units(self) -> None:
+        app = Wevva()
+        weather = {'current': {'temperature_2m': 72}}
+        loader = AsyncMock(return_value=weather)
+
+        with patch('wevva.app.fetch_current_weather', new=loader):
+            result = await app.load_alert_place_weather(
+                34.42,
+                -106.83,
+                'fahrenheit',
+                'mph',
+                'inch',
+            )
+
+        self.assertIs(result, weather)
+        loader.assert_awaited_once_with(
+            lat=34.42,
+            lon=-106.83,
+            temperature_unit='fahrenheit',
+            wind_speed_unit='mph',
+            precipitation_unit='inch',
+        )
+
 
 class CityTemperatureRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_request_batches_coordinates_and_asks_only_for_temperature(self) -> None:
@@ -228,99 +250,6 @@ class CityTemperatureRequestTests(unittest.IsolatedAsyncioTestCase):
         loader.assert_awaited_once_with(
             coordinates,
             temperature_unit='fahrenheit',
-        )
-
-
-class AlertPlaceHourlyRequestTests(unittest.IsolatedAsyncioTestCase):
-    async def test_request_asks_only_for_alert_strip_hourly_fields(self) -> None:
-        response = Mock()
-        response.json.return_value = {'hourly': {'time': []}}
-        client = AsyncMock()
-        client.__aenter__.return_value = client
-        client.__aexit__.return_value = None
-        client.get.return_value = response
-
-        with patch('wevva.openmeteo.httpx.AsyncClient', return_value=client):
-            result = await OpenMeteoForecast.fetch_hourly_summary(
-                34.42,
-                -106.83,
-                temperature_unit='fahrenheit',
-                wind_speed_unit='mph',
-            )
-
-        self.assertEqual(result, {'hourly': {'time': []}})
-        params = client.get.await_args.kwargs['params']
-        self.assertEqual(
-            params['hourly'],
-            [
-                'temperature_2m',
-                'precipitation_probability',
-                'wind_speed_10m',
-                'wind_direction_10m',
-            ],
-        )
-        self.assertEqual(params['timezone'], 'auto')
-        self.assertNotIn('current', params)
-        self.assertNotIn('daily', params)
-        self.assertEqual(params['temperature_unit'], 'fahrenheit')
-        self.assertEqual(params['wind_speed_unit'], 'mph')
-        response.raise_for_status.assert_called_once_with()
-
-    async def test_service_normalizes_the_hourly_response(self) -> None:
-        payload = {
-            'latitude': 34.42,
-            'longitude': -106.83,
-            'timezone': 'UTC',
-            'hourly_units': {
-                'temperature_2m': '°C',
-                'precipitation_probability': '%',
-                'wind_speed_10m': 'km/h',
-                'wind_direction_10m': '°',
-            },
-            'hourly': {
-                'time': ['2099-01-01T00:00'],
-                'temperature_2m': [12.5],
-                'precipitation_probability': [25],
-                'wind_speed_10m': [18.0],
-                'wind_direction_10m': [270],
-            },
-        }
-
-        with patch.object(
-            OpenMeteoForecast,
-            'fetch_hourly_summary',
-            new=AsyncMock(return_value=payload),
-        ):
-            result = await fetch_alert_place_hourly_forecast(
-                lat=34.42,
-                lon=-106.83,
-            )
-
-        self.assertEqual(result.forecast_metadata.timezone, 'UTC')
-        self.assertEqual(result.get_temperature(), 12.5)
-        self.assertEqual(result.get_precipitation_probability(), 25)
-        self.assertEqual(result.get_wind_speed(), 18)
-        self.assertEqual(result.get_wind_direction(), 'W →')
-
-    async def test_application_forwards_alert_place_units(self) -> None:
-        app = Wevva(temperature_unit='fahrenheit', wind_speed_unit='mph')
-        forecast = object()
-        loader = AsyncMock(return_value=forecast)
-
-        with patch('wevva.app.fetch_alert_place_hourly_forecast', new=loader):
-            result = await app.load_alert_place_hourly_forecast(
-                34.42,
-                -106.83,
-                'fahrenheit',
-                'mph',
-            )
-
-        self.assertIs(result, forecast)
-        loader.assert_awaited_once_with(
-            lat=34.42,
-            lon=-106.83,
-            temperature_unit='fahrenheit',
-            wind_speed_unit='mph',
         )
 
 

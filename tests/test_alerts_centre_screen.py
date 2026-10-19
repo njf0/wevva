@@ -184,25 +184,17 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
 
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
-            with (
-                patch.object(
-                    screen.country_map,
-                    'set_max_city_labels',
-                    wraps=screen.country_map.set_max_city_labels,
-                ) as set_label_limit,
-                patch.object(
-                    screen.place_forecast,
-                    'set_layout',
-                    wraps=screen.place_forecast.set_layout,
-                ) as set_place_layout,
-            ):
+            with patch.object(
+                screen.country_map,
+                'set_max_city_labels',
+                wraps=screen.country_map.set_max_city_labels,
+            ) as set_label_limit:
                 screen._apply_responsive_layout(
                     screen._layout_width,
                     screen._layout_height,
                 )
 
             set_label_limit.assert_not_called()
-            set_place_layout.assert_not_called()
 
     async def test_country_select_changes_the_loaded_country(self) -> None:
         service = _FixtureService({'DE': [], 'FR': []})

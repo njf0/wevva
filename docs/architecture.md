@@ -22,7 +22,8 @@ t key -> TropicalSystemsScreen -> global canonical tropical systems + products
 
 g key -> AlertsCentreScreen -> country-alert service/cache
                             -> complete map unit + provider warning polygons
-                            -> selected-settlement minimal hourly request/cache
+                            -> hovered-settlement current-weather tooltip/cache
+                            -> activated settlement -> WeatherScreen
 
 m key -> WorldLocationsScreen -> checked-in global map-unit geometry
                              -> cached saved-location summaries
@@ -278,24 +279,15 @@ retained, including nearby and multi-alert-spanning regions; provider warning
 area prose is not used as map geography and the US receives no separate county
 label path.
 Settlement callouts contain names only and use ordinary theme text. They are
-native focusable controls: click, Enter, or Space emits an Alerts-Centre-only
-selection message rather than the application's global place-navigation
-message. Selection starts one minimal Open-Meteo hourly request for temperature,
-precipitation probability, wind speed/direction, and timezone metadata. Results
-are normalized into `HourlyOpenMeteoForecast`, cached briefly by rounded
-coordinates and temperature/wind units, and guarded by cancellation plus a
-request generation. Country or alert changes clear the selection; relevant
-unit changes refetch it; resize performs no weather work. A dedicated fixed
-hourly strip below the map fills its width with up to 24 consecutive hours and
-has no tabs, cursor, or scrolling. The pure responsive budget limits it to one
-quarter of the Map workspace, always admits temperature and time first, then
-rain and wind values, then complete corresponding bar rows. If the minimum
-complete strip cannot fit, it remains hidden while retaining settlement and
-forecast state; loading, empty, and retryable failure occupy the same peer when
-its one-row body fits. Loading uses a centred indicator. Once a forecast strip
-has been displayed, a replacement settlement request retains that established
-height, capped to the current responsive allowance, rather than collapsing the
-peer while data is in flight.
+native focusable controls. Hovering lazily requests compact current conditions
+and updates a non-interactive Rich tooltip with condition, temperature, rain,
+wind, and a full-forecast hint. Successful responses are cached briefly by
+rounded coordinates and all display units; hover changes use cancellation plus
+a request generation so stale results cannot update another label. Resize
+performs no weather work. Click, Enter, or Space converts the source-neutral
+place identity into ordinary location metadata and opens the complete Weather
+screen forecast. The persistent Alerts Centre retains its country, selected
+alert, filters, and map context for the next `g` return.
 
 Country loading swaps the navigation list for an indeterminate catalogue-fetch
 bar, then a percentage-bearing provider-document/geometry bar when measurable
@@ -325,11 +317,11 @@ terminals show three columns, medium terminals stack map and document beside
 navigation, 80x24 uses native Map/Details tabs, and smaller terminals expose
 Navigation/Map/Details one pane at a time. These modes only toggle and rearrange
 the same mounted widgets, preserving selection and document scroll state. The
-allocator also owns the forecast-peer height, complete hourly rows, and broad
-settlement-label cap so resize changes presentation without fetching data.
+allocator also owns the broad settlement-label cap so resize changes
+presentation without fetching data.
 `Wevva` installs this reusable workspace with Textual and opens it with `g`,
-owns its independent `CountryAlertsService`, and supplies the focused hourly
-loader. Pop/reopen cycles suspend and resume the live widget
+owns its independent `CountryAlertsService`, and supplies the current-weather
+preview loader. Pop/reopen cycles suspend and resume the live widget
 tree rather than remounting a previously removed screen.
 Its `r` refresh bypasses only Alerts Centre caches;
 `w` returns to weather. Settings update its language, units, and theme-derived
