@@ -58,6 +58,8 @@ replacement, schema/corruption handling, clock skew, and unavailable storage;
 they do not read or modify the user's cache directory. Alerts Centre service
 and screen tests additionally cover fresh restart hits, provisional stale
 catalogues, expiry filtering, forced refresh, and observation-journal behavior.
+Weather warning tests cover persisted candidate reuse, stale provisional
+matching, refresh failure, and the always-fresh native point-query path.
 
 The country Alerts Centre has deterministic service, screen, interactive-map,
 settlement-tooltip lifecycle, full-weather navigation, and responsive-budget

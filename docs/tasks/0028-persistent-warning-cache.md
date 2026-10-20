@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A–B implemented; Slices C–D remain
+In progress — Slices A–C implemented; Slice D remains
 
 ## Context
 
@@ -11,7 +11,7 @@ especially the complete United States feed, may take minutes because providers
 and the warning library resolve alert documents, affected zones, prose, and
 geometry before returning normalized alerts.
 
-Wevva currently keeps two successful warning products only in memory:
+Before this task, Wevva kept two successful warning products only in memory:
 
 - the Alerts Centre owns a fifteen-minute cache of complete country catalogues;
 - the Weather path owns a thirty-minute cache of reusable country candidates,
@@ -270,5 +270,12 @@ the cache. Only successful provider refreshes update the durable `NEW` baseline
 and the bounded 500-entry first/last-observed journal; cache reads restore the
 stored badges without counting as observations.
 
-The Weather reusable-candidate cache remains unchanged until Slice C. File
-pruning remains Slice D work.
+Slice C replaces the Weather screen's session dictionary with the shared
+reusable-candidate namespace. Entries remain fresh for thirty minutes and may
+provide a filtered provisional match for a further six hours while one
+replacement fetch runs. Native point sources still run once for every selected
+coordinate and are combined with both fresh and provisional candidate matches;
+they are never persisted. Explicit refresh bypasses the candidate cache, and
+only completed country-candidate results replace it.
+
+File pruning remains Slice D work.

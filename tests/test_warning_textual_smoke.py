@@ -10,6 +10,7 @@ from wevva.alerts import Alert
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import WeatherAlertsProgress, WeatherAlertsUpdated
+from wevva.services.warning_cache import WarningCache, WarningCacheProduct
 
 
 def _location(
@@ -61,8 +62,14 @@ class WarningTextualSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_candidate_cache_hit_does_not_show_progress(self) -> None:
         location = _location()
         app = Wevva(initial_location=location, saved_locations=[location])
-        app._alert_cache_clock = lambda: 1_000.0
-        app._alert_cache[('DE', 'auto')] = (1_000.0, ())
+        app.warning_cache = WarningCache(None)
+        app.country_alerts_service.cache = app.warning_cache
+        await app.warning_cache.store(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+            [],
+        )
         reusable_lookup = AsyncMock(return_value=([], True))
 
         with (
@@ -110,6 +117,8 @@ class WarningTextualSmokeTests(unittest.IsolatedAsyncioTestCase):
             return [stale_alert], True
 
         app = Wevva(initial_location=old_location, saved_locations=[old_location])
+        app.warning_cache = WarningCache(None)
+        app.country_alerts_service.cache = app.warning_cache
         with (
             patch.object(Wevva, 'action_refresh', new=AsyncMock()),
             patch('wevva.app.get_alert_candidates_async', new=delayed_lookup),

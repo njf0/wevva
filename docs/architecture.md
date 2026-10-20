@@ -70,9 +70,11 @@ from cached values and accept later results without issuing its own queries.
   controller and public API merge selected hourly series into weather data.
 - `wevva/services/alerts.py` wraps `wevva-warnings`, normalizes country codes,
   filters expired alerts, and uses a thread for its async wrapper. Reusable
-  country candidates are cached by the TUI and locally matched; native
-  point-query sources are fetched for every selected location, then combined
-  and de-duplicated. Progress for reusable candidate retrieval is forwarded to
+  country candidates use the shared persistent warning cache and are locally
+  matched; fresh entries last thirty minutes, with a six-hour provisional
+  grace period. Native point-query sources are still fetched for every selected
+  location, then combined and de-duplicated without being persisted. Progress
+  for reusable candidate retrieval is forwarded to
   `WeatherAlertsProgress` messages on the Textual event loop, then rendered by
   `SavedLocationsSidebar` without reflowing the main forecast layout. The
   alert service returns a named candidate result: completed empty and
@@ -85,8 +87,9 @@ from cached values and accept later results without issuing its own queries.
   for the lifetime of the warning task and then restores `Powered by
   Open-Meteo`. Warning checks do not emit toast notifications; active results
   are communicated by the warning widget.
-  Reusable country alerts and native point alerts start together. Tropical
-  retrieval is not part of this weather-location refresh path.
+  Native point retrieval starts for every warning refresh. Country-candidate
+  provider work starts only after a cache miss, stale hit, or explicit refresh.
+  Tropical retrieval is not part of this weather-location refresh path.
 - `wevva/services/country_alerts.py` is the independent country-discovery
   boundary for the Alerts Centre. It derives supported country choices from
   the warning library's public alert-source registry, calls the broad public
@@ -103,8 +106,9 @@ from cached values and accept later results without issuing its own queries.
   normalized alerts in atomic per-key cache files, and restores source
   presentation metadata from the installed warning registry. Its public disk
   operations run in worker threads and unavailable or invalid cache storage is
-  treated as an optimization miss. The Alerts Centre catalogue uses this
-  boundary; the Weather candidate owner remains in place until Slice C.
+  treated as an optimization miss. Both the Alerts Centre catalogue and
+  Weather reusable-candidate paths now use this boundary while retaining their
+  separate product namespaces and lifetimes.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
   `get_canonical_tropical_systems()` only for the dedicated tropical workspace
   and keeps them in a separate thirty-minute, session-only cache. Canonical

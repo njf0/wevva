@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import ClassVar
 
@@ -48,7 +49,7 @@ from wevva.services.alerts import (
     normalize_country_code,
 )
 from wevva.services.country_alerts import CountryAlertsService
-from wevva.services.warning_cache import WarningCache
+from wevva.services.warning_cache import WarningCache, WarningCacheProduct
 from wevva.services.tropical import (
     get_tropical_products_async,
     get_tropical_system_candidates_async,
@@ -62,7 +63,6 @@ from wevva.services.weather import (
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
-AlertCacheKey = tuple[str | None, str]
 ForecastCacheKey = tuple[float, float, str, str, str]
 ForecastCacheEntry = tuple[float, WeatherUpdated]
 TropicalCacheEntry = tuple[float, tuple[CanonicalTropicalSystem, ...]]
@@ -108,6 +108,7 @@ class Wevva(App, inherit_bindings=False):
     ]
 
     ALERT_CACHE_TTL_SECONDS = 30 * 60
+    ALERT_CACHE_STALE_GRACE_SECONDS = 6 * 60 * 60
     FORECAST_CACHE_TTL_SECONDS = 15 * 60
     TROPICAL_SYSTEM_CACHE_TTL_SECONDS = 30 * 60
 
@@ -147,9 +148,10 @@ class Wevva(App, inherit_bindings=False):
         self._forecast_cache_clock = time.monotonic
         self._alerts_task: asyncio.Task[None] | None = None
         self._alert_indicator_generation: int | None = None
-        self._alert_cache: dict[AlertCacheKey, tuple[float, tuple[Alert, ...]]] = {}
-        self._alert_cache_clock = time.monotonic
-        self.warning_cache = WarningCache()
+        self._warning_cache_clock = lambda: datetime.now(UTC)
+        self.warning_cache = WarningCache(
+            clock=lambda: self._warning_cache_clock(),
+        )
         self.country_alerts_service = CountryAlertsService(cache=self.warning_cache)
         self._alerts_centre_screen: AlertsCentreScreen | None = None
         self._tropical_system_cache: TropicalCacheEntry | None = None
@@ -793,22 +795,14 @@ class Wevva(App, inherit_bindings=False):
         self._set_warning_checking(True)
         country_code = normalize_country_code(self.location.country_code)
         warning_language = 'en' if self.warning_language == 'en' else 'auto'
-        cache_key = (country_code, warning_language)
-        entry = None
-        if not force_refresh:
-            entry = self._alert_cache.get(cache_key)
-            if entry is not None and self._alert_cache_clock() - entry[0] >= self.ALERT_CACHE_TTL_SECONDS:
-                del self._alert_cache[cache_key]
-                entry = None
         self._alerts_task = asyncio.create_task(
             self._fetch_alerts_for_location(
                 lat=lat,
                 lon=lon,
                 country_code=country_code,
                 warning_language=warning_language,
-                cache_key=cache_key,
                 refresh_generation=refresh_generation,
-                cached_candidates=entry[1] if entry is not None else None,
+                force_refresh=force_refresh,
             )
         )
 
@@ -819,13 +813,13 @@ class Wevva(App, inherit_bindings=False):
         lon: float,
         country_code: str | None,
         warning_language: str,
-        cache_key: AlertCacheKey,
         refresh_generation: int,
-        cached_candidates: tuple[Alert, ...] | None,
+        force_refresh: bool,
     ) -> None:
         """Fetch and publish ordinary weather alerts."""
         loop = asyncio.get_running_loop()
         provider_names: dict[str, str] = {}
+        candidate_lookup: asyncio.Task | None = None
         native_lookup = asyncio.create_task(
             get_native_point_alerts_async(
                 lat,
@@ -854,48 +848,122 @@ class Wevva(App, inherit_bindings=False):
             )
 
         try:
-            if cached_candidates is None:
-                candidates, completed = await get_alert_candidates_async(
+            cached_candidates: tuple[Alert, ...] | None = None
+            cached_is_stale = False
+            if not force_refresh and country_code is not None:
+                entry = await self.warning_cache.load(
+                    WarningCacheProduct.REUSABLE_CANDIDATES,
+                    country_code,
+                    warning_language,
+                )
+                if entry is not None:
+                    age = max(
+                        0.0,
+                        (
+                            self._warning_cache_clock() - entry.fetched_at
+                        ).total_seconds(),
+                    )
+                    if age < (
+                        self.ALERT_CACHE_TTL_SECONDS
+                        + self.ALERT_CACHE_STALE_GRACE_SECONDS
+                    ):
+                        cached_candidates = entry.alerts
+                        cached_is_stale = age >= self.ALERT_CACHE_TTL_SECONDS
+
+            if cached_candidates is not None and not cached_is_stale:
+                native_alerts, _ = await native_lookup
+                await self._publish_alert_candidates(
+                    candidates=cached_candidates,
+                    native_alerts=native_alerts,
+                    lat=lat,
+                    lon=lon,
+                    refresh_generation=refresh_generation,
+                    progress=report_progress,
+                )
+                return
+
+            candidate_lookup = asyncio.create_task(
+                get_alert_candidates_async(
                     country_code,
                     warning_language,
                     progress=report_progress,
                 )
-
-                if completed:
-                    self._alert_cache[cache_key] = self._alert_cache_clock(), tuple(candidates)
-            else:
-                candidates = list(cached_candidates)
-
+            )
             native_alerts, _ = await native_lookup
 
-            if (
-                refresh_generation != self._refresh_generation
-                or self.location.latitude != lat
-                or self.location.longitude != lon
-            ):
+            if cached_candidates is not None:
+                await self._publish_alert_candidates(
+                    candidates=cached_candidates,
+                    native_alerts=native_alerts,
+                    lat=lat,
+                    lon=lon,
+                    refresh_generation=refresh_generation,
+                    progress=report_progress,
+                )
+
+            candidates, completed = await candidate_lookup
+            if completed and country_code is not None:
+                await self.warning_cache.store(
+                    WarningCacheProduct.REUSABLE_CANDIDATES,
+                    country_code,
+                    warning_language,
+                    candidates,
+                    fetched_at=self._warning_cache_clock(),
+                )
+
+            if cached_candidates is not None and not completed:
                 return
-            alerts = await match_alert_candidates_async(
-                candidates,
-                native_alerts,
-                lat,
-                lon,
+            await self._publish_alert_candidates(
+                candidates=candidates,
+                native_alerts=native_alerts,
+                lat=lat,
+                lon=lon,
+                refresh_generation=refresh_generation,
                 progress=report_progress,
             )
-
-            if (
-                refresh_generation != self._refresh_generation
-                or self.location.latitude != lat
-                or self.location.longitude != lon
-            ):
-                return
-
-            self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
         finally:
+            if candidate_lookup is not None and not candidate_lookup.done():
+                candidate_lookup.cancel()
             if not native_lookup.done():
                 native_lookup.cancel()
             if self._alert_indicator_generation == refresh_generation:
                 self._alert_indicator_generation = None
                 self._set_warning_checking(False)
+
+    async def _publish_alert_candidates(
+        self,
+        *,
+        candidates: Sequence[Alert],
+        native_alerts: list[Alert],
+        lat: float,
+        lon: float,
+        refresh_generation: int,
+        progress,
+    ) -> None:
+        """Match and publish candidates only for their requesting location."""
+        if not self._alert_request_is_current(lat, lon, refresh_generation):
+            return
+        alerts = await match_alert_candidates_async(
+            list(candidates),
+            native_alerts,
+            lat,
+            lon,
+            progress=progress,
+        )
+        if self._alert_request_is_current(lat, lon, refresh_generation):
+            self.weather_screen.post_message(WeatherAlertsUpdated(alerts=alerts))
+
+    def _alert_request_is_current(
+        self,
+        lat: float,
+        lon: float,
+        refresh_generation: int,
+    ) -> bool:
+        return (
+            refresh_generation == self._refresh_generation
+            and self.location.latitude == lat
+            and self.location.longitude == lon
+        )
 
     def _get_tropical_system_fetch_task(self) -> asyncio.Task[tuple[list[CanonicalTropicalSystem], bool]]:
         """Return the one in-flight global canonical fetch for this session."""

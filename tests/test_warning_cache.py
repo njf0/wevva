@@ -1,4 +1,4 @@
-"""Focused checks for the TUI's session-only warning-result cache."""
+"""Focused checks for the TUI's persistent warning-result cache."""
 
 from __future__ import annotations
 
@@ -69,8 +69,23 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.app.weather_screen = _WeatherScreen()
         self.app.notify = Mock()
         self.app._refresh_generation = 1
-        self.clock = 1_000.0
-        self.app._alert_cache_clock = lambda: self.clock
+        self.now = datetime(2030, 1, 1, 12, tzinfo=UTC)
+        self._replace_cache()
+
+    def _replace_cache(self, cache_directory=None) -> None:
+        self.app._warning_cache_clock = lambda: self.now
+        self.app.warning_cache = WarningCache(
+            cache_directory,
+            clock=lambda: self.now,
+        )
+        self.app.country_alerts_service.cache = self.app.warning_cache
+
+    async def _candidate_entry(self):
+        return await self.app.warning_cache.load(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+        )
 
     async def _schedule_and_wait(self, *, force_refresh: bool = False) -> None:
         self.app._schedule_alert_refresh(1, force_refresh=force_refresh)
@@ -81,9 +96,10 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app.ALERT_CACHE_TTL_SECONDS, 30 * 60)
 
     def test_alerts_centre_uses_the_application_warning_cache(self) -> None:
+        app = Wevva(initial_location=self.location)
         self.assertIs(
-            self.app.country_alerts_service.cache,
-            self.app.warning_cache,
+            app.country_alerts_service.cache,
+            app.warning_cache,
         )
 
     def _alert_updates(self) -> list[WeatherAlertsUpdated]:
@@ -112,11 +128,143 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reusable_lookup.await_count, 2)
         self.assertEqual(native_lookup.await_count, 4)
-        self.assertEqual(len(self.app._alert_cache), 1)
+        self.assertIsNotNone(await self._candidate_entry())
         updates = self._alert_updates()
         self.assertEqual([alert.id for alert in updates[0].alerts], ['berlin'])
         self.assertEqual([alert.id for alert in updates[2].alerts], ['munich'])
         self.assertEqual(len(updates), 4)
+
+    async def test_persisted_candidates_survive_cache_restart(self) -> None:
+        candidate = _alert_in_box(
+            'berlin',
+            min_lat=52.3,
+            max_lat=52.8,
+            min_lon=13.0,
+            max_lon=13.8,
+        )
+        reusable_lookup = AsyncMock(return_value=([candidate], True))
+        native_lookup = AsyncMock(return_value=([], True))
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_path = Path(temporary_directory)
+            self._replace_cache(cache_path)
+            with (
+                patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
+                patch(
+                    'wevva.app.get_native_point_alerts_async',
+                    new=native_lookup,
+                ),
+            ):
+                await self._schedule_and_wait()
+                self._replace_cache(cache_path)
+                await self._schedule_and_wait()
+
+        self.assertEqual(reusable_lookup.await_count, 1)
+        self.assertEqual(native_lookup.await_count, 2)
+        self.assertEqual(
+            [[alert.id for alert in update.alerts] for update in self._alert_updates()],
+            [['berlin'], ['berlin']],
+        )
+
+    async def test_stale_candidates_publish_while_one_refresh_runs(self) -> None:
+        stale = _alert_in_box(
+            'stale',
+            min_lat=52.3,
+            max_lat=52.8,
+            min_lon=13.0,
+            max_lon=13.8,
+        )
+        fresh = _alert_in_box(
+            'fresh',
+            min_lat=52.3,
+            max_lat=52.8,
+            min_lon=13.0,
+            max_lon=13.8,
+        )
+        await self.app.warning_cache.store(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+            [stale],
+            fetched_at=self.now - timedelta(minutes=31),
+        )
+        refresh_started = asyncio.Event()
+        finish_refresh = asyncio.Event()
+
+        async def refresh(*_args, **_kwargs):
+            refresh_started.set()
+            await finish_refresh.wait()
+            return [fresh], True
+
+        native_lookup = AsyncMock(return_value=([], True))
+        with (
+            patch('wevva.app.get_alert_candidates_async', new=refresh),
+            patch(
+                'wevva.app.get_native_point_alerts_async',
+                new=native_lookup,
+            ),
+        ):
+            self.app._schedule_alert_refresh(1)
+            assert self.app._alerts_task is not None
+            await refresh_started.wait()
+            for _ in range(5):
+                if self._alert_updates():
+                    break
+                await asyncio.sleep(0)
+
+            self.assertEqual(
+                [alert.id for alert in self._alert_updates()[0].alerts],
+                ['stale'],
+            )
+            self.assertFalse(self.app._alerts_task.done())
+
+            finish_refresh.set()
+            await self.app._alerts_task
+
+        self.assertEqual(native_lookup.await_count, 1)
+        self.assertEqual(
+            [[alert.id for alert in update.alerts] for update in self._alert_updates()],
+            [['stale'], ['fresh']],
+        )
+        cached = await self._candidate_entry()
+        assert cached is not None
+        self.assertEqual([alert.id for alert in cached.alerts], ['fresh'])
+
+    async def test_failed_stale_refresh_keeps_provisional_result(self) -> None:
+        stale = _alert_in_box(
+            'stale',
+            min_lat=52.3,
+            max_lat=52.8,
+            min_lon=13.0,
+            max_lon=13.8,
+        )
+        await self.app.warning_cache.store(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+            [stale],
+            fetched_at=self.now - timedelta(minutes=31),
+        )
+        with (
+            patch(
+                'wevva.app.get_alert_candidates_async',
+                new=AsyncMock(return_value=([], False)),
+            ) as reusable_lookup,
+            patch(
+                'wevva.app.get_native_point_alerts_async',
+                new=AsyncMock(return_value=([], True)),
+            ),
+        ):
+            await self._schedule_and_wait()
+
+        reusable_lookup.assert_awaited_once()
+        self.assertEqual(
+            [[alert.id for alert in update.alerts] for update in self._alert_updates()],
+            [['stale']],
+        )
+        cached = await self._candidate_entry()
+        assert cached is not None
+        self.assertEqual([alert.id for alert in cached.alerts], ['stale'])
 
     async def test_ttl_expiry_discards_entry_and_queries_again(self) -> None:
         reusable_lookup = AsyncMock(return_value=([], True))
@@ -126,12 +274,12 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
         ):
             await self._schedule_and_wait()
-            self.clock += self.app.ALERT_CACHE_TTL_SECONDS
+            self.now += timedelta(seconds=self.app.ALERT_CACHE_TTL_SECONDS)
             await self._schedule_and_wait()
 
         self.assertEqual(reusable_lookup.await_count, 2)
         self.assertEqual(native_lookup.await_count, 2)
-        self.assertEqual(len(self.app._alert_cache), 1)
+        self.assertIsNotNone(await self._candidate_entry())
 
     async def test_empty_success_is_cached_but_failure_is_not(self) -> None:
         reusable_lookup = AsyncMock(side_effect=[([], True), ([], False), ([], False)])
@@ -143,9 +291,9 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             await self._schedule_and_wait()
             await self._schedule_and_wait()
         self.assertEqual(reusable_lookup.await_count, 1)
-        self.assertEqual(len(self.app._alert_cache), 1)
+        self.assertIsNotNone(await self._candidate_entry())
 
-        self.app._alert_cache.clear()
+        self._replace_cache()
         with (
             patch('wevva.app.get_alert_candidates_async', new=reusable_lookup),
             patch('wevva.app.get_native_point_alerts_async', new=native_lookup),
@@ -154,7 +302,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             await self._schedule_and_wait()
         self.assertEqual(reusable_lookup.await_count, 3)
         self.assertEqual(native_lookup.await_count, 4)
-        self.assertEqual(self.app._alert_cache, {})
+        self.assertIsNone(await self._candidate_entry())
 
     async def test_cancelled_lookup_is_not_cached(self) -> None:
         started = asyncio.Event()
@@ -173,7 +321,7 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await self.app._alerts_task
 
-        self.assertEqual(self.app._alert_cache, {})
+        self.assertIsNone(await self._candidate_entry())
 
     async def test_key_changes_and_expired_alert_filtering(self) -> None:
         reusable_lookup = AsyncMock(return_value=([], True))
@@ -204,8 +352,13 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         )
         self.app.location = LocationMetadata(latitude=52.52, longitude=13.405, country_code='DE')
         self.app.warning_language = 'auto'
-        key = ('DE', 'auto')
-        self.app._alert_cache[key] = self.clock, (expired_alert,)
+        await self.app.warning_cache.store(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+            [expired_alert],
+            fetched_at=self.now,
+        )
         with patch('wevva.app.get_native_point_alerts_async', new=AsyncMock(return_value=([], True))):
             await self._schedule_and_wait()
         self.assertEqual(self._alert_updates()[-1].alerts, [])
@@ -252,9 +405,15 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([alert.id for alert in updates[1].alerts], ['denver'])
 
     async def test_cached_candidates_report_measured_matching_progress(self) -> None:
-        self.app._alert_cache[('DE', 'auto')] = self.clock, (
-            _alert_in_box('berlin', min_lat=52.3, max_lat=52.8, min_lon=13.0, max_lon=13.8),
-            _alert_in_box('munich', min_lat=47.9, max_lat=48.4, min_lon=11.2, max_lon=11.9),
+        await self.app.warning_cache.store(
+            WarningCacheProduct.REUSABLE_CANDIDATES,
+            'DE',
+            'auto',
+            (
+                _alert_in_box('berlin', min_lat=52.3, max_lat=52.8, min_lon=13.0, max_lon=13.8),
+                _alert_in_box('munich', min_lat=47.9, max_lat=48.4, min_lon=11.2, max_lon=11.9),
+            ),
+            fetched_at=self.now,
         )
 
         with patch(
