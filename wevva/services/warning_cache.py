@@ -21,6 +21,8 @@ from wevva.services.alerts import normalize_country_code
 
 WARNING_CACHE_SCHEMA_VERSION = 1
 WARNING_CACHE_CLOCK_SKEW = timedelta(minutes=5)
+WARNING_CACHE_MAX_AGE = timedelta(days=7)
+WARNING_CACHE_MAX_ENTRIES = 32
 _DEFAULT_CACHE_DIRECTORY: Final[object] = object()
 
 
@@ -84,6 +86,8 @@ class WarningCache:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         clock_skew: timedelta = WARNING_CACHE_CLOCK_SKEW,
+        max_age: timedelta = WARNING_CACHE_MAX_AGE,
+        max_entries: int = WARNING_CACHE_MAX_ENTRIES,
     ) -> None:
         resolved_directory = (
             get_warning_cache_directory()
@@ -95,6 +99,8 @@ class WarningCache:
         )
         self._clock = clock
         self.clock_skew = max(clock_skew, timedelta(0))
+        self.max_age = max(max_age, timedelta(0))
+        self.max_entries = max(1, int(max_entries))
         self._memory: dict[tuple[WarningCacheProduct, str, str], WarningCacheEntry] = {}
 
     async def load(
@@ -107,12 +113,15 @@ class WarningCache:
 
         key = _normalize_key(product, country_code, warning_language)
         if entry := self._memory.get(key):
-            return entry if self._timestamp_is_usable(entry.fetched_at) else None
+            if self._entry_is_retained(entry):
+                return entry
+            del self._memory[key]
         path = _cache_path(self.cache_directory, key)
         if path is None:
             return None
         entry = await asyncio.to_thread(_read_entry, path, key)
-        if entry is None or not self._timestamp_is_usable(entry.fetched_at):
+        if entry is None or not self._entry_is_retained(entry):
+            await asyncio.to_thread(_discard_file, path)
             return None
         self._memory[key] = entry
         return entry
@@ -138,7 +147,7 @@ class WarningCache:
             fetched_at=_as_utc(fetched_at or self._clock()),
             new_alert_identities=frozenset(new_alert_identities),
         )
-        if not self._timestamp_is_usable(entry.fetched_at):
+        if not self._entry_is_retained(entry):
             return False
 
         try:
@@ -149,10 +158,24 @@ class WarningCache:
         path = _cache_path(self.cache_directory, key)
         if path is None:
             return True
-        return await asyncio.to_thread(_atomic_write, path, payload)
+        written = await asyncio.to_thread(_atomic_write, path, payload)
+        if written:
+            await asyncio.to_thread(
+                _prune_cache_directory,
+                self.cache_directory,
+                _as_utc(self._clock()),
+                self.clock_skew,
+                self.max_age,
+                self.max_entries,
+            )
+        return written
 
-    def _timestamp_is_usable(self, fetched_at: datetime) -> bool:
-        return _as_utc(fetched_at) <= _as_utc(self._clock()) + self.clock_skew
+    def _entry_is_retained(self, entry: WarningCacheEntry) -> bool:
+        now = _as_utc(self._clock())
+        return (
+            entry.fetched_at <= now + self.clock_skew
+            and now - entry.fetched_at <= self.max_age
+        )
 
 
 def _cache_path(
@@ -356,3 +379,63 @@ def _atomic_write(path: Path, payload: bytes) -> bool:
         except OSError:
             pass
         return False
+
+
+def _prune_cache_directory(
+    directory: Path,
+    now: datetime,
+    clock_skew: timedelta,
+    max_age: timedelta,
+    max_entries: int,
+) -> None:
+    """Remove invalid, old, and excess entries without surfacing cache errors."""
+
+    try:
+        paths = sorted(directory.glob('*.json.gz'))
+    except OSError:
+        return
+
+    retained: list[tuple[datetime, Path]] = []
+    for path in paths:
+        key = _key_from_cache_path(path)
+        entry = _read_entry(path, key) if key is not None else None
+        if (
+            entry is None
+            or entry.fetched_at > now + clock_skew
+            or now - entry.fetched_at > max_age
+        ):
+            _discard_file(path)
+        else:
+            retained.append((entry.fetched_at, path))
+
+    retained.sort(key=lambda item: (item[0], item[1].name))
+    for _, path in retained[: max(0, len(retained) - max_entries)]:
+        _discard_file(path)
+
+
+def _key_from_cache_path(
+    path: Path,
+) -> tuple[WarningCacheProduct, str, str] | None:
+    suffix = '.json.gz'
+    if not path.name.endswith(suffix):
+        return None
+    stem = path.name[: -len(suffix)]
+    for product in WarningCacheProduct:
+        prefix = f'{product.value}-'
+        if not stem.startswith(prefix):
+            continue
+        parts = stem[len(prefix) :].split('-')
+        if len(parts) != 2:
+            return None
+        try:
+            return _normalize_key(product, parts[0], parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def _discard_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass

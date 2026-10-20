@@ -100,15 +100,18 @@ from cached values and accept later results without issuing its own queries.
   refresh-scoped `NEW` badges and the bounded first/last-observed journal.
   Cache reads do neither. It never reads the Weather screen's reusable-
   candidate namespace.
-- `wevva/services/warning_cache.py` is the versioned persistence boundary being
-  introduced by Task 0028. It keeps complete country catalogues and reusable
+- `wevva/services/warning_cache.py` is the versioned persistence boundary from
+  Task 0028. It keeps complete country catalogues and reusable
   Weather candidates in separate country/language/product namespaces, stores
   normalized alerts in atomic per-key cache files, and restores source
   presentation metadata from the installed warning registry. Its public disk
   operations run in worker threads and unavailable or invalid cache storage is
   treated as an optimization miss. Both the Alerts Centre catalogue and
   Weather reusable-candidate paths now use this boundary while retaining their
-  separate product namespaces and lifetimes.
+  separate product namespaces and lifetimes. Successful writes opportunistically
+  prune malformed, incompatible, seven-day-old, and excess files, retaining at
+  most the newest 32 entries with deterministic oldest-first eviction. Cache
+  deletion failures are ignored.
 - `wevva/services/tropical.py` fetches `CanonicalTropicalSystem` groups with
   `get_canonical_tropical_systems()` only for the dedicated tropical workspace
   and keeps them in a separate thirty-minute, session-only cache. Canonical

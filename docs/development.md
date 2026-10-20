@@ -54,10 +54,11 @@ uv run python -m unittest tests.test_warning_cache tests.test_warning_textual_sm
 
 The warning-cache tests use temporary directories and controlled UTC clocks to
 exercise the persistent alert codec, product namespace separation, atomic
-replacement, schema/corruption handling, clock skew, and unavailable storage;
-they do not read or modify the user's cache directory. Alerts Centre service
-and screen tests additionally cover fresh restart hits, provisional stale
-catalogues, expiry filtering, forced refresh, and observation-journal behavior.
+replacement, schema/corruption handling, clock skew, unavailable storage, and
+deterministic age/count pruning; they do not read or modify the user's cache
+directory. Alerts Centre service and screen tests additionally cover fresh
+restart hits, provisional stale catalogues, expiry filtering, forced refresh,
+and observation-journal behavior.
 Weather warning tests cover persisted candidate reuse, stale provisional
 matching, refresh failure, and the always-fresh native point-query path.
 

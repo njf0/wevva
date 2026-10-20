@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A–C implemented; Slice D remains
+Complete
 
 ## Context
 
@@ -278,4 +278,9 @@ coordinate and are combined with both fresh and provisional candidate matches;
 they are never persisted. Explicit refresh bypasses the candidate cache, and
 only completed country-candidate results replace it.
 
-File pruning remains Slice D work.
+Slice D completes the lifecycle with opportunistic worker-thread pruning after
+successful writes. Cache files older than seven days, malformed or incompatible
+files, and entries beyond the newest 32 are removed in deterministic fetch-time
+and filename order. Invalid files are also discarded when read. Pruning and
+deletion failures remain silent cache misses, so unavailable or read-only cache
+storage never becomes an application failure.

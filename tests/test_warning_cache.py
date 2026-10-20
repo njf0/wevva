@@ -786,9 +786,11 @@ class PersistentWarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
         path.write_bytes(b'not gzip data')
         self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
+        self.assertFalse(path.exists())
 
         path.write_bytes(gzip.compress(json.dumps({'schema_version': 999}).encode()))
         self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
+        self.assertFalse(path.exists())
 
         future_writer = WarningCache(
             self.cache_path,
@@ -800,6 +802,7 @@ class PersistentWarningCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(
             await self._cache().load('country_catalogue', 'GB')
         )
+        self.assertFalse(path.exists())
 
     async def test_unwritable_path_keeps_validated_entry_in_memory(self) -> None:
         blocked_path = self.cache_path / 'not-a-directory'
@@ -830,6 +833,74 @@ class PersistentWarningCacheTests(unittest.IsolatedAsyncioTestCase):
         entry = await self._cache().load('country_catalogue', 'GB')
         assert entry is not None
         self.assertEqual([alert.id for alert in entry.alerts], ['alert-1'])
+
+    async def test_pruning_removes_old_and_invalid_files(self) -> None:
+        await self._cache().store(
+            'country_catalogue',
+            'GB',
+            'auto',
+            [],
+            fetched_at=self.now - timedelta(days=2),
+        )
+        corrupt = self.cache_path / 'reusable_candidates-FR-auto.json.gz'
+        corrupt.write_bytes(b'broken')
+        incompatible = self.cache_path / 'country_catalogue-DE-en.json.gz'
+        incompatible.write_bytes(
+            gzip.compress(json.dumps({'schema_version': 999}).encode())
+        )
+        unknown = self.cache_path / 'legacy-warning.json.gz'
+        unknown.write_bytes(gzip.compress(b'{}'))
+
+        cache = WarningCache(
+            self.cache_path,
+            clock=lambda: self.now,
+            max_age=timedelta(days=1),
+        )
+        self.assertTrue(
+            await cache.store('country_catalogue', 'CA', 'auto', [])
+        )
+
+        self.assertEqual(
+            [path.name for path in self.cache_path.glob('*.json.gz')],
+            ['country_catalogue-CA-auto.json.gz'],
+        )
+
+    async def test_pruning_keeps_newest_entries_with_a_deterministic_limit(self) -> None:
+        cache = WarningCache(
+            self.cache_path,
+            clock=lambda: self.now,
+            max_entries=2,
+        )
+        await cache.store(
+            'country_catalogue',
+            'GB',
+            'auto',
+            [],
+            fetched_at=self.now - timedelta(hours=3),
+        )
+        await cache.store(
+            'country_catalogue',
+            'FR',
+            'auto',
+            [],
+            fetched_at=self.now - timedelta(hours=2),
+        )
+        await cache.store(
+            'country_catalogue',
+            'DE',
+            'auto',
+            [],
+            fetched_at=self.now - timedelta(hours=1),
+        )
+
+        self.assertEqual(
+            sorted(path.name for path in self.cache_path.glob('*.json.gz')),
+            [
+                'country_catalogue-DE-auto.json.gz',
+                'country_catalogue-FR-auto.json.gz',
+            ],
+        )
+        self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
 
 
 class WarningProgressTests(unittest.TestCase):
