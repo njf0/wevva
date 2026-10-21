@@ -416,7 +416,7 @@ def _fetch_country_alerts(
     alerts = get_alerts_for_country(
         country_code,
         lang=lang,
-        active_only=True,
+        active_only=False,
         progress=progress,
     )
     return sort_country_alerts(alerts)
@@ -569,6 +569,7 @@ class CountryAlertsService:
             progress,
         )
         fetched_at = _as_utc(self._wall_clock())
+        alerts = _filter_unexpired(alerts, fetched_at)
         newly_observed = self._observations.observe(
             normalized_country,
             language,

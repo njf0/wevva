@@ -786,7 +786,10 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
         async with empty_app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
             message = empty_screen.query_one('#alerts-centre-list-empty', Static)
-            self.assertEqual(_rendered(message).strip(), 'No active alerts')
+            self.assertEqual(
+                _rendered(message).strip(),
+                'No current or upcoming alerts',
+            )
             detail_prompt = empty_screen.query_one(
                 '#alerts-centre-document-empty',
                 Static,

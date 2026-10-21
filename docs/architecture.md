@@ -100,7 +100,8 @@ the same values and accept later results without issuing their own queries.
 - `wevva/services/country_alerts.py` is the independent country-discovery
   boundary for the Alerts Centre. It derives supported country choices from
   the warning library's public alert-source registry, calls the broad public
-  country query with active filtering, and orders and deduplicates results.
+  country query, retains current and future-onset warnings until they expire,
+  and orders and deduplicates results.
   Complete catalogues use the shared warning-cache boundary with a fifteen-
   minute fresh lifetime and six-hour provisional grace period. Only successful
   provider refreshes update the separate durable identity snapshot used for

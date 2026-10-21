@@ -13,12 +13,12 @@ selected forecast coordinate? Its warning cache and native point-query path are
 deliberately optimized for that question. Task 0019 improves the local alert
 reader but should remain a modal rather than grow into a country browser.
 
-A separate alerts centre can answer a different question: which active alerts
-are available for a country, where are their issued polygons, and what do their
-full provider documents say? The application already has most of the visual
-primitives: country geometry, ranked Natural Earth cities, compact current
-weather formatting, semantic alert colours, full provider prose, and Braille
-polygon rendering.
+A separate alerts centre can answer a different question: which current or
+upcoming alerts are available for a country, where are their issued polygons,
+and what do their full provider documents say? The application already has
+most of the visual primitives: country geometry, ranked Natural Earth cities,
+compact current weather formatting, semantic alert colours, full provider
+prose, and Braille polygon rendering.
 
 ## Problem
 
@@ -152,7 +152,8 @@ Accra and Tema
 ## Country alert data boundary
 
 Add a dedicated asynchronous service around the public country query, for
-example `get_alerts_for_country(..., active_only=True)`. Keep it separate from
+example `get_alerts_for_country(..., active_only=False)`, then remove expired
+results locally while retaining future-onset warnings. Keep it separate from
 the weather screen's `_alert_cache`:
 
 - that cache intentionally contains reusable candidates for later point
@@ -168,7 +169,7 @@ identity snapshot per country/language so new alerts can be recognized across
 application runs. The first fetch establishes a baseline, failed fetches do not
 advance it, and this snapshot is not an alert-content history. Reuse provider
 progress callbacks internally without showing per-source counts or producing a
-toast per source or document. Filter expired/inactive alerts and deduplicate
+toast per source or document. Filter expired alerts and deduplicate
 through the warning library's public model/query behavior. Do not silently
 manufacture national completeness by sampling points.
 
@@ -286,7 +287,8 @@ responsive topology changes, and a refresh when it remains present.
   list/empty state without transient provider-count text. It is indeterminate
   while fetching a provider's warning catalogue, then shows document/geometry
   completion and a percentage when the provider exposes a measurable total.
-- A successful empty result says `No active alerts`, centred in the list area.
+- A successful empty result says `No current or upcoming alerts`, centred in
+  the list area.
 - A local text filter with no matches has a distinct `No matching alerts`
   state and does not clear the loaded country data.
 - Partial provider failure keeps successful alerts and identifies unavailable

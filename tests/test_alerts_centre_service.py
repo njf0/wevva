@@ -12,6 +12,7 @@ from wevva_warnings import Alert, WarningSource
 
 from wevva.services.country_alerts import (
     CountryAlertsService,
+    _fetch_country_alerts,
     country_alert_default_filter,
     list_supported_alert_countries,
     sort_country_alerts,
@@ -122,8 +123,57 @@ class CountryAlertOrderingTests(unittest.TestCase):
             ['extreme', 'sooner', 'later', 'moderate'],
         )
 
+    def test_country_fetch_requests_current_and_future_alerts(self) -> None:
+        future = _alert('future', 'Moderate', expires_in_hours=1)
+
+        with patch(
+            'wevva.services.country_alerts.get_alerts_for_country',
+            return_value=[future],
+        ) as fetch:
+            alerts = _fetch_country_alerts('GB', 'en', None)
+
+        self.assertEqual(alerts, [future])
+        fetch.assert_called_once_with(
+            'GB',
+            lang='en',
+            active_only=False,
+            progress=None,
+        )
+
 
 class CountryAlertsServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_catalogue_includes_future_alerts_but_not_expired_alerts(self) -> None:
+        now = datetime(2030, 1, 1, 12, tzinfo=UTC)
+        future = Alert(
+            id='future',
+            source='fixture',
+            event='Wind Warning',
+            headline='Future wind warning',
+            onset=now + timedelta(days=1),
+            expires=now + timedelta(days=2),
+        )
+        expired = Alert(
+            id='expired',
+            source='fixture',
+            event='Rain Warning',
+            headline='Expired rain warning',
+            onset=now - timedelta(days=2),
+            expires=now - timedelta(days=1),
+        )
+        service = CountryAlertsService(
+            wall_clock=lambda: now,
+            cache=WarningCache(None, clock=lambda: now),
+            observation_path=None,
+        )
+
+        with patch(
+            'wevva.services.country_alerts._fetch_country_alerts',
+            return_value=[future, expired],
+        ):
+            alerts = await service.get_alerts('GB')
+
+        self.assertEqual([alert.id for alert in alerts], ['future'])
+
     async def test_cache_hit_and_expiry_are_isolated_by_country_and_language(self) -> None:
         now = [datetime(2030, 1, 1, 12, tzinfo=UTC)]
         service = CountryAlertsService(

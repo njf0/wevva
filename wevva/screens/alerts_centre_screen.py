@@ -1233,7 +1233,9 @@ class AlertsCentreScreen(Screen[None]):
                 self._show_alert_list_state('')
             else:
                 self._show_alert_list_state(
-                    'No matching alerts' if self.alerts else 'No active alerts'
+                    'No matching alerts'
+                    if self.alerts
+                    else 'No current or upcoming alerts'
                 )
 
     def _matching_alerts(self, query: str) -> list[Alert]:
