@@ -11,29 +11,32 @@ from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, OptionList, Static, Tab, Tabs
 from textual.widgets.option_list import Option
+from wevva_warnings import (
+    CanonicalTropicalSystem,
+    TropicalProduct,
+    TropicalSystem,
+)
 
-from wevva.conditions import get_condition
-from wevva.config import location_key, location_label
+from wevva.config import location_key
 from wevva.dashboard_layout import DashboardLayoutBudget, dashboard_layout_for
+from wevva.layout import CurrentDensity
 from wevva.location_metadata import LocationMetadata
 from wevva.services.alert_bulletin import BulletinAlert
 from wevva.services.country_alerts import country_alert_identity
 from wevva.messages import (
-    DashboardPlaceActivated,
     DashboardPlacePressed,
-    DashboardPlacePreviewed,
-    DashboardPlacePreviewEnded,
     DashboardTropicalActivated,
     HourHighlighted,
     WeatherUpdated,
 )
-from wevva.utils import emoji_prefix, temp_colour
+from wevva.widgets.context_bar import ContextBar
+from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.dashboard_daily_forecast import DashboardDailyForecast
 from wevva.widgets.dashboard_hourly_forecast import DashboardHourlyForecast
 from wevva.widgets.dashboard_world_map import (
@@ -41,6 +44,12 @@ from wevva.widgets.dashboard_world_map import (
     DashboardWorldMap,
 )
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
+from wevva.widgets.tropical_products import (
+    tropical_forecast_summary,
+    tropical_product_tab_specs,
+    tropical_product_widgets,
+)
+from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
 from wevva.widgets.weather_alerts import alert_condition_name, alert_severity_color
 from wevva.utils.country_codes import get_country_name_by_alpha2
 
@@ -56,79 +65,113 @@ class DashboardForecastPanel(Container):
         border: round $primary;
         border-title-color: $primary;
         padding: 0 1;
-        overflow-y: auto;
+        overflow: hidden hidden;
         background: $background;
-    }
-
-    #dashboard-forecast-role {
-        width: 100%;
-        height: 1;
-        color: $text-muted;
-        text-style: italic;
     }
 
     #dashboard-forecast-place {
         width: 100%;
-        height: auto;
-        min-height: 1;
+        height: 2;
         text-style: bold;
+        text-align: center;
+        content-align: center middle;
     }
 
-    #dashboard-current-summary {
+    #dashboard-current-conditions {
+        grid-size: 3 1;
+        grid-columns: 1fr 1fr 1fr;
+        grid-gutter: 0 1;
         width: 100%;
-        height: 4;
-        margin: 1 0;
-        content-align: left middle;
+        max-width: 100%;
+        height: 5;
+        hatch: none;
+    }
+
+    #dashboard-current-conditions CurrentDetailTable {
+        display: none;
+    }
+
+    #dashboard-current-conditions WeatherWidget,
+    #dashboard-current-conditions PrecipWidget {
+        border: none;
+        padding: 0;
+        align-horizontal: center;
+    }
+
+    #dashboard-current-conditions WeatherWidget > Static {
+        text-align: center;
+        align-horizontal: center;
+    }
+
+    #dashboard-current-conditions WeatherWidget #digits-row {
+        width: 100%;
+        align-horizontal: center;
+    }
+
+    .dashboard-forecast-separator {
+        width: 100%;
+        height: 1;
+        color: $primary-muted;
+        text-style: bold;
+        text-wrap: nowrap;
+        text-overflow: clip;
     }
 
     DashboardForecastPanel DashboardHourlyForecast {
         width: 100%;
         max-width: 100%;
         height: 2fr;
-        min-height: 8;
+        min-height: 5;
     }
 
     DashboardForecastPanel DashboardDailyForecast {
         width: 100%;
         max-width: 100%;
+        height: 3;
+    }
+
+    #dashboard-forecast-context {
+        width: 100%;
         height: 6;
     }
 
-    #dashboard-hourly-status {
+    #dashboard-forecast-status {
         width: 100%;
-        height: 10;
-        border: round $primary-muted;
+        height: 1fr;
         color: $text-muted;
         text-style: italic;
         content-align: center middle;
         text-align: center;
     }
-
-    #dashboard-open-weather-hint {
-        width: 100%;
-        height: auto;
-        min-height: 1;
-        color: $text-muted;
-        text-style: italic;
-    }
-
     """
 
     def compose(self) -> ComposeResult:
         self.border_title = 'Location Forecast'
-        yield Static('', id='dashboard-forecast-role')
         yield Static('No location selected', id='dashboard-forecast-place')
-        yield Static('Weather summary unavailable', id='dashboard-current-summary')
+        yield Static(
+            '─ Current ────────────────────────────────────────────────',
+            classes='dashboard-forecast-separator',
+        )
+        yield CurrentConditions(id='dashboard-current-conditions')
+        yield Static(
+            '─ Hourly Forecast ─────────────────────────────────────────',
+            classes='dashboard-forecast-separator',
+        )
         yield DashboardHourlyForecast(id='dashboard-hourly-forecast')
         yield Static(
-            'Select a place to load its hourly forecast.',
-            id='dashboard-hourly-status',
+            '─ Daily Forecast ──────────────────────────────────────────',
+            classes='dashboard-forecast-separator',
         )
         yield DashboardDailyForecast(id='dashboard-daily-forecast')
+        yield ContextBar(id='dashboard-forecast-context')
         yield Static(
-            'Again opens Weather.',
-            id='dashboard-open-weather-hint',
+            'Select a place to load its forecast.',
+            id='dashboard-forecast-status',
         )
+
+    @property
+    def current_conditions(self) -> CurrentConditions:
+        return self.query_one('#dashboard-current-conditions', CurrentConditions)
 
     @property
     def hourly_forecast(self) -> DashboardHourlyForecast:
@@ -144,226 +187,124 @@ class DashboardForecastPanel(Container):
             DashboardDailyForecast,
         )
 
+    @property
+    def context_bar(self) -> ContextBar:
+        return self.query_one('#dashboard-forecast-context', ContextBar)
+
     def on_mount(self) -> None:
-        self.hourly_forecast.display = False
-        self.daily_forecast.display = False
+        self._layout_context_rows = 1
+        self._show_status('Select a place to load its forecast.')
 
     def set_layout(self, budget: DashboardLayoutBudget) -> None:
         """Apply the weather-rail reductions selected for this viewport."""
 
-        current = self.query_one('#dashboard-current-summary', Static)
-        current.styles.height = budget.current_summary_height
-        current.styles.margin = (
-            (1, 0) if budget.current_summary_height >= 4 else (0, 0)
+        density = (
+            CurrentDensity.STANDARD
+            if budget.current_conditions_height >= 5
+            else CurrentDensity.SMALL
         )
+        self.current_conditions.set_layout(
+            density,
+            budget.current_conditions_height,
+            (),
+            False,
+        )
+        self.current_conditions.detail.display = False
         self.hourly_forecast.styles.min_height = budget.hourly_min_height
         self.daily_forecast.set_row_count(budget.daily_rows)
-        self.query_one('#dashboard-open-weather-hint', Static).display = (
-            budget.show_open_hint
+        self._layout_context_rows = budget.context_rows
+        context_height = (
+            (budget.context_rows + 1) * 3 if budget.context_rows else 0
+        )
+        self.context_bar.set_layout(
+            row_count=budget.context_rows,
+            height=context_height,
+            narrow=True,
+            show_air_quality=True,
+            separated=True,
         )
 
     def show_location(
         self,
         location: LocationMetadata | None,
-        summary: SavedLocationWeatherSummary | None,
-        *,
-        role: str,
-        temperature_unit: str,
     ) -> None:
-        """Render one active, selected, or transiently previewed place."""
+        """Show one place while its complete forecast is unavailable."""
 
         if not self.is_mounted:
             return
-        self.query_one('#dashboard-forecast-role', Static).update(role)
-        place = 'No location selected' if location is None else location_label(location)
-        self.query_one('#dashboard-forecast-place', Static).update(place)
-        self.query_one('#dashboard-current-summary', Static).update(
-            self._summary_text(summary, temperature_unit=temperature_unit)
+        self.query_one('#dashboard-forecast-place', Static).update(
+            _dashboard_place_heading(location)
         )
-        self._show_hourly_status('Select this place to load its hourly forecast.')
+        self._show_status('Select this place to load its forecast.')
 
     def show_loading(
         self,
         location: LocationMetadata,
-        summary: SavedLocationWeatherSummary | None,
-        *,
-        role: str,
-        temperature_unit: str,
     ) -> None:
-        """Keep the known current summary visible while loading a snapshot."""
+        """Show a stable loading state for one committed place."""
 
-        self.show_location(
-            location,
-            summary,
-            role=role,
-            temperature_unit=temperature_unit,
-        )
-        self._show_hourly_status('Loading hourly forecast…')
+        self.show_location(location)
+        self._show_status('Loading forecast…')
 
     def show_error(
         self,
         location: LocationMetadata,
-        summary: SavedLocationWeatherSummary | None,
-        *,
-        role: str,
-        temperature_unit: str,
     ) -> None:
-        """Show a retryable preview failure without discarding known current data."""
+        """Show a retryable selected-place failure."""
 
-        self.show_location(
-            location,
-            summary,
-            role=role,
-            temperature_unit=temperature_unit,
-        )
-        self._show_hourly_status(
-            'Hourly forecast unavailable.\nSelect another place and return to retry.'
+        self.show_location(location)
+        self._show_status(
+            'Forecast unavailable.\nSelect another place and return to retry.'
         )
 
     def show_forecast(
         self,
         location: LocationMetadata,
         event: WeatherUpdated,
-        *,
-        role: str,
-        temperature_unit: str,
     ) -> None:
-        """Render one complete app-owned preview in the narrow rail."""
+        """Render one complete app-owned forecast in the narrow rail."""
 
         if not self.is_mounted:
             return
-        self.query_one('#dashboard-forecast-role', Static).update(role)
         self.query_one('#dashboard-forecast-place', Static).update(
-            location_label(location)
+            _dashboard_place_heading(location)
         )
         self._forecast_event = event
-        self._forecast_temperature_unit = temperature_unit
+        self.current_conditions.hourly_model = event.hourly
         self.show_hour(0)
         self.hourly_forecast.update_forecast(event)
         self.daily_forecast.update_forecast(event)
+        self.context_bar.update_forecast(event, location=location)
+        self.current_conditions.display = True
         self.hourly_forecast.display = True
         self.daily_forecast.display = True
-        self.query_one('#dashboard-hourly-status', Static).display = False
+        self.context_bar.display = self._layout_context_rows > 0
+        for separator in self.query('.dashboard-forecast-separator'):
+            separator.display = True
+        self.query_one('#dashboard-forecast-status', Static).display = False
 
     def show_hour(self, index: int) -> None:
-        """Update the fixed conditions summary for one highlighted hour."""
+        """Update standard current instruments and AQI for one hourly row."""
 
         event = getattr(self, '_forecast_event', None)
         if event is None:
             return
-        hourly = event.hourly
-        point = hourly.get_point(index)
-        if point is None:
+        if event.hourly.get_point(index) is None:
             return
-        temperature_unit = getattr(
-            self,
-            '_forecast_temperature_unit',
-            'celsius',
-        )
-        temperature = hourly.get_temperature(index)
-        feels = hourly.get_feels_temperature(index)
-        rain = hourly.get_precipitation_probability(index)
-        wind = hourly.get_wind_speed(index)
-        gust = hourly.get_wind_gust(index)
-        direction = hourly.get_wind_direction(index) or ''
-        temp_unit = hourly.forecast_units.get(
-            'temperature_2m',
-            '°F' if temperature_unit == 'fahrenheit' else '°C',
-        )
-        wind_unit = hourly.forecast_units.get('wind_speed_10m', '')
-        condition = get_condition(point.get('weather_code'))
-        time = point.get('time')
+        self.current_conditions.hour_index = index
+        self.context_bar.on_hour_highlighted(index)
 
-        text = Text()
-        if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
-            colour = temp_colour(
-                temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=temperature_unit,
-                theme_colours=self.app.theme_variables,
-            )
-            text.append(f'{round(temperature):.0f}{temp_unit}', style=f'bold {colour}')
-        else:
-            text.append('--', style='italic dim')
-        if condition is not None:
-            colour = (
-                self.app.theme_variables.get(condition.color_var)
-                if condition.color_var
-                else None
-            )
-            text.append(' · ', style='dim')
-            text.append(
-                condition.name,
-                style=f'italic {colour}' if colour else 'italic',
-            )
-        if time is not None:
-            text.append(f'\n{time:%a %H:%M}', style='dim')
-        if isinstance(feels, (int, float)):
-            text.append(f' · Feels {round(feels):.0f}{temp_unit}')
-        if isinstance(rain, (int, float)):
-            text.append(f'\nRain {round(rain):.0f}%')
-        if isinstance(wind, (int, float)):
-            direction_label = f'{direction} ' if direction else ''
-            text.append(
-                f' · Wind {direction_label}{round(wind):.0f}{wind_unit}'
-            )
-        if isinstance(gust, (int, float)):
-            text.append(f'\nGust {round(gust):.0f}{wind_unit}')
-        self.query_one('#dashboard-current-summary', Static).update(text)
-
-    def _show_hourly_status(self, message: str) -> None:
+    def _show_status(self, message: str) -> None:
         self._forecast_event = None
+        self.current_conditions.display = False
         self.hourly_forecast.display = False
         self.daily_forecast.display = False
-        status = self.query_one('#dashboard-hourly-status', Static)
+        self.context_bar.display = False
+        for separator in self.query('.dashboard-forecast-separator'):
+            separator.display = False
+        status = self.query_one('#dashboard-forecast-status', Static)
         status.update(message)
         status.display = True
-
-    def _summary_text(
-        self,
-        summary: SavedLocationWeatherSummary | None,
-        *,
-        temperature_unit: str,
-    ) -> Text:
-        text = Text()
-        if summary is None or summary.error:
-            text.append('Current summary unavailable', style='italic dim')
-            text.append('\nNo new request is made by Dashboard.', style='dim')
-            return text
-
-        temperature = summary.temperature
-        if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
-            unit = (summary.temperature_unit or '').strip()
-            if not unit:
-                unit = '°F' if temperature_unit == 'fahrenheit' else '°C'
-            colour = temp_colour(
-                temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=temperature_unit,
-                theme_colours=self.app.theme_variables,
-            )
-            text.append(f'{round(temperature):.0f}{unit}', style=f'bold {colour}')
-        else:
-            text.append('--', style='italic dim')
-
-        condition = summary.condition
-        if condition is not None:
-            text.append('\n')
-            colour = (
-                self.app.theme_variables.get(condition.color_var)
-                if condition.color_var
-                else None
-            )
-            style = f'italic {colour}' if colour else 'italic'
-            if self.app.emoji_enabled and summary.condition_emoji:
-                text.append(emoji_prefix(summary.condition_emoji))
-            text.append(condition.name, style=style)
-        else:
-            text.append('\nCondition unavailable', style='italic dim')
-        return text
-
 
 class DashboardAlertList(OptionList):
     """Keep Enter as an explicit open action while click/Space selects."""
@@ -710,6 +651,298 @@ class DashboardAlertsPanel(Container):
         return max(8, self.alert_list.content_size.width - 1)
 
 
+class DashboardTropicalPanel(Container):
+    """Track and official products for one committed source observation."""
+
+    DEFAULT_CSS = """
+    DashboardTropicalPanel {
+        width: 1fr;
+        height: 100%;
+        min-width: 18;
+        min-height: 8;
+        border: round $primary;
+        border-title-color: $primary;
+        background: $background;
+    }
+
+    #dashboard-tropical-tabs {
+        width: 100%;
+        height: 2;
+    }
+
+    #dashboard-tropical-content {
+        width: 100%;
+        height: 1fr;
+        overflow: hidden hidden;
+    }
+
+    #dashboard-tropical-track {
+        width: 100%;
+        height: 1fr;
+    }
+
+    #dashboard-tropical-product-body {
+        width: 100%;
+        height: 1fr;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+    }
+
+    #dashboard-tropical-track-unavailable,
+    #dashboard-tropical-detail-state {
+        width: 100%;
+        height: 100%;
+        padding: 0 1;
+        color: $text-muted;
+        text-style: italic;
+        text-align: center;
+        content-align: center middle;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        self.border_title = 'Tropical System'
+        tabs = Tabs(
+            Tab('Track and Cone', id='dashboard-tropical-track-tab'),
+            active='dashboard-tropical-track-tab',
+            id='dashboard-tropical-tabs',
+        )
+        tabs.display = False
+        yield tabs
+        with Container(id='dashboard-tropical-content'):
+            yield LargeTropicalStormTrackScope(id='dashboard-tropical-track')
+            unavailable = Static(
+                'Track and cone unavailable for this source.',
+                id='dashboard-tropical-track-unavailable',
+            )
+            unavailable.display = False
+            yield unavailable
+            body = VerticalScroll(id='dashboard-tropical-product-body')
+            body.display = False
+            yield body
+            yield Static(
+                'Select a tropical system on the map.',
+                id='dashboard-tropical-detail-state',
+            )
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._observation: TropicalSystem | None = None
+        self._products: tuple[TropicalProduct, ...] = ()
+        self._product_indices: dict[str, int] = {}
+        self._updating_tabs = False
+
+    @property
+    def track(self) -> LargeTropicalStormTrackScope:
+        return self.query_one(
+            '#dashboard-tropical-track',
+            LargeTropicalStormTrackScope,
+        )
+
+    @property
+    def tabs(self) -> Tabs:
+        return self.query_one('#dashboard-tropical-tabs', Tabs)
+
+    def show_overview(
+        self,
+        systems: tuple[CanonicalTropicalSystem, ...] | None,
+    ) -> None:
+        """Show loading, empty, or selection guidance below the world map."""
+
+        if systems is None:
+            message = 'Loading tropical systems…'
+        elif systems:
+            message = 'Select a tropical system on the map.'
+        else:
+            message = 'No active tropical systems.'
+        self._show_state(message)
+
+    def show_error(self) -> None:
+        self._show_state('Tropical systems are temporarily unavailable.')
+
+    def show_system(
+        self,
+        system: CanonicalTropicalSystem | None,
+        observation: TropicalSystem | None,
+    ) -> None:
+        """Show the source track immediately, before product loading settles."""
+
+        if system is None or observation is None:
+            self.show_overview(())
+            return
+        self._observation = observation
+        self._products = ()
+        self._product_indices.clear()
+        self.query_one('#dashboard-tropical-detail-state', Static).display = False
+        self.tabs.display = True
+        self.tabs.active = 'dashboard-tropical-track-tab'
+        self.query_one('#dashboard-tropical-product-body').display = False
+        try:
+            self.track.update_system(observation)
+        except Exception as error:
+            self.log.error(f'Unable to render Dashboard tropical track: {error!r}')
+            self.track.clear()
+        self._show_track()
+
+    async def reset_products(self) -> None:
+        """Discard prior selection tabs while keeping the new track visible."""
+
+        await self._replace_tabs(())
+
+    async def show_products(
+        self,
+        observation: TropicalSystem,
+        products: list[TropicalProduct],
+    ) -> None:
+        """Add only provider-backed tabs for the still-selected observation."""
+
+        if observation is not self._observation:
+            return
+        self._products = tuple(products)
+        try:
+            self.track.update_system(observation, products=self._products)
+        except Exception as error:
+            self.log.error(f'Unable to render Dashboard tropical products: {error!r}')
+            self.track.clear()
+        specs = tropical_product_tab_specs(
+            observation,
+            self._products,
+            id_prefix='dashboard-tropical-product',
+        )
+        await self._replace_tabs(specs)
+        self._show_track()
+
+    async def _replace_tabs(self, specs: list[tuple[str, str]] | tuple) -> None:
+        self._updating_tabs = True
+        try:
+            await self.tabs.clear()
+            await self.tabs.add_tab(
+                Tab('Track and Cone', id='dashboard-tropical-track-tab')
+            )
+            self._product_indices.clear()
+            for tab_id, label in specs:
+                await self.tabs.add_tab(Tab(label, id=tab_id))
+                suffix = tab_id.rsplit('-', 1)[-1]
+                if suffix.isdigit():
+                    self._product_indices[tab_id] = int(suffix)
+            self.tabs.active = 'dashboard-tropical-track-tab'
+        finally:
+            self._updating_tabs = False
+
+    async def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tabs is not self.tabs:
+            return
+        event.stop()
+        if self._updating_tabs or event.tab.id is None:
+            return
+        if event.tab.id == 'dashboard-tropical-track-tab':
+            self._show_track()
+            return
+        await self._show_product(event.tab.id)
+
+    def _show_track(self) -> None:
+        body = self.query_one(
+            '#dashboard-tropical-product-body',
+            VerticalScroll,
+        )
+        body.display = False
+        unavailable = self.query_one(
+            '#dashboard-tropical-track-unavailable',
+            Static,
+        )
+        unavailable.display = not self.track.available
+        self.track.set_layout(
+            visible=True,
+            height=max(1, self.content_size.height - 2),
+        )
+
+    async def _show_product(self, tab_id: str) -> None:
+        observation = self._observation
+        if observation is None:
+            return
+        self.track.set_layout(visible=False, height=0)
+        self.query_one(
+            '#dashboard-tropical-track-unavailable',
+            Static,
+        ).display = False
+        body = self.query_one(
+            '#dashboard-tropical-product-body',
+            VerticalScroll,
+        )
+        body.display = True
+        await body.remove_children()
+        if tab_id == 'dashboard-tropical-product-forecast':
+            await body.mount(Static(tropical_forecast_summary(observation)))
+            return
+        index = self._product_indices.get(tab_id)
+        if index is None or not 0 <= index < len(self._products):
+            await body.mount(Static('Product unavailable'))
+            return
+        await body.mount(*tropical_product_widgets(self._products[index]))
+
+    def _show_state(self, message: str) -> None:
+        self._observation = None
+        self._products = ()
+        if not self.is_mounted:
+            return
+        self.tabs.display = False
+        self.track.clear()
+        self.query_one(
+            '#dashboard-tropical-track-unavailable',
+            Static,
+        ).display = False
+        self.query_one('#dashboard-tropical-product-body').display = False
+        state = self.query_one('#dashboard-tropical-detail-state', Static)
+        state.update(message)
+        state.display = True
+
+
+class DashboardAlertDetailPanel(Container):
+    """Persistent lower-centre home for one committed bulletin selection."""
+
+    DEFAULT_CSS = """
+    DashboardAlertDetailPanel {
+        width: 1fr;
+        height: 100%;
+        min-width: 18;
+        min-height: 8;
+        border: round $primary;
+        border-title-color: $primary;
+        background: $background;
+    }
+
+    #dashboard-alert-detail-state {
+        width: 100%;
+        height: 100%;
+        padding: 0 1;
+        color: $text-muted;
+        text-style: italic;
+        text-align: center;
+        content-align: center middle;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        self.border_title = 'Selected Alert'
+        yield Static(
+            'Select an alert from the bulletin.',
+            id='dashboard-alert-detail-state',
+        )
+
+    def show_alert(self, row: BulletinAlert | None) -> None:
+        """Show honest Slice A state for the committed alert identity."""
+
+        state = self.query_one('#dashboard-alert-detail-state', Static)
+        if row is None:
+            state.update('Select an alert from the bulletin.')
+            return
+        country = get_country_name_by_alpha2(row.country_code) or row.country_code
+        state.update(
+            f'{alert_condition_name(row.alert)}\n{country}\n\n'
+            'Map and warning details are not available here yet.'
+        )
+
+
 class DashboardScreen(Screen[None]):
     """Installed dashboard with one stable responsive widget tree."""
 
@@ -763,10 +996,33 @@ class DashboardScreen(Screen[None]):
         margin-right: 2;
     }
 
-    #dashboard-world-map {
+    #dashboard-center-column {
         width: 1fr;
         height: 100%;
+        layout: vertical;
         margin-right: 2;
+        overflow: hidden hidden;
+        background: $background;
+        hatch: right $background-lighten-1;
+    }
+
+    #dashboard-world-map {
+        width: 100%;
+        height: 14;
+    }
+
+    #dashboard-detail-row {
+        width: 100%;
+        height: 1fr;
+        layout: horizontal;
+        margin-top: 1;
+        overflow: hidden hidden;
+        background: $background;
+        hatch: right $background-lighten-1;
+    }
+
+    #dashboard-tropical-panel {
+        margin-right: 1;
     }
 
     #dashboard-alerts-panel {
@@ -792,11 +1048,15 @@ class DashboardScreen(Screen[None]):
         self._active_pane = 'map'
         self._selected_location: LocationMetadata | None = None
         self._displayed_location: LocationMetadata | None = None
-        self._previewing = False
+        self._selected_tropical_system: CanonicalTropicalSystem | None = None
+        self._selected_tropical_observation: TropicalSystem | None = None
         self._forecast_request_generation = 0
         self._forecast_request_key: tuple[str, str, str, str] | None = None
         self._forecast_wait_task: asyncio.Task[None] | None = None
         self._tropical_wait_task: asyncio.Task[None] | None = None
+        self._tropical_product_task: asyncio.Task[None] | None = None
+        self._tropical_detail_generation = 0
+        self._tropical_detail_key: tuple[str, str, str] | None = None
         self._bulletin_generation = -1
         self._alert_return_focus: str | None = None
 
@@ -806,13 +1066,23 @@ class DashboardScreen(Screen[None]):
             yield Tabs(
                 Tab('Forecast', id='dashboard-tab-forecast'),
                 Tab('Map', id='dashboard-tab-map'),
-                Tab('Alerts', id='dashboard-tab-alerts'),
+                Tab('Tropical', id='dashboard-tab-tropical'),
+                Tab('Selected Alert', id='dashboard-tab-alert-detail'),
+                Tab('Recent Alerts', id='dashboard-tab-alerts'),
                 active='dashboard-tab-map',
                 id='dashboard-pane-tabs',
             )
             with Container(id='dashboard-body'):
                 yield DashboardForecastPanel(id='dashboard-forecast-panel')
-                yield DashboardWorldMap(id='dashboard-world-map')
+                with Container(id='dashboard-center-column'):
+                    yield DashboardWorldMap(id='dashboard-world-map')
+                    with Container(id='dashboard-detail-row'):
+                        yield DashboardTropicalPanel(
+                            id='dashboard-tropical-panel'
+                        )
+                        yield DashboardAlertDetailPanel(
+                            id='dashboard-alert-detail-panel'
+                        )
                 yield DashboardAlertsPanel(id='dashboard-alerts-panel')
         yield Footer()
 
@@ -827,6 +1097,17 @@ class DashboardScreen(Screen[None]):
     @property
     def alerts_panel(self) -> DashboardAlertsPanel:
         return self.query_one('#dashboard-alerts-panel', DashboardAlertsPanel)
+
+    @property
+    def tropical_panel(self) -> DashboardTropicalPanel:
+        return self.query_one('#dashboard-tropical-panel', DashboardTropicalPanel)
+
+    @property
+    def alert_detail_panel(self) -> DashboardAlertDetailPanel:
+        return self.query_one(
+            '#dashboard-alert-detail-panel',
+            DashboardAlertDetailPanel,
+        )
 
     def selected_country_code(self) -> str | None:
         """Return the persistent map selection used by bulletin priority work."""
@@ -869,6 +1150,7 @@ class DashboardScreen(Screen[None]):
         if self._tropical_wait_task is not None:
             self._tropical_wait_task.cancel()
             self._tropical_wait_task = None
+        self._cancel_tropical_product_wait()
 
     def on_resize(self, event: Resize) -> None:
         self._apply_layout(event.size.width, event.size.height)
@@ -879,13 +1161,14 @@ class DashboardScreen(Screen[None]):
             self._active_pane = 'forecast'
         elif tab_id == 'dashboard-tab-map':
             self._active_pane = 'map'
+        elif tab_id == 'dashboard-tab-tropical':
+            self._active_pane = 'tropical'
+        elif tab_id == 'dashboard-tab-alert-detail':
+            self._active_pane = 'alert-detail'
         elif tab_id == 'dashboard-tab-alerts':
             self._active_pane = 'alerts'
         else:
             return
-        if self._active_pane != 'map' and self._previewing:
-            self._previewing = False
-            self._show_persistent_location()
         self._update_visibility()
         if self._active_pane == 'map':
             self.call_after_refresh(self.world_map.focus_preferred_location)
@@ -907,11 +1190,18 @@ class DashboardScreen(Screen[None]):
         self.world_map.set_active_location(self.app.location)
         self.world_map.set_selected_location(self._selected_location)
         self._sync_tropical_systems()
+        if (
+            self._selected_tropical_system is not None
+            and self._selected_tropical_observation is not None
+        ):
+            self._select_tropical_detail(
+                self._selected_tropical_system,
+                self._selected_tropical_observation,
+            )
         self.update_bulletin(
             self.app.alert_bulletin.generation,
             self.app.alert_bulletin.recent_alerts_snapshot(),
         )
-        self._previewing = False
         self._show_persistent_location()
         self._ensure_persistent_forecast()
 
@@ -932,10 +1222,7 @@ class DashboardScreen(Screen[None]):
             self._displayed_location is not None
             and location_key(self._displayed_location) == location_key(location)
         ):
-            if self._previewing:
-                self._show_location(self._displayed_location, role='Preview')
-            else:
-                self._show_persistent_location()
+            self._show_persistent_location()
 
     def refresh_appearance(self) -> None:
         """Rebuild theme/emoji-sensitive Rich content from cached state only."""
@@ -956,58 +1243,27 @@ class DashboardScreen(Screen[None]):
         )
         self._show_persistent_location()
 
-    def on_dashboard_place_previewed(
-        self,
-        message: DashboardPlacePreviewed,
-    ) -> None:
-        message.stop()
-        if (
-            self._layout_budget is not None
-            and not self._layout_budget.simultaneous
-            and self._active_pane != 'map'
-        ):
-            return
-        self._previewing = True
-        self._show_location(message.location, role='Preview')
-
-    def on_dashboard_place_preview_ended(
-        self,
-        message: DashboardPlacePreviewEnded,
-    ) -> None:
-        message.stop()
-        self._previewing = False
-        self._show_persistent_location()
-
     def on_dashboard_place_pressed(self, message: DashboardPlacePressed) -> None:
         message.stop()
-        key = location_key(message.location)
-        selected_key = (
-            location_key(self._selected_location)
-            if self._selected_location is not None
-            else None
-        )
-        if key == selected_key:
-            self._cancel_forecast_wait()
-            self.post_message(DashboardPlaceActivated(location=message.location))
-            return
         self._selected_location = message.location
         self.app.note_bulletin_country_used(message.location.country_code)
-        self._previewing = False
         self.world_map.set_selected_location(message.location)
         self._show_persistent_location()
         self._ensure_persistent_forecast()
 
-    async def on_dashboard_tropical_activated(
+    def on_dashboard_tropical_activated(
         self,
         message: DashboardTropicalActivated,
     ) -> None:
-        """Open the owning tropical workspace at the exact source anchor."""
+        """Commit the exact storm/source anchor to the Dashboard detail pane."""
 
         message.stop()
+        self._selected_tropical_system = message.system
+        self._selected_tropical_observation = message.observation
         self.world_map.set_selected_tropical(message.system)
-        await self.app.open_tropical_systems_screen(
-            system=message.system,
-            observation=message.observation,
+        self._select_tropical_detail(
+            message.system,
+            message.observation,
         )
 
     def update_bulletin(
@@ -1025,6 +1281,7 @@ class DashboardScreen(Screen[None]):
             self.alerts_panel.selected_row,
             pulse=False,
         )
+        self.alert_detail_panel.show_alert(self.alerts_panel.selected_row)
 
     def on_dashboard_alerts_panel_selected(
         self,
@@ -1032,6 +1289,7 @@ class DashboardScreen(Screen[None]):
     ) -> None:
         message.stop()
         self.world_map.set_selected_alert(message.row)
+        self.alert_detail_panel.show_alert(message.row)
         if message.row is not None:
             self.app.note_bulletin_country_used(message.row.country_code)
 
@@ -1075,8 +1333,12 @@ class DashboardScreen(Screen[None]):
         snapshot = self.app.tropical_systems_snapshot()
         if snapshot is not None:
             self.world_map.set_tropical_systems(snapshot)
+            if self._selected_tropical_observation is None:
+                self.tropical_panel.show_overview(snapshot)
             return
         self.world_map.set_tropical_loading()
+        if self._selected_tropical_observation is None:
+            self.tropical_panel.show_overview(None)
         if self._tropical_wait_task is None or self._tropical_wait_task.done():
             self._tropical_wait_task = asyncio.create_task(
                 self._load_tropical_systems()
@@ -1090,78 +1352,107 @@ class DashboardScreen(Screen[None]):
         except Exception:
             if self.is_mounted:
                 self.world_map.set_tropical_error()
+                if self._selected_tropical_observation is None:
+                    self.tropical_panel.show_error()
         else:
             if self.is_mounted:
                 self.world_map.set_tropical_systems(systems)
+                if self._selected_tropical_observation is None:
+                    self.tropical_panel.show_overview(tuple(systems))
         finally:
             if self._tropical_wait_task is asyncio.current_task():
                 self._tropical_wait_task = None
+
+    def _select_tropical_detail(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+    ) -> None:
+        """Show one exact source and lazily join its app-owned product load."""
+
+        key = _tropical_observation_key(observation)
+        if self._tropical_detail_key == key and (
+            self._tropical_product_task is None
+            or not self._tropical_product_task.done()
+        ):
+            return
+        self._cancel_tropical_product_wait()
+        self._tropical_detail_key = key
+        self.tropical_panel.show_system(system, observation)
+        generation = self._tropical_detail_generation
+        self._tropical_product_task = asyncio.create_task(
+            self._load_tropical_detail_products(
+                observation,
+                key,
+                generation,
+            )
+        )
+
+    async def _load_tropical_detail_products(
+        self,
+        observation: TropicalSystem,
+        key: tuple[str, str, str],
+        generation: int,
+    ) -> None:
+        try:
+            await self.tropical_panel.reset_products()
+            products = await self.app.load_tropical_products(observation)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if generation == self._tropical_detail_generation:
+                self._tropical_detail_key = None
+            return
+        finally:
+            if (
+                generation == self._tropical_detail_generation
+                and self._tropical_product_task is asyncio.current_task()
+            ):
+                self._tropical_product_task = None
+        if self._tropical_detail_result_is_current(key, generation):
+            await self.tropical_panel.show_products(observation, products)
+
+    def _tropical_detail_result_is_current(
+        self,
+        key: tuple[str, str, str],
+        generation: int,
+    ) -> bool:
+        selected = self._selected_tropical_observation
+        return (
+            self.is_mounted
+            and generation == self._tropical_detail_generation
+            and selected is not None
+            and _tropical_observation_key(selected) == key
+        )
+
+    def _cancel_tropical_product_wait(self) -> None:
+        self._tropical_detail_generation += 1
+        if (
+            self._tropical_product_task is not None
+            and not self._tropical_product_task.done()
+        ):
+            self._tropical_product_task.cancel()
+        self._tropical_product_task = None
+        self._tropical_detail_key = None
 
     def _show_persistent_location(self) -> None:
         location = self._selected_location or self.app.location
         self._displayed_location = location
         if location is None:
-            self._show_location(None, role='No active place')
+            self.forecast_panel.show_location(None)
             return
-        role = self._display_role(location)
         snapshot = self.app.dashboard_forecast_snapshot(location)
         if snapshot is not None:
-            self.forecast_panel.show_forecast(
-                location,
-                snapshot,
-                role=role,
-                temperature_unit=self.app.temperature_unit,
-            )
+            self.forecast_panel.show_forecast(location, snapshot)
             return
-        summary = self.app.saved_location_weather_summary(location)
         if (
             self._forecast_wait_task is not None
             and not self._forecast_wait_task.done()
             and self._forecast_request_key == self._forecast_selection_key(location)
         ):
-            self.forecast_panel.show_loading(
-                location,
-                summary,
-                role=role,
-                temperature_unit=self.app.temperature_unit,
-            )
+            self.forecast_panel.show_loading(location)
             return
-        self.forecast_panel.show_location(
-            location,
-            summary,
-            role=role,
-            temperature_unit=self.app.temperature_unit,
-        )
-
-    def _show_location(self, location: LocationMetadata | None, *, role: str) -> None:
-        self._displayed_location = location
-        persistent = self._selected_location or self.app.location
-        if (
-            role == 'Preview'
-            and location is not None
-            and persistent is not None
-            and location_key(location) == location_key(persistent)
-        ):
-            snapshot = self.app.dashboard_forecast_snapshot(location)
-            if snapshot is not None:
-                self.forecast_panel.show_forecast(
-                    location,
-                    snapshot,
-                    role=role,
-                    temperature_unit=self.app.temperature_unit,
-                )
-                return
-        summary = (
-            None
-            if location is None
-            else self.app.saved_location_weather_summary(location)
-        )
-        self.forecast_panel.show_location(
-            location,
-            summary,
-            role=role,
-            temperature_unit=self.app.temperature_unit,
-        )
+        self.forecast_panel.show_location(location)
 
     def _ensure_persistent_forecast(self) -> None:
         """Start at most one selected-place preview wait for the current state."""
@@ -1188,8 +1479,7 @@ class DashboardScreen(Screen[None]):
         self._forecast_wait_task = asyncio.create_task(
             self._load_forecast(location, key, generation)
         )
-        if not self._previewing:
-            self._show_persistent_location()
+        self._show_persistent_location()
 
     async def _load_forecast(
         self,
@@ -1204,13 +1494,8 @@ class DashboardScreen(Screen[None]):
         except asyncio.CancelledError:
             raise
         except Exception:
-            if self._forecast_result_is_current(key, generation) and not self._previewing:
-                self.forecast_panel.show_error(
-                    location,
-                    self.app.saved_location_weather_summary(location),
-                    role=self._display_role(location),
-                    temperature_unit=self.app.temperature_unit,
-                )
+            if self._forecast_result_is_current(key, generation):
+                self.forecast_panel.show_error(location)
             return
         finally:
             if (
@@ -1219,7 +1504,7 @@ class DashboardScreen(Screen[None]):
             ):
                 self._forecast_request_key = None
                 self._forecast_wait_task = None
-        if self._forecast_result_is_current(key, generation) and not self._previewing:
+        if self._forecast_result_is_current(key, generation):
             self._show_persistent_location()
 
     def _forecast_result_is_current(
@@ -1260,15 +1545,6 @@ class DashboardScreen(Screen[None]):
         message.stop()
         self.forecast_panel.show_hour(message.index)
 
-    def _display_role(self, location: LocationMetadata | None) -> str:
-        if location is None:
-            return 'No active place'
-        if self._selected_location is not None and (
-            location_key(location) == location_key(self._selected_location)
-        ):
-            return 'Selected place'
-        return 'Active weather'
-
     def _apply_layout(self, width: int, height: int) -> None:
         if not self.is_mounted:
             return
@@ -1287,32 +1563,79 @@ class DashboardScreen(Screen[None]):
             self.forecast_panel.styles.width = budget.forecast_width
             self.forecast_panel.styles.height = '100%'
             self.forecast_panel.styles.margin = (0, budget.gutter, 0, 0)
-            self.world_map.styles.width = '1fr'
-            self.world_map.styles.height = (
-                '100%' if budget.map_height is None else budget.map_height
+            centre = self.query_one('#dashboard-center-column', Container)
+            centre.styles.width = '1fr'
+            centre.styles.height = '100%'
+            centre.styles.margin = (0, budget.gutter, 0, 0)
+            self.world_map.styles.width = '100%'
+            self.world_map.styles.height = budget.map_height or '1fr'
+            self.world_map.styles.margin = 0
+            detail_row = self.query_one('#dashboard-detail-row', Container)
+            detail_row.styles.width = '100%'
+            detail_row.styles.height = budget.detail_height
+            detail_row.styles.margin = (budget.detail_gutter, 0, 0, 0)
+            self.tropical_panel.styles.width = '1fr'
+            self.tropical_panel.styles.height = '100%'
+            self.tropical_panel.styles.margin = (
+                0,
+                budget.detail_gutter,
+                0,
+                0,
             )
-            self.world_map.styles.margin = (0, budget.gutter, 0, 0)
+            self.alert_detail_panel.styles.width = '1fr'
+            self.alert_detail_panel.styles.height = '100%'
+            self.alert_detail_panel.styles.margin = 0
             self.alerts_panel.styles.width = budget.alert_width
             self.alerts_panel.styles.height = '100%'
+            self.alerts_panel.styles.margin = 0
         else:
-            for panel in (self.forecast_panel, self.world_map, self.alerts_panel):
+            centre = self.query_one('#dashboard-center-column', Container)
+            for panel in (self.forecast_panel, centre, self.alerts_panel):
                 panel.styles.width = '100%'
                 panel.styles.height = '100%'
                 panel.styles.margin = 0
+            self.world_map.styles.width = '100%'
+            self.world_map.styles.height = '100%'
+            self.world_map.styles.margin = 0
         self._update_visibility()
 
     def _update_visibility(self) -> None:
         if self._layout_budget is None:
             return
         tabs = self.query_one('#dashboard-pane-tabs', Tabs)
+        centre = self.query_one('#dashboard-center-column', Container)
+        detail_row = self.query_one('#dashboard-detail-row', Container)
         tabs.display = not self._layout_budget.simultaneous
         if self._layout_budget.simultaneous:
             self.forecast_panel.display = True
+            centre.display = True
             self.world_map.display = True
+            detail_row.display = True
+            self.tropical_panel.display = True
+            self.alert_detail_panel.display = True
             self.alerts_panel.display = True
             return
         self.forecast_panel.display = self._active_pane == 'forecast'
+        centre.display = self._active_pane in {
+            'map',
+            'tropical',
+            'alert-detail',
+        }
         self.world_map.display = self._active_pane == 'map'
+        detail_row.display = self._active_pane in {'tropical', 'alert-detail'}
+        self.tropical_panel.display = self._active_pane == 'tropical'
+        self.alert_detail_panel.display = self._active_pane == 'alert-detail'
+        if detail_row.display:
+            detail_row.styles.height = '100%'
+            detail_row.styles.margin = 0
+            selected_detail = (
+                self.tropical_panel
+                if self._active_pane == 'tropical'
+                else self.alert_detail_panel
+            )
+            selected_detail.styles.width = '100%'
+            selected_detail.styles.height = '100%'
+            selected_detail.styles.margin = 0
         self.alerts_panel.display = self._active_pane == 'alerts'
 
     def _restore_focus(self) -> None:
@@ -1385,8 +1708,30 @@ def _relative_observation(value: datetime) -> str:
     return observed.strftime('on %d %b')
 
 
+def _dashboard_place_heading(location: LocationMetadata | None) -> str:
+    """Return the compact place heading without administrative regions."""
+
+    if location is None:
+        return 'No location selected'
+    name = (location.name or '').strip()
+    if not name and location.latitude is not None and location.longitude is not None:
+        name = f'{location.latitude:.3f}, {location.longitude:.3f}'
+    name = name or 'Selected location'
+    country = (location.country or '').strip()
+    return f'{name}\n{country}' if country and country != name else name
+
+
+def _tropical_observation_key(
+    observation: TropicalSystem,
+) -> tuple[str, str, str]:
+    issued = observation.issued_at.isoformat() if observation.issued_at else ''
+    return observation.source, observation.id, issued
+
+
 __all__ = [
+    'DashboardAlertDetailPanel',
     'DashboardAlertsPanel',
     'DashboardForecastPanel',
     'DashboardScreen',
+    'DashboardTropicalPanel',
 ]

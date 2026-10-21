@@ -48,6 +48,20 @@ class ContextBar(Container):
         scrollbar-size-horizontal: 0;
         scrollbar-size-vertical: 0;
     }
+
+    ContextBar.separated {
+        grid-gutter: 0 0;
+        hatch: none;
+    }
+
+    ContextBar.separated LocationInfo,
+    ContextBar.separated AstronomyInfo,
+    ContextBar.separated AirQualityWidget {
+        border: none;
+        border-top: solid $primary-muted;
+        border-title-color: $primary;
+        margin: 0;
+    }
     """
 
     def compose(self) -> ComposeResult:  # type: ignore[override]
@@ -81,13 +95,17 @@ class ContextBar(Container):
         height: int,
         narrow: bool = False,
         show_air_quality: bool = True,
+        separated: bool = False,
     ) -> None:
         """Apply one shared density and choose the visible context cards."""
 
         self.styles.height = height
+        self.set_class(separated, 'separated')
         if row_count <= 0:
+            self.display = False
             return
-        card_height = row_count + 2
+        self.display = True
+        card_height = row_count + (1 if separated else 2)
         visible_count = 3 if show_air_quality else 2
         self.styles.grid_size_rows = visible_count
         self.styles.grid_rows = (card_height,) * visible_count
@@ -124,7 +142,7 @@ class ContextBar(Container):
 
         # Update location info - set reactive properties (widget updates itself)
         self.location.forecast_metadata = self.forecast_metadata
-        self.location.location = self.app.location
+        self.location.location = self.location_metadata or self.app.location
 
         # Update astronomy details - set reactive properties (widget updates itself)
         self.astronomy.forecast_metadata = self.forecast_metadata
@@ -138,17 +156,27 @@ class ContextBar(Container):
             self.astronomy.refresh_display()
 
     # ----------------------- Messages -----------------------
-    async def on_weather_updated(self, event: WeatherUpdated) -> None:  # type: ignore[override]
-        """Update location and info when new data arrives."""
+    def update_forecast(
+        self,
+        event: WeatherUpdated,
+        *,
+        location: Any | None = None,
+    ) -> None:
+        """Install one explicit forecast/location snapshot for all three tables."""
+
+        self.location_metadata = location or event.metadata
         self.forecast_metadata = event.daily.forecast_metadata
         self.daily_model = event.daily
         self.hourly_model = event.hourly
-        self.location_metadata = event.metadata
 
-        # Set air quality widget reactive properties (widget updates itself)
         self.air_quality.hourly_model = event.hourly
-        self.air_quality.location = event.metadata
+        self.air_quality.location = self.location_metadata
         self.air_quality.hour_index = 0
+
+    async def on_weather_updated(self, event: WeatherUpdated) -> None:  # type: ignore[override]
+        """Update location and info when fresh Weather-screen data arrives."""
+
+        self.update_forecast(event)
 
     # Public API for WeatherScreen to forward hour highlights
     def on_hour_highlighted(self, hour_index: int) -> None:

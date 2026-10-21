@@ -9,7 +9,7 @@ from rich.cells import cell_len
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.events import Blur, Click, Enter, Focus, Leave
+from textual.events import Click
 from textual.message import Message
 from textual.widgets import Static
 from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
@@ -19,11 +19,7 @@ from wevva.geography import representative_polygon_point
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
     DashboardPlacePressed,
-    DashboardPlacePreviewed,
-    DashboardPlacePreviewEnded,
     DashboardTropicalActivated,
-    DashboardTropicalPreviewed,
-    DashboardTropicalPreviewEnded,
 )
 from wevva.services.tropical import (
     canonical_tropical_anchor,
@@ -36,7 +32,6 @@ from wevva.widgets.map_callouts import DirectionalCalloutCandidate
 from wevva.widgets.tropical_systems import (
     build_canonical_tropical_label,
     canonical_storm_key,
-    source_tab_label,
 )
 from wevva.widgets.weather_alerts import alert_condition_name, alert_severity_color
 from wevva.widgets.world_locations_map import WorldLocationLabel, WorldLocationsMap
@@ -45,9 +40,14 @@ from wevva.widgets.world_locations_map import WorldLocationLabel, WorldLocations
 class DashboardLocationLabel(WorldLocationLabel):
     """Location callout whose primary action is owned by Dashboard."""
 
+    BINDINGS = [
+        Binding('enter', 'select_location', 'Select', show=False),
+        Binding('space', 'select_location', 'Select', show=False),
+    ]
+
     DEFAULT_CSS = """
     DashboardLocationLabel.active-place {
-        text-style: bold underline;
+        text-style: bold;
     }
 
     DashboardLocationLabel.selected-place,
@@ -66,29 +66,12 @@ class DashboardLocationLabel(WorldLocationLabel):
 
         self.post_message(DashboardPlacePressed(location=self.location))
 
-    def on_focus(self, event: Focus) -> None:
-        del event
-        self.post_message(DashboardPlacePreviewed(location=self.location))
-
-    def on_blur(self, event: Blur) -> None:
-        del event
-        self.post_message(DashboardPlacePreviewEnded())
-
-    def on_enter(self, event: Enter) -> None:
-        del event
-        self.post_message(DashboardPlacePreviewed(location=self.location))
-
-    def on_leave(self, event: Leave) -> None:
-        del event
-        self.post_message(DashboardPlacePreviewEnded())
-
-
 class DashboardTropicalLabel(Static, can_focus=True):
     """One canonical storm anchored to an exact source observation."""
 
     BINDINGS = [
-        Binding('enter', 'activate', 'Open', show=False),
-        Binding('space', 'activate', 'Open', show=False),
+        Binding('enter', 'activate', 'Select', show=False),
+        Binding('space', 'activate', 'Select', show=False),
     ]
 
     DEFAULT_CSS = """
@@ -110,7 +93,7 @@ class DashboardTropicalLabel(Static, can_focus=True):
     DashboardTropicalLabel.selected-tropical,
     DashboardTropicalLabel.selected-tropical:hover,
     DashboardTropicalLabel.selected-tropical:focus {
-        text-style: underline reverse;
+        text-style: reverse;
     }
     """
 
@@ -141,8 +124,11 @@ class DashboardTropicalLabel(Static, can_focus=True):
             system,
             self.app.theme_variables,
         )
-        context = _tropical_context(system, observation, self.app.theme_variables)
-        self.tooltip = context
+        self.tooltip = _tropical_tooltip(
+            system,
+            observation,
+            self.app.theme_variables,
+        )
         self.set_marker_on_right(self._marker_on_right)
 
     def set_marker_on_right(self, marker_on_right: bool) -> None:
@@ -171,31 +157,6 @@ class DashboardTropicalLabel(Static, can_focus=True):
         event.stop()
         self.focus()
         self.action_activate()
-
-    def on_focus(self, event: Focus) -> None:
-        del event
-        self._preview()
-
-    def on_blur(self, event: Blur) -> None:
-        del event
-        self.post_message(DashboardTropicalPreviewEnded())
-
-    def on_enter(self, event: Enter) -> None:
-        del event
-        self._preview()
-
-    def on_leave(self, event: Leave) -> None:
-        del event
-        self.post_message(DashboardTropicalPreviewEnded())
-
-    def _preview(self) -> None:
-        self.post_message(
-            DashboardTropicalPreviewed(
-                system=self.system,
-                observation=self.observation,
-            )
-        )
-
 
 class DashboardAlertMarker(Static, can_focus=True):
     """The dashboard's sole selected or transient alert marker."""
@@ -266,19 +227,6 @@ class DashboardWorldMap(WorldLocationsMap):
     DashboardWorldMap {
         layers: map labels alert-marker;
     }
-
-    DashboardWorldMap #dashboard-tropical-context {
-        position: absolute;
-        layer: labels;
-        offset: 1 1;
-        width: auto;
-        max-width: 90%;
-        height: auto;
-        max-height: 3;
-        color: $text-muted;
-        text-style: italic;
-        background: $background;
-    }
     """
 
     def __init__(
@@ -296,7 +244,6 @@ class DashboardWorldMap(WorldLocationsMap):
         self._tropical_systems: list[CanonicalTropicalSystem] = []
         self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
         self._selected_tropical_key: str | None = None
-        self._tropical_status = 'Tropical systems not loaded'
         self._selected_alert: BulletinAlert | None = None
         self._preview_alert: BulletinAlert | None = None
         self._alert_pulse_task: asyncio.Task[None] | None = None
@@ -305,10 +252,6 @@ class DashboardWorldMap(WorldLocationsMap):
 
     def compose(self) -> ComposeResult:
         yield from super().compose()
-        yield Static(
-            self._tropical_status,
-            id='dashboard-tropical-context',
-        )
         marker = DashboardAlertMarker()
         self._alert_marker_widget = marker
         marker.display = False
@@ -390,12 +333,10 @@ class DashboardWorldMap(WorldLocationsMap):
         self._schedule_reflow()
 
     def set_tropical_loading(self) -> None:
-        self._tropical_status = 'Loading tropical systems…'
-        self._show_tropical_overview()
+        """Retain current geography while the lower detail pane owns status."""
 
     def set_tropical_error(self) -> None:
-        self._tropical_status = 'Tropical systems unavailable'
-        self._show_tropical_overview()
+        """Retain current geography while the lower detail pane owns status."""
 
     def set_tropical_systems(
         self,
@@ -406,16 +347,9 @@ class DashboardWorldMap(WorldLocationsMap):
         self._tropical_systems = sort_canonical_tropical_systems_by_severity(
             systems
         )
-        count = len(self._tropical_systems)
-        self._tropical_status = (
-            'No active tropical systems'
-            if count == 0
-            else f'{count} active tropical system{"s" if count != 1 else ""}'
-        )
         if self.is_mounted:
             self._sync_tropical_label_widgets()
             self._apply_label_state()
-            self._show_tropical_overview()
             self._schedule_reflow()
 
     def set_selected_tropical(
@@ -651,43 +585,6 @@ class DashboardWorldMap(WorldLocationsMap):
         )
         return labels
 
-    def on_dashboard_tropical_previewed(
-        self,
-        message: DashboardTropicalPreviewed,
-    ) -> None:
-        message.stop()
-        self.query_one('#dashboard-tropical-context', Static).update(
-            _tropical_context(
-                message.system,
-                message.observation,
-                self.app.theme_variables,
-            )
-        )
-
-    def on_dashboard_tropical_preview_ended(
-        self,
-        message: DashboardTropicalPreviewEnded,
-    ) -> None:
-        message.stop()
-        focused = self.app.focused
-        if isinstance(focused, DashboardTropicalLabel):
-            self.query_one('#dashboard-tropical-context', Static).update(
-                _tropical_context(
-                    focused.system,
-                    focused.observation,
-                    self.app.theme_variables,
-                )
-            )
-        else:
-            self._show_tropical_overview()
-
-    def _show_tropical_overview(self) -> None:
-        if self.is_mounted:
-            self.query_one('#dashboard-tropical-context', Static).update(
-                self._tropical_status
-            )
-
-
 def _tropical_callout_key(key: str | None) -> str:
     return f'tropical:{key or ""}'
 
@@ -696,28 +593,20 @@ def _bulletin_identity(row: BulletinAlert | None) -> tuple[str, str] | None:
     return None if row is None else country_alert_identity(row.alert)
 
 
-def _tropical_context(
+def _tropical_tooltip(
     system: CanonicalTropicalSystem,
     observation: TropicalSystem,
     theme: dict[str, str],
 ) -> Text:
     text = build_canonical_tropical_label(system, theme)
-    facts = []
     if observation.movement:
-        facts.append(f'Moving {observation.movement.strip()}')
-    if observation.max_wind:
-        facts.append(f'Wind {observation.max_wind.strip()}')
-    if facts:
         text.append('\n')
-        text.append(' · '.join(facts))
-    source = source_tab_label(observation)
-    issued = observation.issued_at
-    issued_label = issued.strftime('%d %b %H:%M %Z').rstrip() if issued else ''
-    text.append('\n')
-    text.append(
-        ' · '.join(value for value in (source, issued_label) if value),
-        style='dim',
-    )
+        text.append('Movement', style='dim')
+        text.append(f' {observation.movement.strip()}')
+    if observation.max_wind:
+        text.append('\n')
+        text.append('Wind', style='dim')
+        text.append(f' {observation.max_wind.strip()}')
     return text
 
 

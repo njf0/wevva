@@ -378,6 +378,10 @@ class TropicalDisplayTests(unittest.TestCase):
         label = build_tropical_tab_label(nearby, accent='#abcdef')
 
         self.assertEqual(label.plain, 'Typhoon DOLPHIN')
+        self.assertEqual(
+            [(span.start, span.end) for span in label.spans],
+            [(0, len('Typhoon'))],
+        )
 
 class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

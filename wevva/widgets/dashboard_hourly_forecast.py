@@ -16,18 +16,21 @@ from wevva.messages import HourHighlighted, WeatherUpdated
 from wevva.utils import rain_colour, temp_colour, wind_colour
 
 
+_MINIMUM_WIDTHS = (2, 3, 8, 7, 9)
+_PREFERRED_WIDTHS = (3, 4, 12, 12, 17)
+
+
 class DashboardHourlyForecast(Container):
-    """One row per hour with no horizontal navigation requirement."""
+    """One formatted row per hour with no horizontal navigation."""
 
     DEFAULT_CSS = """
     DashboardHourlyForecast {
         width: 100%;
         height: 2fr;
-        min-height: 8;
-        border: round $primary;
-        border-title-color: $primary;
-        border-title-align: left;
+        min-height: 5;
+        border: none;
         background: $background;
+        overflow: hidden hidden;
     }
 
     DashboardHourlyForecast DataTable {
@@ -43,30 +46,34 @@ class DashboardHourlyForecast(Container):
         super().__init__(id=id)
         self._hourly_model: Any | None = None
         self._indices: list[int] = []
-        self._wide_columns = False
+        self._column_widths: tuple[int, ...] = ()
 
     def compose(self) -> ComposeResult:
-        yield DataTable(
-            show_header=True,
+        table = DataTable(
+            show_header=False,
             cursor_type='row',
             cell_padding=0,
             zebra_stripes=True,
             id='dashboard-hourly-table',
         )
+        # The application stylesheet makes generic DataTables auto-width.
+        # This table is the rail's viewport, so keep that rule from collapsing
+        # it to its column content during the first layout pass.
+        table.styles.width = '100%'
+        table.styles.min_width = 0
+        yield table
 
     @property
     def table(self) -> DataTable:
         return self.query_one('#dashboard-hourly-table', DataTable)
 
     def on_mount(self) -> None:
-        self.border_title = 'Hourly Forecast'
         self._rebuild()
 
     def on_resize(self, event: Resize) -> None:
         event.stop()
-        wide_columns = event.size.width >= 46
-        if wide_columns != self._wide_columns:
-            self._wide_columns = wide_columns
+        widths = _fitted_widths(max(1, event.size.width - 1))
+        if widths != self._column_widths:
             self._rebuild()
 
     def update_forecast(self, event: WeatherUpdated) -> None:
@@ -89,9 +96,15 @@ class DashboardHourlyForecast(Container):
         if model is None or not model.forecast_timeseries:
             return
 
-        self._wide_columns = self.content_size.width >= 46
-        for label, key, width in self._column_specs(model):
-            table.add_column(label, key=key, width=width)
+        self._column_widths = _fitted_widths(
+            max(1, self.content_size.width - 1)
+        )
+        for key, width in zip(
+            ('hour', 'condition', 'temperature', 'rain', 'wind'),
+            self._column_widths,
+            strict=True,
+        ):
+            table.add_column('', key=key, width=width)
 
         self._indices = list(
             range(min(HOURS_WINDOW, len(model.forecast_timeseries)))
@@ -107,53 +120,26 @@ class DashboardHourlyForecast(Container):
             table.move_cursor(row=row, animate=False, scroll=False)
         table.refresh()
 
-    def _column_specs(self, model: Any) -> tuple[tuple[str, str, int], ...]:
-        precip_unit = model.forecast_units.get('precipitation', 'mm')
-        wind_unit = model.forecast_units.get('wind_speed_10m', '')
-        temp_unit = model.forecast_units.get('temperature_2m', '°')
-        self.border_subtitle = f'{precip_unit} · wind {wind_unit}'.strip()
-        if self._wide_columns:
-            return (
-                ('Hour', 'hour', 7),
-                ('Cond', 'condition', 5),
-                (f'T{temp_unit}', 'temperature', 5),
-                ('P%', 'probability', 4),
-                ('Rain', 'amount', 6),
-                ('Wind', 'wind', 7),
-                ('Gust', 'gust', 7),
-                ('Dir', 'direction', 5),
-            )
-        return (
-            ('Hr', 'hour', 3),
-            ('Wx', 'condition', 3),
-            (temp_unit, 'temperature', 4),
-            ('P%', 'probability', 4),
-            (precip_unit, 'amount', 4),
-            ('W', 'wind', 3),
-            ('G', 'gust', 4),
-            ('Dir', 'direction', 3),
-        )
-
     def _row_cells(self, index: int) -> tuple[Text, ...]:
         model = self._hourly_model
         point = model.get_point(index) or {}
         theme = self.app.theme_variables
         temperature = model.get_temperature(index)
+        feels = model.get_feels_temperature(index)
         probability = model.get_precipitation_probability(index)
         amount = model.get_precipitation(index)
         wind = model.get_wind_speed(index)
         gust = model.get_wind_gust(index)
         condition = get_condition(point.get('weather_code'))
-        temp_style = (
-            temp_colour(
-                temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=self.app.temperature_unit,
-                theme_colours=theme,
-            )
-            if _is_number(temperature)
-            else 'dim'
+        temperature_style = _temperature_style(
+            temperature,
+            unit=self.app.temperature_unit,
+            theme=theme,
+        )
+        feels_style = _temperature_style(
+            feels,
+            unit=self.app.temperature_unit,
+            theme=theme,
         )
         rain_style = (
             rain_colour(
@@ -165,54 +151,56 @@ class DashboardHourlyForecast(Container):
             if _is_number(probability)
             else 'dim'
         )
-        wind_style = (
-            wind_colour(
-                wind,
-                hex=True,
-                min_colour=theme['foreground'],
-                max_colour=theme['secondary'],
-            )
-            if _is_number(wind)
-            else 'dim'
-        )
-        gust_style = (
-            wind_colour(
-                gust,
-                hex=True,
-                min_colour=theme['foreground'],
-                max_colour=theme['secondary'],
-            )
-            if _is_number(gust)
-            else 'dim'
-        )
+        wind_style = _wind_style(wind, theme)
+        gust_style = _wind_style(gust, theme)
         condition_style = (
             f'bold {theme.get(condition.color_var)}'
             if condition is not None and condition.color_var
             else 'bold'
         )
         time = point.get('time')
-        hour = (
-            time.strftime('%a %H')
-            if self._wide_columns and time is not None
-            else time.strftime('%H') if time is not None else '--'
-        )
+        hour = time.strftime('%H') if time is not None else '--'
+        temp_unit = model.forecast_units.get('temperature_2m', '°C')
+        precip_unit = model.forecast_units.get('precipitation', 'mm')
+        wind_unit = model.forecast_units.get('wind_speed_10m', '')
         direction = (model.get_wind_direction(index) or '--').replace(' ', '')
         return (
             Text(hour, style='dim'),
-            Text(condition.abbr if condition is not None else '--', style=condition_style),
-            Text(_number(temperature, suffix='°'), style=temp_style),
-            Text(_number(probability), style=rain_style),
-            Text(_amount(amount), style=rain_style),
-            Text(_number(wind), style=wind_style),
-            Text(_number(gust), style=gust_style),
-            Text(direction, style='dim'),
+            Text(
+                condition.abbr if condition is not None else '--',
+                style=condition_style,
+            ),
+            _paired_measure(
+                temperature,
+                feels,
+                unit=temp_unit,
+                primary_style=temperature_style,
+                secondary_style=feels_style,
+            ),
+            _paired_measure(
+                probability,
+                amount,
+                unit='%',
+                secondary_unit=precip_unit,
+                primary_style=rain_style,
+                secondary_style=rain_style,
+                secondary_amount=True,
+            ),
+            _wind_measure(
+                wind,
+                direction,
+                gust,
+                unit=wind_unit,
+                wind_style=wind_style,
+                gust_style=gust_style,
+            ),
         )
 
     def on_data_table_row_highlighted(
         self,
         event: DataTable.RowHighlighted,
     ) -> None:
-        """Keep the fixed current summary aligned with the selected row."""
+        """Keep current instruments and AQI aligned with the selected row."""
 
         if (
             event.data_table is self.table
@@ -222,11 +210,83 @@ class DashboardHourlyForecast(Container):
             self.post_message(HourHighlighted(self._indices[event.cursor_row]))
 
 
-def _number(value: object, *, suffix: str = '') -> str:
+def _paired_measure(
+    primary: object,
+    secondary: object,
+    *,
+    unit: str,
+    primary_style: str,
+    secondary_style: str,
+    secondary_unit: str | None = None,
+    secondary_amount: bool = False,
+) -> Text:
+    text = Text()
+    text.append(_number(primary), style=primary_style)
+    text.append(unit)
+    text.append(' (')
+    text.append(
+        _amount(secondary) if secondary_amount else _number(secondary),
+        style=secondary_style,
+    )
+    text.append(secondary_unit if secondary_unit is not None else unit)
+    text.append(')')
+    return text
+
+
+def _wind_measure(
+    wind: object,
+    direction: str,
+    gust: object,
+    *,
+    unit: str,
+    wind_style: str,
+    gust_style: str,
+) -> Text:
+    text = Text()
+    text.append(_number(wind), style=wind_style)
+    text.append(unit)
+    text.append(' ')
+    text.append(direction, style=wind_style if direction != '--' else 'dim')
+    text.append(' (')
+    text.append(_number(gust), style=gust_style)
+    text.append(unit)
+    text.append(')')
+    return text
+
+
+def _temperature_style(
+    value: object,
+    *,
+    unit: str,
+    theme: dict[str, str],
+) -> str:
+    if not _is_number(value):
+        return 'dim'
+    return temp_colour(
+        value,
+        scale='theme_temperature',
+        hex=True,
+        unit=unit,
+        theme_colours=theme,
+    )
+
+
+def _wind_style(value: object, theme: dict[str, str]) -> str:
+    if not _is_number(value):
+        return 'dim'
+    return wind_colour(
+        value,
+        hex=True,
+        min_colour=theme['foreground'],
+        max_colour=theme['secondary'],
+    )
+
+
+def _number(value: object) -> str:
     if not _is_number(value):
         return '--'
     assert isinstance(value, (int, float))
-    return f'{round(value):.0f}{suffix}'
+    return f'{round(value):.0f}'
 
 
 def _amount(value: object) -> str:
@@ -238,6 +298,18 @@ def _amount(value: object) -> str:
 
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _fitted_widths(available: int) -> tuple[int, ...]:
+    widths = list(_MINIMUM_WIDTHS)
+    remaining = max(0, available - sum(widths))
+    for index in (4, 2, 3, 1, 0):
+        addition = min(remaining, _PREFERRED_WIDTHS[index] - widths[index])
+        widths[index] += addition
+        remaining -= addition
+        if remaining == 0:
+            break
+    return tuple(widths)
 
 
 __all__ = ['DashboardHourlyForecast']

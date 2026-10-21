@@ -31,7 +31,8 @@ m key -> WorldLocationsScreen -> checked-in global map-unit geometry
 
 b key -> installed DashboardScreen -> app-owned current/saved summaries
                                    -> active/saved places on shared world geometry
-                                   -> repeated place activation -> WeatherScreen + refresh
+                                   -> committed place/storm/alert selections
+                                   -> in-dashboard forecast and detail regions
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -243,34 +244,41 @@ The Dashboard is a persistent installed workspace opened from Weather with
 120×30-or-larger viewport shows the forecast rail, dominant world map, and
 alerts rail together; larger widths progressively grow both rails rather than
 assigning every surplus cell to the map. On very wide, tall terminals the
-central map is capped near the natural Braille projection aspect, leaving the
-unused lower centre available for later real content. Smaller viewports expose
-the same mounted panels through tabs. Its dashboard map subclasses the
-saved-locations map at narrow
+central map is capped near the natural Braille projection aspect. The remaining
+centre height is a persistent two-column detail row for a selected tropical
+system and alert, separated from the map and each other by hatched gutters. At
+the 120×30 baseline the pure budget assigns 14 rows to the map, one gutter, and
+11 rows to the detail row. Smaller viewports expose the same mounted forecast,
+map, tropical-detail, selected-alert-detail, and recent-alert panels through
+tabs. Its dashboard map subclasses the saved-locations map at narrow
 creation, ordering, and interaction hooks, retaining the shared projection,
 callout placement, temperature rendering, and resize behavior. Focus and hover
-only preview a place. Enter, Space, and click share one primary-action path:
-the first action selects a place and a repeated action adopts it, returns to
-the existing Weather screen, and refreshes there. Resize and tab changes are
+are visual-only. Enter, Space, and click share one primary-action path which
+commits the place to the Dashboard forecast rail; repeating it leaves the
+selection in place. `w` remains the explicit route back to Weather, and a
+Dashboard selection never adopts `Wevva.location`. Resize and tab changes are
 presentation-only. Mount, resume, and selection consult one application-owned
-preview loader, which serves a valid snapshot immediately, coalesces a missing
-coordinate/unit key through the same fifteen-minute complete-forecast cache
-used by Weather, and never adopts the previewed place as `Wevva.location`.
+forecast loader, which serves a valid snapshot immediately and coalesces a
+missing coordinate/unit key through the same fifteen-minute complete-forecast
+cache used by Weather.
 The Dashboard cancels an obsolete wait and guards the result by selection
-generation, so a late response cannot replace a newer selection. Its fixed
-current summary follows the highlighted hour. A Dashboard-specific vertical
-hourly table shows hour, abbreviated condition, temperature, precipitation
-chance and amount, wind speed, gust, and direction without horizontal
-scrolling; it retains configured units and emits the ordinary
-`HourHighlighted` message. The adjacent Dashboard-specific daily table consumes
-the same cached snapshot, skips today like the ordinary daily forecast, and
-presents complete future-day
-rows without horizontal scrolling. It uses compact columns in the baseline
-rail and restores rain amount plus fuller labels when the rail or fallback pane
-is wide enough. The layout budget reduces current-summary height and daily row
-count at medium, compact, and short sizes while keeping the same mounted widget
-tree; hourly scrolling remains internal, so it does not move current or daily
-context.
+generation, so a late response cannot replace a newer selection. The forecast
+rail reuses `CurrentConditions` for its borderless Temperature, Precipitation,
+and Wind instruments; the selected hourly row drives those instruments and the
+air-quality hour. A Dashboard-specific vertical hourly table shows hour,
+abbreviated condition, temperature plus feels-like, precipitation chance plus
+amount, and wind speed/direction/gust without horizontal scrolling. It retains
+configured units, builds value and punctuation spans separately, and emits the
+ordinary `HourHighlighted` message. The adjacent Dashboard adapter wraps the
+standard `DailySummaryTable`, selects its combined date, condition,
+temperature, rain, and wind field groups, and skips today through the standard
+model path. The borderless `ContextBar` stack receives the Dashboard-selected
+location explicitly rather than reading the active Weather location; its
+existing density controls show one row per context card at 120x30, expand on
+taller terminals, and omit the cards in compact/medium modes. The pure layout
+budget reduces daily rows and current-instrument density at short sizes while
+keeping the same mounted widget tree; hourly scrolling remains internal, so it
+does not move the current, daily, or context sections.
 
 The Dashboard consumes the application's existing thirty-minute canonical
 tropical-system cache. A fresh cache is rendered immediately; otherwise one
@@ -284,14 +292,24 @@ can send locations and storms through the same callout planner. Selected
 features rank first, then canonical storms, the active location, and ordinary
 saved locations; the resulting order also drives keyboard traversal.
 
-Canonical storm labels use the same accent-coloured, classification-first
-formatter as `TropicalSystemsScreen`. Focus or hover shows the
-anchor observation's movement, wind, source, and issue time. Activation records
-the Dashboard selection and opens a fresh Tropical Systems screen with stable
-storm and source/ID intent. The dedicated screen applies that intent both to an
-already-cached catalogue and after an initially empty catalogue loads, falling
-back to a refreshed observation from the same source if the exact ID changed.
-Returning reveals the existing Dashboard and restores the selected storm focus.
+Canonical storm map labels use an accent-coloured, classification-first
+formatter, including their marker bullet. Their native tooltip contains only
+the classification/name title and available movement and wind lines; no storm
+status or focused-tooltip copy is painted over the world map. The Tropical
+Systems workspace uses a separate tab formatter which colours only the
+classification and leaves the name plain.
+
+Storm activation records the exact Dashboard canonical/source observation and
+renders that source's `LargeTropicalStormTrackScope` immediately in the lower
+tropical pane. It then joins `Wevva.load_tropical_products()`, retaining the
+application's per-issued-observation cache and in-flight coalescing. Track and
+Cone remains the first tab; only fetched, content-backed product choices such
+as Forecast, Public Advisory, and Forecast Discussion are added. The Dashboard
+owns only a cancellable waiter and selection generation, so a late response
+cannot replace a newer storm. `wevva/widgets/tropical_products.py` contains the
+small shared product-tab and provider-product presentation helpers consumed by
+both Dashboard and the full Tropical Systems screen; provider loading and
+caching remain outside it.
 
 The application owns one session alert-bulletin coordinator independently of
 Dashboard lifecycle. It starts after the first active-location warning request

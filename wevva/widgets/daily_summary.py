@@ -34,19 +34,28 @@ class DailySummaryTable(DataTable):
             if column is not DailyColumn.WIND_DIRECTION
         )
         self._row_count = 6
+        self._column_widths: tuple[int, ...] | None = None
 
     def set_layout(
         self,
         columns: tuple[DailyColumn, ...],
         row_count: int,
+        column_widths: tuple[int, ...] | None = None,
     ) -> None:
         """Select complete field groups and complete forecast days."""
 
         columns = tuple(columns)
         row_count = max(0, int(row_count))
-        changed = columns != self._visible_columns or row_count != self._row_count
+        if column_widths is not None and len(column_widths) != len(columns):
+            raise ValueError('column_widths must match the selected columns')
+        changed = (
+            columns != self._visible_columns
+            or row_count != self._row_count
+            or column_widths != self._column_widths
+        )
         self._visible_columns = columns
         self._row_count = row_count
+        self._column_widths = column_widths
         self.styles.height = row_count
         if changed and self.daily_model is not None and self.is_mounted:
             self._update_display()
@@ -83,7 +92,7 @@ class DailySummaryTable(DataTable):
             DailyColumn.SUNRISE: 'Rise',
             DailyColumn.SUNSET: 'Set',
         }
-        widths = daily_column_widths(self._visible_columns)
+        widths = self._column_widths or daily_column_widths(self._visible_columns)
         for column, width in zip(self._visible_columns, widths, strict=True):
             self.add_column(column_labels[column], key=column.value, width=width)
 

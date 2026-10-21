@@ -27,14 +27,18 @@ class DashboardLayoutBudget:
     alert_width: int = 30
     gutter: int = 2
     map_height: int | None = None
+    detail_height: int = 0
+    detail_gutter: int = 1
     daily_rows: int = 3
-    current_summary_height: int = 4
-    hourly_min_height: int = 8
-    show_open_hint: bool = True
+    current_conditions_height: int = 5
+    hourly_min_height: int = 5
+    context_rows: int = 1
 
 
 _BASELINE_WIDTH = 120
 _WORLD_VIEWPORT_ASPECT = 360 / 168
+_MAP_MINIMUM_HEIGHT = 14
+_DETAIL_MINIMUM_HEIGHT = 9
 
 
 def _wide_dashboard_budget(width: int, height: int) -> DashboardLayoutBudget:
@@ -53,15 +57,19 @@ def _wide_dashboard_budget(width: int, height: int) -> DashboardLayoutBudget:
         - alert_width
         - gutter * 2,
     )
-    map_height = None
-    if width >= 180 and height >= 40:
-        usable_height = max(8, height - 2 - stage_padding[0] * 2)
-        map_content_width = max(1, central_width - 2)
-        natural_height = math.ceil(
-            map_content_width / (2.0 * _WORLD_VIEWPORT_ASPECT)
-        ) + 2
-        map_height = min(usable_height, max(20, natural_height))
+    usable_height = max(8, height - 2 - stage_padding[0] * 2)
+    map_content_width = max(1, central_width - 2)
+    natural_height = max(
+        _MAP_MINIMUM_HEIGHT,
+        math.ceil(map_content_width / (2.0 * _WORLD_VIEWPORT_ASPECT)) + 2,
+    )
+    map_height = min(
+        natural_height,
+        usable_height - 1 - _DETAIL_MINIMUM_HEIGHT,
+    )
+    detail_height = usable_height - map_height - 1
     daily_rows = 6 if height >= 38 else 4 if height >= 34 else 3
+    context_rows = 5 if height >= 50 else 2 if height >= 38 else 1
     return DashboardLayoutBudget(
         DashboardPresentation.WIDE,
         simultaneous=True,
@@ -70,7 +78,9 @@ def _wide_dashboard_budget(width: int, height: int) -> DashboardLayoutBudget:
         alert_width=alert_width,
         gutter=gutter,
         map_height=map_height,
+        detail_height=detail_height,
         daily_rows=daily_rows,
+        context_rows=context_rows,
     )
 
 
@@ -90,9 +100,9 @@ def dashboard_layout_for(
             simultaneous=False,
             stage_padding=(0, 0),
             daily_rows=1,
-            current_summary_height=2,
+            current_conditions_height=3,
             hourly_min_height=4,
-            show_open_hint=False,
+            context_rows=0,
         )
     if width < 100 or height < 24:
         return DashboardLayoutBudget(
@@ -100,17 +110,14 @@ def dashboard_layout_for(
             simultaneous=False,
             stage_padding=(0, 1),
             daily_rows=2,
-            current_summary_height=3,
-            hourly_min_height=6,
-            show_open_hint=False,
+            context_rows=0,
         )
     return DashboardLayoutBudget(
         DashboardPresentation.MEDIUM,
         simultaneous=False,
         stage_padding=(1, 2),
         daily_rows=4 if height >= 30 else 2,
-        current_summary_height=3,
-        show_open_hint=False,
+        context_rows=0,
     )
 
 

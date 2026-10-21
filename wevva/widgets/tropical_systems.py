@@ -50,6 +50,26 @@ def build_canonical_tropical_label(
     return label
 
 
+def build_canonical_tropical_tab_label(
+    system: CanonicalTropicalSystem,
+    theme: dict[str, str],
+) -> Text:
+    """Colour the classification while leaving the canonical name plain."""
+
+    name = _clean(system.name) or 'Tropical System'
+    classification = canonical_tropical_classification(system)
+    colour = theme.get('accent') or theme.get('text-accent')
+    label = Text()
+    if classification:
+        label.append(
+            classification,
+            style=Style(bold=True, color=colour),
+        )
+        label.append(' ')
+    label.append(name)
+    return label
+
+
 def build_tropical_system_text(nearby: NearbyTropicalSystem, *, accent: str | None = None) -> Text:
     """Render no more than two lines of nearby-storm context for the panel."""
     system = nearby.system
@@ -80,13 +100,15 @@ def build_tropical_tab_label(nearby: NearbyTropicalSystem, *, accent: str | None
     system = nearby.system
     classification = _clean(system.classification)
     name = _system_name(system)
-    style = Style(bold=True, color=accent)
     label = Text()
     if classification:
-        label.append(classification, style=style)
+        label.append(
+            classification,
+            style=Style(bold=True, color=accent),
+        )
         if name:
-            label.append(' ', style=style)
-    label.append(name, style=style)
+            label.append(' ')
+    label.append(name)
     return label
 
 
@@ -190,6 +212,7 @@ def _clean(value: object) -> str:
 
 __all__ = [
     'build_canonical_tropical_label',
+    'build_canonical_tropical_tab_label',
     'build_tropical_coordinates_text',
     'build_tropical_system_details',
     'build_tropical_system_text',

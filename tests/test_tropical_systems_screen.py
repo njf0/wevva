@@ -203,6 +203,13 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             sources = screen.query_one('#tropical-source-tabs', Tabs)
             self.assertEqual(labels, ['Typhoon NANGKA', 'Tropical Storm LALA'])
             self.assertTrue(storm_tabs[0].label.spans[0].style.bold)
+            self.assertEqual(
+                (
+                    storm_tabs[0].label.spans[0].start,
+                    storm_tabs[0].label.spans[0].end,
+                ),
+                (0, len('Typhoon')),
+            )
             self.assertEqual([tab.label.plain for tab in sources.query('Tab')], ['JMA', 'CMA'])
             self.assertTrue(sources.display)
             self.assertEqual(calls, ['jma_tropical'])

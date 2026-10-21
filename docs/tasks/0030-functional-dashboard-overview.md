@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — agreed follow-up to Task 0029; no implementation started
+In progress — Slices A-C implemented
 
 ## Context
 
@@ -319,6 +319,15 @@ topology before detailed readers are added.
 
 Depends on Task 0029 only. Later slices depend on this stable composition.
 
+Implemented with one centre-column tree containing the aspect-aware world map
+and two persistent detail-panel boundaries. The 120x30 budget assigns 14 map
+rows, one hatched gutter, and 11 detail rows; compact presentations expose Map,
+Tropical, Selected Alert, and Recent Alerts as distinct tabs over the same
+mounted widgets. Place hover/focus is now visual-only, repeated selection stays
+in Dashboard, and storm selection records the exact canonical/source anchor
+without opening Tropical Systems or loading products. Both detail regions show
+selection-aware empty states ready for their later reader slices.
+
 ### Slice B — complete location forecast rail
 
 Replace the current summary with the three reused current instruments; revise
@@ -330,6 +339,17 @@ selection guards.
 Depends on Slice A's rail height budgets. It is otherwise independent of the
 two lower detail readers.
 
+Implemented by reusing `CurrentConditions`, `DailySummaryTable`, and
+`ContextBar` over the selected place's existing application-owned forecast
+snapshot. The Dashboard keeps only one custom vertical hourly adapter; its
+five Rich cells colour values independently from units and punctuation and do
+not expose a horizontal scroll path. The heading is name plus country only,
+and hourly selection updates both the standard current instruments and AQI.
+The pure layout budget omits context cards in compact/medium modes, shows one
+row per card at the 120x30 baseline, and expands their existing density at
+taller sizes. `ContextBar` now accepts an explicit location, while the Weather
+screen continues through the same update boundary.
+
 ### Slice C — tropical selection and detail reader
 
 Simplify map storm tooltip/state, separate workspace tab colouring from map
@@ -338,6 +358,17 @@ and Cone plus available product tabs through the existing application cache.
 
 Depends on Slice A's lower-left pane and selection ownership. It does not
 depend on alert work.
+
+Implemented with a persistent `Track and Cone` tab backed by
+`LargeTropicalStormTrackScope` and content-backed official-product tabs. A
+committed source observation renders its own geometry immediately, then joins
+`Wevva.load_tropical_products()`; Dashboard selection generations prevent late
+results from replacing a newer storm. Product-tab selection and safe product
+widget conversion now live in one small shared presentation module used by
+both Dashboard and Tropical Systems. The world map no longer paints storm
+status or focused-tooltip copies over geography, and its native tooltip is
+limited to title, movement, and wind. Map labels remain fully accent-coloured,
+while Tropical Systems tabs again colour only the classification.
 
 ### Slice D — selected-alert reader and rail simplification
 

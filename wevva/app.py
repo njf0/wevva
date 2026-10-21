@@ -28,7 +28,6 @@ from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
-    DashboardPlaceActivated,
     PlaceSelected,
     SavedLocationSelected,
     WeatherAlertsProgress,
@@ -918,21 +917,6 @@ class Wevva(App, inherit_bindings=False):
         self._update_saved_location_weather(location, summary)
 
     # ---------------- Messages ----------------
-    async def on_dashboard_place_activated(
-        self,
-        message: DashboardPlaceActivated,
-    ) -> None:
-        """Adopt a dashboard place and return to the existing Weather screen."""
-
-        self.location = message.location
-        if self._alerts_centre_screen is not None:
-            self._alerts_centre_screen.preserve_country_on_next_resume(False)
-        if self.screen is self._dashboard_screen:
-            await self.pop_screen()
-        elif self.screen is not self.weather_screen:
-            self.push_screen(self.weather_screen)
-        await self.action_refresh()
-
     async def on_place_selected(self, message: PlaceSelected) -> None:
         """Handle place selection → fetch → show main content.
 

@@ -1,14 +1,21 @@
-"""Mounted Slice A checks for the persistent unified dashboard."""
+"""Mounted checks for the persistent unified dashboard."""
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
 from rich.text import Text
+from textual.containers import VerticalScroll
 from textual.widgets import OptionList, Static, Tabs
-from wevva_warnings import Alert, CanonicalTropicalSystem, TropicalSystem
+from wevva_warnings import (
+    Alert,
+    CanonicalTropicalSystem,
+    TropicalProduct,
+    TropicalSystem,
+)
 from wevva_warnings.registry import get_source
 
 from tests.weather_fixtures import weather_update
@@ -18,7 +25,6 @@ from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.services.alert_bulletin import BulletinAlert
-from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.dashboard_daily_forecast import DashboardDailyForecast
 from wevva.widgets.dashboard_world_map import (
@@ -32,6 +38,7 @@ from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 BERLIN = LocationMetadata(
     name='Berlin',
+    admin='Berlin Region',
     country='Germany',
     country_code='DE',
     latitude=52.52,
@@ -135,31 +142,48 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(screen.query_one('#dashboard-pane-tabs', Tabs).display)
             self.assertTrue(screen.forecast_panel.display)
             self.assertTrue(screen.world_map.display)
+            self.assertTrue(screen.tropical_panel.display)
+            self.assertTrue(screen.alert_detail_panel.display)
             self.assertTrue(screen.alerts_panel.display)
             self.assertEqual(len(list(screen.world_map.query(DashboardLocationLabel))), 3)
-            self.assertIn(
-                'Berlin',
-                screen.query_one('#dashboard-forecast-place', Static).render().plain,
+            self.assertEqual(
+                screen.query_one(
+                    '#dashboard-forecast-place',
+                    Static,
+                ).render().plain,
+                'Berlin\nGermany',
             )
-            self.assertIn(
-                '13°C',
-                screen.query_one('#dashboard-current-summary', Static).render().plain,
-            )
+            self.assertEqual(screen.forecast_panel.current_conditions.temp._value, '13')
             hourly = screen.query_one(
                 '#dashboard-hourly-forecast',
                 DashboardHourlyForecast,
             )
             self.assertTrue(hourly.display)
-            self.assertGreater(len(hourly.table.columns), 0)
+            self.assertFalse(hourly.table.show_header)
+            self.assertEqual(len(hourly.table.columns), 5)
             self.assertEqual(len(hourly.table.rows), 24)
             self.assertEqual(hourly.table.max_scroll_x, 0)
+            hourly_row = hourly.table.get_row_at(0)
+            self.assertEqual(hourly_row[0].plain, '05')
+            self.assertEqual(hourly_row[1].plain, 'OC')
+            self.assertEqual(hourly_row[2].plain, '13°C (11°C)')
+            self.assertEqual(hourly_row[3].plain, '0% (0.0mm)')
+            self.assertEqual(hourly_row[4].plain, '8mp/h E← (14mp/h)')
+            self.assertEqual(
+                [(span.start, span.end) for span in hourly_row[2].spans],
+                [(0, 2), (6, 8)],
+            )
             daily = screen.query_one(
                 '#dashboard-daily-forecast',
                 DashboardDailyForecast,
             )
             self.assertTrue(daily.display)
             self.assertEqual(len(daily.table.rows), 3)
-            self.assertEqual(len(daily.table.columns), 8)
+            self.assertEqual(len(daily.table.columns), 5)
+            self.assertEqual(
+                [column_key.value for column_key in daily.table.columns],
+                ['date', 'condition', 'temperature', 'rain', 'wind'],
+            )
             self.assertEqual(daily.table.max_scroll_x, 0)
 
             daily_region = daily.region
@@ -168,12 +192,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await _settle(pilot)
             self.assertEqual(daily.region, daily_region)
             self.assertEqual(screen.forecast_panel.scroll_y, 0)
-            self.assertIn(
-                '14°C',
-                screen.query_one(
-                    '#dashboard-current-summary',
-                    Static,
-                ).render().plain,
+            self.assertEqual(screen.forecast_panel.current_conditions.temp._value, '14')
+            self.assertEqual(
+                screen.forecast_panel.context_bar.air_quality.hour_index,
+                1,
             )
             await pilot.press('r')
             await _settle(pilot)
@@ -253,6 +275,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(marker.display)
             self.assertIs(marker.row, row)
+            self.assertIn(
+                'River Flood',
+                screen.query_one(
+                    '#dashboard-alert-detail-state',
+                    Static,
+                ).render().plain,
+            )
             await pilot.pause(0.55)
             self.assertIsNone(screen.world_map._alert_pulse_task)
             self.assertFalse(marker.has_class('pulse'))
@@ -282,6 +311,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
             self.assertFalse(marker.display)
+            self.assertIn(
+                'Select an alert',
+                screen.query_one(
+                    '#dashboard-alert-detail-state',
+                    Static,
+                ).render().plain,
+            )
 
             panel.on_option_list_option_selected(
                 OptionList.OptionSelected(panel.alert_list, option, 0)
@@ -338,7 +374,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
 
-    async def test_place_select_then_activate_returns_to_existing_weather(self) -> None:
+    async def test_place_hover_is_visual_and_repeated_selection_stays_dashboard(self) -> None:
         app = self._app()
         async with app.run_test(size=(120, 30)) as pilot:
             await _settle(pilot)
@@ -360,14 +396,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await _settle(pilot)
             self.assertEqual(app.location, BERLIN)
             self.assertIn(
-                'London',
+                'Berlin',
                 dashboard.query_one('#dashboard-forecast-place', Static).render().plain,
             )
-            self.assertEqual(
-                dashboard.query_one('#dashboard-forecast-role', Static).render().plain,
-                'Preview',
-            )
-
             await pilot.press('enter')
             await _settle(pilot)
             self.assertIs(app.screen, dashboard)
@@ -381,14 +412,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
             await pilot.press('enter')
             await _settle(pilot)
-            self.assertIs(app.screen, weather)
-            self.assertEqual(app.location, LONDON)
-            app.action_refresh.assert_awaited_once()
-
-            await pilot.press('b')
-            await _settle(pilot)
             self.assertIs(app.screen, dashboard)
+            self.assertEqual(app.location, BERLIN)
             self.assertEqual(dashboard.world_map.selected_location_key, location_key(LONDON))
+            app.action_refresh.assert_not_awaited()
+
+            await pilot.press('w')
+            await _settle(pilot)
+            self.assertIs(app.screen, weather)
+            self.assertEqual(app.location, BERLIN)
 
     async def test_resize_reuses_panels_and_compact_tabs(self) -> None:
         app = self._app()
@@ -398,7 +430,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await _settle(pilot)
             screen = app.screen
             self.assertIsInstance(screen, DashboardScreen)
-            panels = (screen.forecast_panel, screen.world_map, screen.alerts_panel)
+            panels = (
+                screen.forecast_panel,
+                screen.world_map,
+                screen.tropical_panel,
+                screen.alert_detail_panel,
+                screen.alerts_panel,
+            )
 
             await pilot.resize_terminal(80, 24)
             await _settle(pilot)
@@ -406,7 +444,21 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(tabs.display)
             self.assertFalse(screen.forecast_panel.display)
             self.assertTrue(screen.world_map.display)
+            self.assertFalse(screen.tropical_panel.display)
+            self.assertFalse(screen.alert_detail_panel.display)
             self.assertFalse(screen.alerts_panel.display)
+
+            tabs.active = 'dashboard-tab-tropical'
+            await _settle(pilot)
+            self.assertFalse(screen.world_map.display)
+            self.assertTrue(screen.tropical_panel.display)
+            self.assertFalse(screen.alert_detail_panel.display)
+
+            tabs.active = 'dashboard-tab-alert-detail'
+            await _settle(pilot)
+            self.assertFalse(screen.world_map.display)
+            self.assertFalse(screen.tropical_panel.display)
+            self.assertTrue(screen.alert_detail_panel.display)
 
             tabs.active = 'dashboard-tab-forecast'
             await _settle(pilot)
@@ -417,14 +469,18 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(compact_daily.display)
             self.assertEqual(len(compact_daily.table.rows), 2)
             self.assertEqual(compact_daily.table.max_scroll_x, 0)
-            self.assertFalse(
-                screen.query_one('#dashboard-open-weather-hint', Static).display
-            )
+            self.assertFalse(screen.forecast_panel.context_bar.display)
 
             await pilot.resize_terminal(120, 30)
             await _settle(pilot)
             self.assertEqual(
-                (screen.forecast_panel, screen.world_map, screen.alerts_panel),
+                (
+                    screen.forecast_panel,
+                    screen.world_map,
+                    screen.tropical_panel,
+                    screen.alert_detail_panel,
+                    screen.alerts_panel,
+                ),
                 panels,
             )
             self.assertTrue(all(panel.display for panel in panels))
@@ -440,10 +496,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.forecast_panel.region.width, 54)
             self.assertEqual(screen.alerts_panel.region.width, 46)
             self.assertLess(screen.world_map.region.height, screen.forecast_panel.region.height)
-            self.assertEqual(len(screen.forecast_panel.hourly_forecast.table.columns), 8)
+            self.assertGreater(screen.tropical_panel.region.height, 0)
+            self.assertEqual(
+                screen.tropical_panel.region.height,
+                screen.alert_detail_panel.region.height,
+            )
+            self.assertEqual(len(screen.forecast_panel.hourly_forecast.table.columns), 5)
             self.assertEqual(screen.forecast_panel.hourly_forecast.table.max_scroll_x, 0)
             self.assertEqual(len(screen.forecast_panel.daily_forecast.table.rows), 6)
-            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 9)
+            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 5)
             self.assertEqual(screen.forecast_panel.daily_forecast.table.max_scroll_x, 0)
 
     async def test_tropical_overlay_uses_source_anchor_and_deep_links(self) -> None:
@@ -465,6 +526,12 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             longitude=135.0,
         )
         nangka = CanonicalTropicalSystem('NANGKA', [cma, jma])
+        jma.geometries = {
+            'forecast_track': {
+                'type': 'LineString',
+                'coordinates': [[135.0, 28.0], [137.0, 30.0]],
+            }
+        }
         lala_observation = _tropical_observation(
             'lala-cphc',
             'cphc_gis_central_pacific',
@@ -478,7 +545,20 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app._tropical_system_cache_clock(),
             (lala, nangka),
         )
-        app.load_tropical_products = AsyncMock(return_value=[])
+        app.load_tropical_products = AsyncMock(
+            return_value=[
+                TropicalProduct(
+                    kind='advisory',
+                    label='Public Advisory',
+                    content='Official advisory text',
+                ),
+                TropicalProduct(
+                    kind='discussion',
+                    label='Forecast Discussion',
+                    content='Official forecast discussion',
+                ),
+            ]
+        )
         app.load_tropical_centre_weather = AsyncMock(return_value={})
 
         async with app.run_test(size=(180, 45)) as pilot:
@@ -501,29 +581,44 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
             label.focus()
             await _settle(pilot)
-            context = dashboard.query_one(
-                '#dashboard-tropical-context',
-                Static,
-            ).render().plain
-            self.assertIn('Moving NW at 15 kt', context)
-            self.assertIn('Wind 45 kt', context)
-            self.assertIn('JMA', context)
+            self.assertEqual(
+                label.tooltip.plain,
+                'Typhoon NANGKA\nMovement NW at 15 kt\nWind 45 kt',
+            )
+            self.assertEqual(
+                list(dashboard.query('#dashboard-tropical-context')),
+                [],
+            )
 
             label.action_activate()
-            await _settle(pilot, cycles=10)
-            tropical = app.screen
-            self.assertIsInstance(tropical, TropicalSystemsScreen)
-            self.assertEqual(tropical.systems[tropical.selected_storm_index].name, 'NANGKA')
-            self.assertIs(tropical.selected_observation, jma)
-
-            await pilot.press('w')
-            await _settle(pilot, cycles=6)
+            await _settle(pilot, cycles=8)
             self.assertIs(app.screen, dashboard)
             self.assertEqual(
                 dashboard.world_map.selected_tropical_key,
                 label.tropical_key,
             )
             self.assertIs(app.focused, label)
+            app.load_tropical_products.assert_awaited_once_with(jma)
+            detail_tabs = dashboard.tropical_panel.tabs
+            self.assertEqual(
+                [tab.label.plain for tab in detail_tabs.query('Tab')],
+                ['Track and Cone', 'Public Advisory', 'Forecast Discussion'],
+            )
+            self.assertTrue(dashboard.tropical_panel.track.available)
+            detail_tabs.active = 'dashboard-tropical-product-0'
+            await _settle(pilot)
+            product_body = dashboard.query_one(
+                '#dashboard-tropical-product-body',
+                VerticalScroll,
+            )
+            self.assertIn(
+                'Official advisory text',
+                product_body.query_one(Static).render().plain,
+            )
+
+            label.action_activate()
+            await _settle(pilot)
+            app.load_tropical_products.assert_awaited_once_with(jma)
 
     async def test_selected_place_loads_preview_without_becoming_active(self) -> None:
         app = self._app()
@@ -552,9 +647,95 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 country_code=LONDON.country_code,
             )
             self.assertTrue(dashboard.forecast_panel.hourly_forecast.display)
+            self.assertIs(
+                dashboard.forecast_panel.context_bar.location.location,
+                LONDON,
+            )
+            self.assertIs(
+                dashboard.forecast_panel.context_bar.air_quality.location,
+                LONDON,
+            )
             self.assertIn(
                 'London',
                 dashboard.query_one('#dashboard-forecast-place', Static).render().plain,
+            )
+
+    async def test_late_tropical_products_cannot_replace_newer_selection(self) -> None:
+        app = self._app()
+        old = _tropical_observation(
+            'old-jma',
+            'jma_tropical',
+            'OLD',
+            classification='Typhoon',
+            latitude=20.0,
+            longitude=130.0,
+        )
+        new = _tropical_observation(
+            'new-cphc',
+            'cphc_gis_central_pacific',
+            'NEW',
+            classification='Tropical Storm',
+            latitude=15.0,
+            longitude=-150.0,
+        )
+        app._tropical_system_cache = (
+            app._tropical_system_cache_clock(),
+            (
+                CanonicalTropicalSystem('OLD', [old]),
+                CanonicalTropicalSystem('NEW', [new]),
+            ),
+        )
+        old_started = asyncio.Event()
+        release_old = asyncio.Event()
+
+        async def load_products(observation: TropicalSystem):
+            if observation is old:
+                old_started.set()
+                try:
+                    await release_old.wait()
+                except asyncio.CancelledError:
+                    await release_old.wait()
+                return [
+                    TropicalProduct(
+                        kind='advisory',
+                        label='Old Advisory',
+                        content='Old product',
+                    )
+                ]
+            return [
+                TropicalProduct(
+                    kind='advisory',
+                    label='New Advisory',
+                    content='New product',
+                )
+            ]
+
+        app.load_tropical_products = AsyncMock(side_effect=load_products)
+
+        async with app.run_test(size=(180, 45)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            labels = {
+                label.system.name: label
+                for label in dashboard.world_map.query(DashboardTropicalLabel)
+            }
+
+            labels['OLD'].action_activate()
+            await old_started.wait()
+            labels['NEW'].action_activate()
+            await _settle(pilot, cycles=8)
+            self.assertEqual(
+                [tab.label.plain for tab in dashboard.tropical_panel.tabs.query('Tab')],
+                ['Track and Cone', 'Forecast', 'New Advisory'],
+            )
+
+            release_old.set()
+            await _settle(pilot, cycles=8)
+            self.assertEqual(
+                [tab.label.plain for tab in dashboard.tropical_panel.tabs.query('Tab')],
+                ['Track and Cone', 'Forecast', 'New Advisory'],
             )
 
     async def test_weather_key_returns_without_refresh_and_preserves_selection(self) -> None:

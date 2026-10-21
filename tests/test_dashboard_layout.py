@@ -1,4 +1,4 @@
-"""Pure responsive budget checks for Dashboard Slice A."""
+"""Pure responsive budget checks for the Dashboard."""
 
 import unittest
 
@@ -19,8 +19,12 @@ class DashboardLayoutTests(unittest.TestCase):
             48,
         )
         self.assertEqual(wide.daily_rows, 3)
-        self.assertEqual(wide.current_summary_height, 4)
-        self.assertEqual(wide.hourly_min_height, 8)
+        self.assertEqual(wide.current_conditions_height, 5)
+        self.assertEqual(wide.hourly_min_height, 5)
+        self.assertEqual(wide.context_rows, 1)
+        self.assertEqual(wide.map_height, 14)
+        self.assertEqual(wide.detail_height, 11)
+        self.assertEqual(wide.detail_gutter, 1)
 
         self.assertFalse(dashboard_layout_for(119, 30).simultaneous)
         self.assertFalse(dashboard_layout_for(120, 29).simultaneous)
@@ -35,7 +39,13 @@ class DashboardLayoutTests(unittest.TestCase):
         self.assertEqual(large.alert_width, 46)
         self.assertIsNotNone(large.map_height)
         self.assertLess(large.map_height, 66)
+        self.assertGreaterEqual(large.detail_height, 9)
+        self.assertEqual(
+            large.map_height + large.detail_gutter + large.detail_height,
+            66,
+        )
         self.assertEqual(large.daily_rows, 6)
+        self.assertEqual(large.context_rows, 5)
 
     def test_fallback_bands_keep_one_stable_pane_model(self) -> None:
         self.assertEqual(
@@ -54,15 +64,16 @@ class DashboardLayoutTests(unittest.TestCase):
         compact = dashboard_layout_for(80, 24)
         short = dashboard_layout_for(140, 19)
         self.assertEqual(compact.daily_rows, 2)
-        self.assertEqual(compact.current_summary_height, 3)
-        self.assertFalse(compact.show_open_hint)
+        self.assertEqual(compact.current_conditions_height, 5)
+        self.assertEqual(compact.context_rows, 0)
         self.assertEqual(short.daily_rows, 1)
-        self.assertEqual(short.current_summary_height, 2)
+        self.assertEqual(short.current_conditions_height, 3)
         self.assertEqual(short.hourly_min_height, 4)
+        self.assertEqual(short.context_rows, 0)
         medium = dashboard_layout_for(110, 28)
         self.assertEqual(medium.daily_rows, 2)
-        self.assertEqual(medium.current_summary_height, 3)
-        self.assertFalse(medium.show_open_hint)
+        self.assertEqual(medium.current_conditions_height, 5)
+        self.assertEqual(medium.context_rows, 0)
 
 
 if __name__ == '__main__':

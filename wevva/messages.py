@@ -40,18 +40,6 @@ class SavedLocationSelected(Message):
         self.location = location
 
 
-class DashboardPlacePreviewed(Message):
-    """Sent when dashboard focus or hover temporarily previews a place."""
-
-    def __init__(self, *, location: LocationMetadata):
-        super().__init__()
-        self.location = location
-
-
-class DashboardPlacePreviewEnded(Message):
-    """Sent when a dashboard place is no longer hovered or focused."""
-
-
 class DashboardPlacePressed(Message):
     """Sent through the dashboard map's shared click/Enter/Space path."""
 
@@ -60,34 +48,8 @@ class DashboardPlacePressed(Message):
         self.location = location
 
 
-class DashboardPlaceActivated(Message):
-    """Sent when the already-selected dashboard place is activated."""
-
-    def __init__(self, *, location: LocationMetadata):
-        super().__init__()
-        self.location = location
-
-
-class DashboardTropicalPreviewed(Message):
-    """Sent when a dashboard tropical label gains focus or hover."""
-
-    def __init__(
-        self,
-        *,
-        system: CanonicalTropicalSystem,
-        observation: TropicalSystem,
-    ) -> None:
-        super().__init__()
-        self.system = system
-        self.observation = observation
-
-
-class DashboardTropicalPreviewEnded(Message):
-    """Sent when a dashboard tropical label loses focus or hover."""
-
-
 class DashboardTropicalActivated(Message):
-    """Sent when a dashboard storm opens its owning workspace."""
+    """Sent when a dashboard storm becomes the committed selection."""
 
     def __init__(
         self,
