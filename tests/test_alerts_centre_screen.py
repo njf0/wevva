@@ -183,6 +183,35 @@ class _CachedFixtureService:
 
 
 class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_deep_link_selects_country_and_alert_after_load(self) -> None:
+        german = _alert(
+            'german',
+            severity='Moderate',
+            event='Wind Warning',
+            headline='German wind warning',
+        )
+        french = _alert(
+            'french',
+            severity='Severe',
+            event='Flood Warning',
+            headline='French flood warning',
+        )
+        service = _FixtureService({'DE': [german], 'FR': [french]})
+        screen = AlertsCentreScreen(
+            service=service,  # type: ignore[arg-type]
+            countries=[GERMANY, FRANCE],
+            initial_country_code='FR',
+        )
+        screen.prepare_alert_deep_link('DE', (german.source, german.id))
+
+        async with _ScreenApp(screen).run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+
+            self.assertEqual(screen.selected_country_code, 'DE')
+            self.assertEqual(screen.selected_alert_key, (german.source, german.id))
+            self.assertTrue(screen.details.display)
+
     async def test_fresh_persisted_hit_renders_without_fetch_progress(self) -> None:
         alert = _alert(
             'cached',

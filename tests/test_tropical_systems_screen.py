@@ -18,7 +18,6 @@ from wevva_warnings.registry import get_source
 from wevva.app import Wevva
 from wevva.screens.tropical_systems_screen import (
     TropicalSystemsScreen,
-    _classification_colour_role,
     _observation_key,
     _product_widgets,
     _structured_product,
@@ -28,6 +27,7 @@ from wevva.tropical_layout import TropicalTopology
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_info_table import TropicalInfoTable
 from wevva.widgets.tropical_summary import TropicalStormSummary
+from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import (
     LargeTropicalStormTrackScope,
     TropicalFixLabel,
@@ -169,24 +169,6 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.nangka = CanonicalTropicalSystem('NANGKA', [self.jma, self.cma])
         self.lala = CanonicalTropicalSystem('LALA', [self.cphc])
 
-    def test_classification_colours_use_semantic_severity_roles(self) -> None:
-        expected = {
-            'Category 5 Hurricane': 'error',
-            'Intense Tropical Cyclone': 'error',
-            'Severe Tropical Storm': 'warning',
-            'Moderate Tropical Storm': 'accent',
-            'Tropical Cyclone 12': 'accent',
-            'Tropical Depression': 'secondary',
-            'Tropical Low': 'primary',
-            'Unknown': 'primary',
-        }
-        for classification, role in expected.items():
-            with self.subTest(classification=classification):
-                self.assertEqual(
-                    _classification_colour_role(classification),
-                    role,
-                )
-
     def test_summary_leaves_classification_and_advisory_to_other_surfaces(self) -> None:
         self.jma.advisory_number = '002'
         screen = TropicalSystemsScreen([self.nangka])
@@ -260,6 +242,29 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press('w')
             await pilot.pause()
             self.assertIsNot(app.screen, screen)
+
+    async def test_pending_deep_link_survives_initial_system_load(self) -> None:
+        systems_loader = AsyncMock(return_value=[self.lala, self.nangka])
+        product_loader = AsyncMock(return_value=[])
+        screen = TropicalSystemsScreen(
+            [],
+            systems_loader=systems_loader,
+            product_loader=product_loader,
+            initial_storm_key=canonical_storm_key(self.lala),
+            initial_observation_source=self.cphc.source,
+            initial_observation_id=self.cphc.id,
+        )
+        app = _ScreenApp(screen)
+        async with app.run_test(size=(140, 45)) as pilot:
+            for _ in range(8):
+                await pilot.pause(0)
+
+            systems_loader.assert_awaited_once_with()
+            self.assertEqual(
+                screen.systems[screen.selected_storm_index].name,
+                'LALA',
+            )
+            self.assertIs(screen.selected_observation, self.cphc)
 
     async def test_source_switch_changes_exact_summary_track_land_and_products(self) -> None:
         calls: list[str] = []

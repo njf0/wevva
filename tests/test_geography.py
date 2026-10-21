@@ -12,6 +12,7 @@ from wevva.geography import (
     geojson_polygons,
     polygon_points,
     project_visible_polygons,
+    representative_polygon_point,
     select_geographic_unit,
     short_location_name,
     viewport_from_lonlat,
@@ -169,6 +170,50 @@ class SharedGeographicRenderingTests(unittest.TestCase):
 
         self.assertEqual(len(polygon), 1)
         self.assertEqual(len(multipolygon), 2)
+
+    def test_representative_point_uses_largest_disconnected_polygon(self) -> None:
+        point = representative_polygon_point(
+            {
+                'type': 'MultiPolygon',
+                'coordinates': [
+                    [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                    [[[10, 10], [14, 10], [14, 14], [10, 14], [10, 10]]],
+                ],
+            }
+        )
+
+        assert point is not None
+        self.assertAlmostEqual(point[0], 12.0)
+        self.assertAlmostEqual(point[1], 12.0)
+
+    def test_representative_point_is_interior_across_the_dateline(self) -> None:
+        point = representative_polygon_point(
+            {
+                'type': 'Polygon',
+                'coordinates': [
+                    [[179, 10], [-179, 10], [-179, 14], [179, 14], [179, 10]]
+                ],
+            }
+        )
+
+        assert point is not None
+        self.assertAlmostEqual(abs(point[0]), 180.0)
+        self.assertAlmostEqual(point[1], 12.0)
+
+    def test_representative_point_avoids_a_hole_and_missing_geometry(self) -> None:
+        point = representative_polygon_point(
+            {
+                'type': 'Polygon',
+                'coordinates': [
+                    [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+                    [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]],
+                ],
+            }
+        )
+
+        assert point is not None
+        self.assertFalse(4 < point[0] < 6 and 4 < point[1] < 6)
+        self.assertIsNone(representative_polygon_point(None))
 
     def test_filled_polygon_raster_respects_a_hole(self) -> None:
         viewport = GeographicViewport(0.0, 0.0, 0.0, 0.0, 10.0, 10.0)

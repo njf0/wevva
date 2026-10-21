@@ -902,6 +902,30 @@ class PersistentWarningCacheTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(await self._cache().load('country_catalogue', 'GB'))
 
+    async def test_product_limits_do_not_evict_the_other_warning_product(self) -> None:
+        cache = WarningCache(
+            self.cache_path,
+            clock=lambda: self.now,
+            product_max_entries={
+                WarningCacheProduct.COUNTRY_CATALOGUE: 2,
+                WarningCacheProduct.REUSABLE_CANDIDATES: 1,
+            },
+        )
+        await cache.store('reusable_candidates', 'GB', 'auto', [])
+        await cache.store('country_catalogue', 'GB', 'auto', [])
+        await cache.store('country_catalogue', 'FR', 'auto', [])
+
+        keys = await cache.retained_keys()
+
+        self.assertEqual(
+            {(product, country) for product, country, _ in keys},
+            {
+                (WarningCacheProduct.REUSABLE_CANDIDATES, 'GB'),
+                (WarningCacheProduct.COUNTRY_CATALOGUE, 'GB'),
+                (WarningCacheProduct.COUNTRY_CATALOGUE, 'FR'),
+            },
+        )
+
 
 class WarningProgressTests(unittest.TestCase):
     def test_provider_start_uses_an_indeterminate_progress_bar(self) -> None:

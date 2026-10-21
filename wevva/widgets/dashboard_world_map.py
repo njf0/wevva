@@ -1,0 +1,729 @@
+"""Dashboard interactions over the shared full-world map."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Sequence
+
+from rich.cells import cell_len
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.events import Blur, Click, Enter, Focus, Leave
+from textual.message import Message
+from textual.widgets import Static
+from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
+
+from wevva.config import location_key, location_label
+from wevva.geography import representative_polygon_point
+from wevva.location_metadata import LocationMetadata
+from wevva.messages import (
+    DashboardPlacePressed,
+    DashboardPlacePreviewed,
+    DashboardPlacePreviewEnded,
+    DashboardTropicalActivated,
+    DashboardTropicalPreviewed,
+    DashboardTropicalPreviewEnded,
+)
+from wevva.services.tropical import (
+    canonical_tropical_anchor,
+    sort_canonical_tropical_systems_by_severity,
+)
+from wevva.services.alert_bulletin import BulletinAlert
+from wevva.services.country_alerts import country_alert_identity
+from wevva.widgets.geographic_scope import GeographicFrame
+from wevva.widgets.map_callouts import DirectionalCalloutCandidate
+from wevva.widgets.tropical_systems import (
+    build_canonical_tropical_label,
+    canonical_storm_key,
+    source_tab_label,
+)
+from wevva.widgets.weather_alerts import alert_condition_name, alert_severity_color
+from wevva.widgets.world_locations_map import WorldLocationLabel, WorldLocationsMap
+
+
+class DashboardLocationLabel(WorldLocationLabel):
+    """Location callout whose primary action is owned by Dashboard."""
+
+    DEFAULT_CSS = """
+    DashboardLocationLabel.active-place {
+        text-style: bold underline;
+    }
+
+    DashboardLocationLabel.selected-place,
+    DashboardLocationLabel.selected-place:hover,
+    DashboardLocationLabel.selected-place:focus {
+        text-style: bold reverse;
+    }
+    """
+
+    def __init__(self, location: LocationMetadata) -> None:
+        super().__init__(location)
+        self.tooltip = location_label(location)
+
+    def action_select_location(self) -> None:
+        """Use one message path for click, Enter, and Space."""
+
+        self.post_message(DashboardPlacePressed(location=self.location))
+
+    def on_focus(self, event: Focus) -> None:
+        del event
+        self.post_message(DashboardPlacePreviewed(location=self.location))
+
+    def on_blur(self, event: Blur) -> None:
+        del event
+        self.post_message(DashboardPlacePreviewEnded())
+
+    def on_enter(self, event: Enter) -> None:
+        del event
+        self.post_message(DashboardPlacePreviewed(location=self.location))
+
+    def on_leave(self, event: Leave) -> None:
+        del event
+        self.post_message(DashboardPlacePreviewEnded())
+
+
+class DashboardTropicalLabel(Static, can_focus=True):
+    """One canonical storm anchored to an exact source observation."""
+
+    BINDINGS = [
+        Binding('enter', 'activate', 'Open', show=False),
+        Binding('space', 'activate', 'Open', show=False),
+    ]
+
+    DEFAULT_CSS = """
+    DashboardTropicalLabel {
+        position: absolute;
+        layer: labels;
+        width: auto;
+        height: 1;
+        min-width: 1;
+        background: $background;
+        pointer: pointer;
+    }
+
+    DashboardTropicalLabel:hover,
+    DashboardTropicalLabel:focus {
+        text-style: reverse;
+    }
+
+    DashboardTropicalLabel.selected-tropical,
+    DashboardTropicalLabel.selected-tropical:hover,
+    DashboardTropicalLabel.selected-tropical:focus {
+        text-style: underline reverse;
+    }
+    """
+
+    def __init__(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+    ) -> None:
+        super().__init__('', markup=False)
+        self.system = system
+        self.observation = observation
+        self._body = Text()
+        self._marker_on_right = False
+        self.label_text = ''
+
+    @property
+    def tropical_key(self) -> str:
+        return canonical_storm_key(self.system)
+
+    def update_system(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+    ) -> None:
+        self.system = system
+        self.observation = observation
+        self._body = build_canonical_tropical_label(
+            system,
+            self.app.theme_variables,
+        )
+        context = _tropical_context(system, observation, self.app.theme_variables)
+        self.tooltip = context
+        self.set_marker_on_right(self._marker_on_right)
+
+    def set_marker_on_right(self, marker_on_right: bool) -> None:
+        self._marker_on_right = marker_on_right
+        label = Text()
+        theme = self.app.theme_variables
+        accent = theme.get('accent') or theme.get('text-accent')
+        if marker_on_right:
+            label.append_text(self._body)
+            label.append(' •', style=accent)
+        else:
+            label.append('• ', style=accent)
+            label.append_text(self._body)
+        self.label_text = label.plain
+        self.update(label)
+
+    def action_activate(self) -> None:
+        self.post_message(
+            DashboardTropicalActivated(
+                system=self.system,
+                observation=self.observation,
+            )
+        )
+
+    def on_click(self, event: Click) -> None:
+        event.stop()
+        self.focus()
+        self.action_activate()
+
+    def on_focus(self, event: Focus) -> None:
+        del event
+        self._preview()
+
+    def on_blur(self, event: Blur) -> None:
+        del event
+        self.post_message(DashboardTropicalPreviewEnded())
+
+    def on_enter(self, event: Enter) -> None:
+        del event
+        self._preview()
+
+    def on_leave(self, event: Leave) -> None:
+        del event
+        self.post_message(DashboardTropicalPreviewEnded())
+
+    def _preview(self) -> None:
+        self.post_message(
+            DashboardTropicalPreviewed(
+                system=self.system,
+                observation=self.observation,
+            )
+        )
+
+
+class DashboardAlertMarker(Static, can_focus=True):
+    """The dashboard's sole selected or transient alert marker."""
+
+    class Activated(Message):
+        def __init__(self, row: BulletinAlert) -> None:
+            super().__init__()
+            self.row = row
+
+    BINDINGS = [
+        Binding('enter', 'activate', 'Open alert', show=False),
+        Binding('space', 'activate', 'Open alert', show=False),
+    ]
+
+    DEFAULT_CSS = """
+    DashboardAlertMarker {
+        position: absolute;
+        layer: alert-marker;
+        width: 1;
+        height: 1;
+        min-width: 1;
+        background: $background;
+        text-style: bold;
+        pointer: pointer;
+    }
+
+    DashboardAlertMarker.preview {
+        text-style: dim;
+    }
+
+    DashboardAlertMarker.pulse,
+    DashboardAlertMarker:hover,
+    DashboardAlertMarker:focus {
+        text-style: bold reverse;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__('●', markup=False, id='dashboard-alert-marker')
+        self.row: BulletinAlert | None = None
+        self.preview = False
+
+    def show_alert(self, row: BulletinAlert, *, preview: bool) -> None:
+        self.row = row
+        self.preview = preview
+        self.set_class(preview, 'preview')
+        self.styles.color = alert_severity_color(
+            self.app.theme_variables,
+            row.alert,
+        )
+        self.tooltip = alert_condition_name(row.alert)
+
+    def action_activate(self) -> None:
+        if self.row is not None and not self.preview:
+            self.post_message(self.Activated(self.row))
+
+    def on_click(self, event: Click) -> None:
+        event.stop()
+        if not self.preview:
+            self.focus()
+            self.action_activate()
+
+
+class DashboardWorldMap(WorldLocationsMap):
+    """One projection containing location and canonical-storm callouts."""
+
+    DEFAULT_CSS = """
+    DashboardWorldMap {
+        layers: map labels alert-marker;
+    }
+
+    DashboardWorldMap #dashboard-tropical-context {
+        position: absolute;
+        layer: labels;
+        offset: 1 1;
+        width: auto;
+        max-width: 90%;
+        height: auto;
+        max-height: 3;
+        color: $text-muted;
+        text-style: italic;
+        background: $background;
+    }
+    """
+
+    def __init__(
+        self,
+        *args,
+        active_location: LocationMetadata | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.border_title = 'World Weather'
+        self._active_location_key = (
+            location_key(active_location) if active_location is not None else None
+        )
+        self._selected_location_key: str | None = None
+        self._tropical_systems: list[CanonicalTropicalSystem] = []
+        self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
+        self._selected_tropical_key: str | None = None
+        self._tropical_status = 'Tropical systems not loaded'
+        self._selected_alert: BulletinAlert | None = None
+        self._preview_alert: BulletinAlert | None = None
+        self._alert_pulse_task: asyncio.Task[None] | None = None
+        self._alert_pulse_generation = 0
+        self._alert_marker_widget: DashboardAlertMarker | None = None
+
+    def compose(self) -> ComposeResult:
+        yield from super().compose()
+        yield Static(
+            self._tropical_status,
+            id='dashboard-tropical-context',
+        )
+        marker = DashboardAlertMarker()
+        self._alert_marker_widget = marker
+        marker.display = False
+        yield marker
+
+    @property
+    def selected_location_key(self) -> str | None:
+        return self._selected_location_key
+
+    @property
+    def selected_tropical_key(self) -> str | None:
+        return self._selected_tropical_key
+
+    @property
+    def alert_marker(self) -> DashboardAlertMarker:
+        if self._alert_marker_widget is None:
+            self._alert_marker_widget = self.query_one(
+                '#dashboard-alert-marker',
+                DashboardAlertMarker,
+            )
+        return self._alert_marker_widget
+
+    def set_selected_alert(
+        self,
+        row: BulletinAlert | None,
+        *,
+        pulse: bool = True,
+    ) -> None:
+        """Replace the one persistent alert marker and its bounded pulse."""
+
+        changed = _bulletin_identity(row) != _bulletin_identity(self._selected_alert)
+        had_preview = self._preview_alert is not None
+        self._selected_alert = row
+        self._preview_alert = None
+        if changed or had_preview:
+            self._cancel_alert_pulse()
+        self._update_alert_marker()
+        if changed and row is not None and pulse and self.alert_marker.display:
+            generation = self._alert_pulse_generation
+            self._alert_pulse_task = asyncio.create_task(
+                self._pulse_alert_marker(generation)
+            )
+
+    def set_alert_preview(self, row: BulletinAlert | None) -> None:
+        """Temporarily replace the marker without committing map selection."""
+
+        if _bulletin_identity(row) == _bulletin_identity(self._selected_alert):
+            row = None
+        if _bulletin_identity(row) == _bulletin_identity(self._preview_alert):
+            return
+        self._preview_alert = row
+        self._cancel_alert_pulse()
+        self._update_alert_marker()
+
+    def pause_alert_marker(self) -> None:
+        """Stop transient marker behavior while Dashboard is not current."""
+
+        self._preview_alert = None
+        self._cancel_alert_pulse()
+        if self.is_mounted:
+            self._update_alert_marker()
+
+    def set_active_location(self, location: LocationMetadata | None) -> None:
+        """Update the active-place emphasis without changing selection."""
+
+        self._active_location_key = (
+            location_key(location) if location is not None else None
+        )
+        self._apply_label_state()
+        self._schedule_reflow()
+
+    def set_selected_location(self, location: LocationMetadata | None) -> None:
+        """Apply persistent dashboard selection and placement priority."""
+
+        self._selected_location_key = (
+            location_key(location) if location is not None else None
+        )
+        self._apply_label_state()
+        self._schedule_reflow()
+
+    def set_tropical_loading(self) -> None:
+        self._tropical_status = 'Loading tropical systems…'
+        self._show_tropical_overview()
+
+    def set_tropical_error(self) -> None:
+        self._tropical_status = 'Tropical systems unavailable'
+        self._show_tropical_overview()
+
+    def set_tropical_systems(
+        self,
+        systems: Sequence[CanonicalTropicalSystem],
+    ) -> None:
+        """Replace canonical storm inputs while retaining matching widgets."""
+
+        self._tropical_systems = sort_canonical_tropical_systems_by_severity(
+            systems
+        )
+        count = len(self._tropical_systems)
+        self._tropical_status = (
+            'No active tropical systems'
+            if count == 0
+            else f'{count} active tropical system{"s" if count != 1 else ""}'
+        )
+        if self.is_mounted:
+            self._sync_tropical_label_widgets()
+            self._apply_label_state()
+            self._show_tropical_overview()
+            self._schedule_reflow()
+
+    def set_selected_tropical(
+        self,
+        system: CanonicalTropicalSystem | None,
+    ) -> None:
+        self._selected_tropical_key = (
+            canonical_storm_key(system) if system is not None else None
+        )
+        self._apply_label_state()
+        self._schedule_reflow()
+
+    def focus_preferred_feature(self) -> bool:
+        """Restore storm/place selection, then the active weather location."""
+
+        if self._selected_tropical_key is not None:
+            label = self._tropical_labels.get(self._selected_tropical_key)
+            if label is not None and label.display:
+                label.focus()
+                return True
+        for key in (self._selected_location_key, self._active_location_key):
+            if key is None:
+                continue
+            label = self._labels.get(key)
+            if label is not None and label.display:
+                label.focus()
+                return True
+        return self.focus_relative(1)
+
+    def focus_preferred_location(self) -> bool:
+        """Compatibility name retained for the initial Dashboard slice."""
+
+        return self.focus_preferred_feature()
+
+    def focus_relative(self, direction: int) -> bool:
+        labels = self._callout_labels()
+        visible = [
+            labels[key]
+            for key in self._placements
+            if key in labels and labels[key].display
+        ]
+        if not visible:
+            return False
+        focused = self.app.focused
+        if focused in visible:
+            index = visible.index(focused)
+            target = visible[(index + (1 if direction >= 0 else -1)) % len(visible)]
+        else:
+            target = visible[0 if direction >= 0 else -1]
+        target.focus()
+        return True
+
+    def _make_location_label(
+        self,
+        location: LocationMetadata,
+    ) -> DashboardLocationLabel:
+        return DashboardLocationLabel(location)
+
+    def _sync_label_widgets(self) -> None:
+        super()._sync_label_widgets()
+        self._sync_tropical_label_widgets()
+        self._apply_label_state()
+
+    def _reflow(self) -> None:
+        super()._reflow()
+        self._position_alert_marker()
+
+    def _update_alert_marker(self) -> None:
+        if not self.is_mounted:
+            return
+        marker = self.alert_marker
+        row = self._preview_alert or self._selected_alert
+        point = (
+            representative_polygon_point(row.alert.geometry)
+            if row is not None
+            else None
+        )
+        if row is None or point is None:
+            marker.display = False
+            marker.row = None
+            return
+        marker.show_alert(row, preview=row is self._preview_alert)
+        marker.display = True
+        self._position_alert_marker(point)
+
+    def _position_alert_marker(
+        self,
+        point: tuple[float, float] | None = None,
+    ) -> None:
+        if not self.is_mounted or not self.alert_marker.display:
+            return
+        row = self.alert_marker.row
+        if point is None and row is not None:
+            point = representative_polygon_point(row.alert.geometry)
+        frame = self._current_frame
+        if point is None or frame is None:
+            self.alert_marker.display = False
+            return
+        longitude, latitude = point
+        column, map_row = frame.canvas.cell_position(
+            frame.canvas.viewport.project(longitude, latitude)
+        )
+        self.alert_marker.styles.offset = (column, map_row)
+
+    async def _pulse_alert_marker(self, generation: int) -> None:
+        marker = self.alert_marker
+        try:
+            for pulse_on in (True, False, True, False):
+                marker.set_class(pulse_on, 'pulse')
+                await asyncio.sleep(0.12)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if generation == self._alert_pulse_generation:
+                marker.remove_class('pulse')
+                if self._alert_pulse_task is asyncio.current_task():
+                    self._alert_pulse_task = None
+
+    def _cancel_alert_pulse(self) -> None:
+        self._alert_pulse_generation += 1
+        if self._alert_pulse_task is not None:
+            self._alert_pulse_task.cancel()
+            self._alert_pulse_task = None
+        marker = self._alert_marker_widget
+        if marker is not None and marker.is_attached:
+            marker.remove_class('pulse')
+
+    def on_unmount(self) -> None:
+        self._cancel_alert_pulse()
+
+    def _sync_tropical_label_widgets(self) -> None:
+        anchored: dict[
+            str,
+            tuple[CanonicalTropicalSystem, TropicalSystem],
+        ] = {}
+        for system in self._tropical_systems:
+            anchor = canonical_tropical_anchor(system)
+            if anchor is not None:
+                anchored.setdefault(canonical_storm_key(system), (system, anchor))
+
+        for key in tuple(self._tropical_labels):
+            if key not in anchored:
+                self._tropical_labels.pop(key).remove()
+        for key, (system, anchor) in anchored.items():
+            label = self._tropical_labels.get(key)
+            if label is None:
+                label = DashboardTropicalLabel(system, anchor)
+                self._tropical_labels[key] = label
+                self.mount(label)
+            label.update_system(system, anchor)
+
+    def _apply_label_state(self) -> None:
+        for key, label in self._labels.items():
+            label.set_class(key == self._active_location_key, 'active-place')
+            label.set_class(key == self._selected_location_key, 'selected-place')
+        for key, label in self._tropical_labels.items():
+            label.set_class(
+                key == self._selected_tropical_key,
+                'selected-tropical',
+            )
+
+    def _ordered_locations(self) -> Sequence[LocationMetadata]:
+        indexed = list(enumerate(self._locations))
+
+        def priority(item: tuple[int, LocationMetadata]) -> tuple[int, int]:
+            index, location = item
+            key = location_key(location)
+            if key == self._selected_location_key:
+                return 0, index
+            if key == self._active_location_key:
+                return 1, index
+            return 2, index
+
+        return [location for _, location in sorted(indexed, key=priority)]
+
+    def _callout_candidates(
+        self,
+        frame: GeographicFrame,
+    ) -> list[DirectionalCalloutCandidate[str]]:
+        location_candidates = super()._callout_candidates(frame)
+        by_key = {candidate.key: candidate for candidate in location_candidates}
+        selected_location = by_key.pop(self._selected_location_key, None)
+        active_location = by_key.pop(self._active_location_key, None)
+
+        tropical_candidates: list[DirectionalCalloutCandidate[str]] = []
+        for system in self._tropical_systems:
+            key = canonical_storm_key(system)
+            label = self._tropical_labels.get(key)
+            if label is None:
+                continue
+            observation = label.observation
+            point = frame.canvas.viewport.project(
+                float(observation.center_lon),
+                float(observation.center_lat),
+            )
+            tropical_candidates.append(
+                DirectionalCalloutCandidate(
+                    key=_tropical_callout_key(key),
+                    anchor=frame.canvas.cell_position(point),
+                    width=cell_len(label.label_text),
+                )
+            )
+        selected_tropical = next(
+            (
+                candidate
+                for candidate in tropical_candidates
+                if candidate.key
+                == _tropical_callout_key(self._selected_tropical_key)
+            ),
+            None,
+        )
+        if selected_tropical is not None:
+            tropical_candidates.remove(selected_tropical)
+
+        ordered: list[DirectionalCalloutCandidate[str]] = []
+        if selected_tropical is not None:
+            ordered.append(selected_tropical)
+        if selected_location is not None:
+            ordered.append(selected_location)
+        ordered.extend(tropical_candidates)
+        if active_location is not None:
+            ordered.append(active_location)
+        ordered.extend(by_key.values())
+        return ordered
+
+    def _callout_labels(self):
+        labels = dict(self._labels)
+        labels.update(
+            {
+                _tropical_callout_key(key): label
+                for key, label in self._tropical_labels.items()
+            }
+        )
+        return labels
+
+    def on_dashboard_tropical_previewed(
+        self,
+        message: DashboardTropicalPreviewed,
+    ) -> None:
+        message.stop()
+        self.query_one('#dashboard-tropical-context', Static).update(
+            _tropical_context(
+                message.system,
+                message.observation,
+                self.app.theme_variables,
+            )
+        )
+
+    def on_dashboard_tropical_preview_ended(
+        self,
+        message: DashboardTropicalPreviewEnded,
+    ) -> None:
+        message.stop()
+        focused = self.app.focused
+        if isinstance(focused, DashboardTropicalLabel):
+            self.query_one('#dashboard-tropical-context', Static).update(
+                _tropical_context(
+                    focused.system,
+                    focused.observation,
+                    self.app.theme_variables,
+                )
+            )
+        else:
+            self._show_tropical_overview()
+
+    def _show_tropical_overview(self) -> None:
+        if self.is_mounted:
+            self.query_one('#dashboard-tropical-context', Static).update(
+                self._tropical_status
+            )
+
+
+def _tropical_callout_key(key: str | None) -> str:
+    return f'tropical:{key or ""}'
+
+
+def _bulletin_identity(row: BulletinAlert | None) -> tuple[str, str] | None:
+    return None if row is None else country_alert_identity(row.alert)
+
+
+def _tropical_context(
+    system: CanonicalTropicalSystem,
+    observation: TropicalSystem,
+    theme: dict[str, str],
+) -> Text:
+    text = build_canonical_tropical_label(system, theme)
+    facts = []
+    if observation.movement:
+        facts.append(f'Moving {observation.movement.strip()}')
+    if observation.max_wind:
+        facts.append(f'Wind {observation.max_wind.strip()}')
+    if facts:
+        text.append('\n')
+        text.append(' · '.join(facts))
+    source = source_tab_label(observation)
+    issued = observation.issued_at
+    issued_label = issued.strftime('%d %b %H:%M %Z').rstrip() if issued else ''
+    text.append('\n')
+    text.append(
+        ' · '.join(value for value in (source, issued_label) if value),
+        style='dim',
+    )
+    return text
+
+
+__all__ = [
+    'DashboardLocationLabel',
+    'DashboardAlertMarker',
+    'DashboardTropicalLabel',
+    'DashboardWorldMap',
+]

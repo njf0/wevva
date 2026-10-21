@@ -23,6 +23,8 @@ WARNING_CACHE_SCHEMA_VERSION = 1
 WARNING_CACHE_CLOCK_SKEW = timedelta(minutes=5)
 WARNING_CACHE_MAX_AGE = timedelta(days=7)
 WARNING_CACHE_MAX_ENTRIES = 32
+WARNING_CACHE_MAX_COUNTRY_CATALOGUES = 128
+WARNING_CACHE_MAX_REUSABLE_CANDIDATES = 32
 _DEFAULT_CACHE_DIRECTORY: Final[object] = object()
 
 
@@ -87,7 +89,8 @@ class WarningCache:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         clock_skew: timedelta = WARNING_CACHE_CLOCK_SKEW,
         max_age: timedelta = WARNING_CACHE_MAX_AGE,
-        max_entries: int = WARNING_CACHE_MAX_ENTRIES,
+        max_entries: int | None = None,
+        product_max_entries: Mapping[WarningCacheProduct | str, int] | None = None,
     ) -> None:
         resolved_directory = (
             get_warning_cache_directory()
@@ -100,7 +103,22 @@ class WarningCache:
         self._clock = clock
         self.clock_skew = max(clock_skew, timedelta(0))
         self.max_age = max(max_age, timedelta(0))
-        self.max_entries = max(1, int(max_entries))
+        if max_entries is not None:
+            limit = max(1, int(max_entries))
+            self.product_max_entries = {
+                product: limit for product in WarningCacheProduct
+            }
+        else:
+            limits = {
+                WarningCacheProduct.COUNTRY_CATALOGUE: max(
+                    WARNING_CACHE_MAX_COUNTRY_CATALOGUES,
+                    _registered_alert_country_count() + 16,
+                ),
+                WarningCacheProduct.REUSABLE_CANDIDATES: WARNING_CACHE_MAX_REUSABLE_CANDIDATES,
+            }
+            for product, limit in (product_max_entries or {}).items():
+                limits[WarningCacheProduct(product)] = max(1, int(limit))
+            self.product_max_entries = limits
         self._memory: dict[tuple[WarningCacheProduct, str, str], WarningCacheEntry] = {}
 
     async def load(
@@ -155,6 +173,7 @@ class WarningCache:
         except (TypeError, ValueError, OverflowError):
             return False
         self._memory[key] = entry
+        self._prune_memory()
         path = _cache_path(self.cache_directory, key)
         if path is None:
             return True
@@ -166,9 +185,36 @@ class WarningCache:
                 _as_utc(self._clock()),
                 self.clock_skew,
                 self.max_age,
-                self.max_entries,
+                self.product_max_entries,
             )
         return written
+
+    async def retained_keys(
+        self,
+        product: WarningCacheProduct | str | None = None,
+    ) -> tuple[tuple[WarningCacheProduct, str, str], ...]:
+        """Enumerate valid retained keys without loading provider data."""
+
+        selected = None if product is None else WarningCacheProduct(product)
+        keys = {
+            key
+            for key, entry in self._memory.items()
+            if (selected is None or key[0] is selected)
+            and self._entry_is_retained(entry)
+        }
+        if self.cache_directory is not None:
+            try:
+                paths = list(self.cache_directory.glob('*.json.gz'))
+            except OSError:
+                paths = []
+            for path in paths:
+                key = _key_from_cache_path(path)
+                if key is None or (selected is not None and key[0] is not selected):
+                    continue
+                entry = await asyncio.to_thread(_read_entry, path, key)
+                if entry is not None and self._entry_is_retained(entry):
+                    keys.add(key)
+        return tuple(sorted(keys, key=lambda key: (key[0].value, key[1], key[2])))
 
     def _entry_is_retained(self, entry: WarningCacheEntry) -> bool:
         now = _as_utc(self._clock())
@@ -176,6 +222,21 @@ class WarningCache:
             entry.fetched_at <= now + self.clock_skew
             and now - entry.fetched_at <= self.max_age
         )
+
+    def _prune_memory(self) -> None:
+        """Apply the same independent product limits to session entries."""
+
+        for product, limit in self.product_max_entries.items():
+            entries = sorted(
+                (
+                    (entry.fetched_at, key)
+                    for key, entry in self._memory.items()
+                    if key[0] is product
+                ),
+                key=lambda item: (item[0], item[1][1], item[1][2]),
+            )
+            for _, key in entries[: max(0, len(entries) - limit)]:
+                self._memory.pop(key, None)
 
 
 def _cache_path(
@@ -343,6 +404,22 @@ def _source_registry() -> dict[str, WarningSource]:
         return {}
 
 
+def _registered_alert_country_count() -> int:
+    """Size catalogue retention from the installed warning-source registry."""
+
+    try:
+        sources = list_sources(kind='alert')
+    except Exception:
+        return 0
+    countries = {
+        code
+        for source in sources
+        for value in (source.country_code, *source.additional_country_codes)
+        if (code := normalize_country_code(value)) is not None
+    }
+    return len(countries)
+
+
 def _encode_datetime(value: datetime) -> str:
     return _as_utc(value).isoformat()
 
@@ -386,7 +463,7 @@ def _prune_cache_directory(
     now: datetime,
     clock_skew: timedelta,
     max_age: timedelta,
-    max_entries: int,
+    product_max_entries: Mapping[WarningCacheProduct, int],
 ) -> None:
     """Remove invalid, old, and excess entries without surfacing cache errors."""
 
@@ -395,7 +472,9 @@ def _prune_cache_directory(
     except OSError:
         return
 
-    retained: list[tuple[datetime, Path]] = []
+    retained: dict[WarningCacheProduct, list[tuple[datetime, Path]]] = {
+        product: [] for product in WarningCacheProduct
+    }
     for path in paths:
         key = _key_from_cache_path(path)
         entry = _read_entry(path, key) if key is not None else None
@@ -406,11 +485,14 @@ def _prune_cache_directory(
         ):
             _discard_file(path)
         else:
-            retained.append((entry.fetched_at, path))
+            assert key is not None
+            retained[key[0]].append((entry.fetched_at, path))
 
-    retained.sort(key=lambda item: (item[0], item[1].name))
-    for _, path in retained[: max(0, len(retained) - max_entries)]:
-        _discard_file(path)
+    for product, entries in retained.items():
+        entries.sort(key=lambda item: (item[0], item[1].name))
+        limit = product_max_entries.get(product, 1)
+        for _, path in entries[: max(0, len(entries) - limit)]:
+            _discard_file(path)
 
 
 def _key_from_cache_path(

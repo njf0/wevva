@@ -394,6 +394,29 @@ def canonical_tropical_classification(system: CanonicalTropicalSystem) -> str:
     return strongest.classification.strip()
 
 
+def canonical_tropical_anchor(
+    system: CanonicalTropicalSystem,
+) -> TropicalSystem | None:
+    """Choose one real source observation as the deterministic map anchor."""
+
+    candidates = [
+        observation
+        for observation in system.observations
+        if _valid_tropical_centre(observation)
+    ]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda observation: (
+            -_tropical_classification_rank(observation.classification),
+            -_tropical_issued_timestamp(observation),
+            (observation.source or '').casefold(),
+            (observation.id or '').casefold(),
+        ),
+    )
+
+
 def sort_canonical_tropical_systems_by_severity(
     systems: Iterable[CanonicalTropicalSystem],
 ) -> list[CanonicalTropicalSystem]:
@@ -432,6 +455,30 @@ def _tropical_classification_rank(value: object) -> int:
     return 0
 
 
+def _valid_tropical_centre(observation: TropicalSystem) -> bool:
+    latitude = observation.center_lat
+    longitude = observation.center_lon
+    return (
+        isinstance(latitude, (int, float))
+        and not isinstance(latitude, bool)
+        and isfinite(latitude)
+        and -90.0 <= latitude <= 90.0
+        and isinstance(longitude, (int, float))
+        and not isinstance(longitude, bool)
+        and isfinite(longitude)
+        and -360.0 <= longitude <= 360.0
+    )
+
+
+def _tropical_issued_timestamp(observation: TropicalSystem) -> float:
+    issued_at = observation.issued_at
+    if not isinstance(issued_at, datetime):
+        return float('-inf')
+    if issued_at.tzinfo is None:
+        issued_at = issued_at.replace(tzinfo=UTC)
+    return issued_at.timestamp()
+
+
 def _nearby_system_sort_key(
     nearby: NearbyTropicalSystem,
     selected_country_code: str,
@@ -447,6 +494,7 @@ __all__ = [
     'NearbyTropicalSystem',
     'TROPICAL_SYSTEMS_RADIUS_KM',
     'canonical_sort_distance_km',
+    'canonical_tropical_anchor',
     'canonical_tropical_classification',
     'canonical_tropical_severity_rank',
     'center_distance_km',

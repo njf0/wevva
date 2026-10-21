@@ -29,7 +29,7 @@ COUNTRY_ALERT_CACHE_TTL_SECONDS = 15 * 60
 COUNTRY_ALERT_CACHE_STALE_GRACE_SECONDS = 6 * 60 * 60
 """Additional lifetime in which a catalogue may be shown provisionally."""
 
-_MAX_OBSERVATION_JOURNAL_ENTRIES = 500
+_MAX_OBSERVATION_JOURNAL_ENTRIES = 4096
 
 _DEFAULT_OBSERVATION_PATH: Final[object] = object()
 
@@ -49,6 +49,7 @@ class CountryAlertsCacheHit:
     alerts: tuple[Alert, ...]
     new_alert_identities: frozenset[tuple[str, str]]
     provisional: bool
+    fetched_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,13 +100,7 @@ class _CountryAlertObservations:
                 (observed_at, observed_at),
             )
             self._journal[journal_key] = first_observed, observed_at
-        self._journal = dict(
-            sorted(
-                self._journal.items(),
-                key=lambda item: (item[1][1], item[0]),
-                reverse=True,
-            )[:_MAX_OBSERVATION_JOURNAL_ENTRIES]
-        )
+        self._prune_journal()
         self._save()
         return newly_observed
 
@@ -154,13 +149,27 @@ class _CountryAlertObservations:
                 continue
             if all(isinstance(value, str) for value in values):
                 self._journal[values] = first, last  # type: ignore[index]
-        self._journal = dict(
-            sorted(
-                self._journal.items(),
-                key=lambda item: (item[1][1], item[0]),
-                reverse=True,
-            )[:_MAX_OBSERVATION_JOURNAL_ENTRIES]
+        self._prune_journal()
+
+    def _prune_journal(self) -> None:
+        """Prefer identities still present in a retained country snapshot."""
+
+        current = {
+            (*key.split(':', 1), source, alert_id)
+            for key, identities in self._snapshots.items()
+            if ':' in key
+            for source, alert_id in identities
+        }
+        ordered = sorted(
+            self._journal.items(),
+            key=lambda item: (
+                item[0] in current,
+                item[1][1],
+                item[0],
+            ),
+            reverse=True,
         )
+        self._journal = dict(ordered[:_MAX_OBSERVATION_JOURNAL_ENTRIES])
 
     def _save(self) -> None:
         if self.path is None:
@@ -398,6 +407,10 @@ class CountryAlertsService:
             resolved_observation_path,
             wall_clock,
         )
+        self._refresh_tasks: dict[
+            tuple[str, str],
+            asyncio.Task[list[Alert]],
+        ] = {}
         self.last_country_code: str | None = None
 
     async def get_cached_alerts(
@@ -432,6 +445,36 @@ class CountryAlertsService:
             alerts=tuple(_filter_unexpired(entry.alerts, self._wall_clock())),
             new_alert_identities=identities,
             provisional=age >= self.ttl_seconds,
+            fetched_at=entry.fetched_at,
+        )
+
+    async def get_retained_alerts(
+        self,
+        country_code: str,
+        *,
+        warning_language: str = 'auto',
+    ) -> CountryAlertsCacheHit | None:
+        """Return any retained complete catalogue for warm bulletin startup."""
+
+        normalized_country, language = _normalized_request(
+            country_code,
+            warning_language,
+        )
+        entry = await self.cache.load(
+            WarningCacheProduct.COUNTRY_CATALOGUE,
+            normalized_country,
+            language,
+        )
+        if entry is None:
+            return None
+        self._new_alert_identities[(normalized_country, language)] = (
+            entry.new_alert_identities
+        )
+        return CountryAlertsCacheHit(
+            alerts=tuple(_filter_unexpired(entry.alerts, self._wall_clock())),
+            new_alert_identities=entry.new_alert_identities,
+            provisional=True,
+            fetched_at=entry.fetched_at,
         )
 
     async def refresh_alerts(
@@ -443,10 +486,33 @@ class CountryAlertsService:
     ) -> list[Alert]:
         """Fetch, observe, and persist one complete provider catalogue."""
 
-        normalized_country, language = _normalized_request(
+        key = _normalized_request(
             country_code,
             warning_language,
         )
+        task = self._refresh_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                self._refresh_and_store(*key, progress=progress)
+            )
+            self._refresh_tasks[key] = task
+            task.add_done_callback(
+                lambda completed, refresh_key=key: self._discard_refresh_task(
+                    refresh_key,
+                    completed,
+                )
+            )
+        return list(await asyncio.shield(task))
+
+    async def _refresh_and_store(
+        self,
+        normalized_country: str,
+        language: str,
+        *,
+        progress: WarningQueryProgress | None,
+    ) -> list[Alert]:
+        """Perform the single provider request for a normalized key."""
+
         alerts = await asyncio.to_thread(
             _fetch_country_alerts,
             normalized_country,
@@ -470,6 +536,39 @@ class CountryAlertsService:
         )
         self.last_country_code = normalized_country
         return list(alerts)
+
+    def _discard_refresh_task(
+        self,
+        key: tuple[str, str],
+        task: asyncio.Task[list[Alert]],
+    ) -> None:
+        if self._refresh_tasks.get(key) is task:
+            self._refresh_tasks.pop(key, None)
+        if not task.cancelled():
+            task.exception()
+
+    def refresh_in_flight(
+        self,
+        country_code: str,
+        *,
+        warning_language: str = 'auto',
+    ) -> bool:
+        """Return whether a complete-country refresh is already running."""
+
+        try:
+            key = _normalized_request(country_code, warning_language)
+        except ValueError:
+            return False
+        task = self._refresh_tasks.get(key)
+        return task is not None and not task.done()
+
+    def cancel_refreshes(self) -> None:
+        """Cancel service-owned wrappers during final application shutdown."""
+
+        for task in tuple(self._refresh_tasks.values()):
+            if not task.done():
+                task.cancel()
+        self._refresh_tasks.clear()
 
     async def get_alerts(
         self,

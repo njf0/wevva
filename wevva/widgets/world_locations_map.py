@@ -182,6 +182,7 @@ class WorldLocationsMap(Container):
         self._temperature_unit = temperature_unit
         self._labels: dict[str, WorldLocationLabel] = {}
         self._placements: dict[str, WorldLocationPlacement] = {}
+        self._current_frame: GeographicFrame | None = None
         self._backdrop_key: tuple[int, int, str | None] | None = None
         self._reflow_pending = False
 
@@ -193,6 +194,21 @@ class WorldLocationsMap(Container):
         """Current visible callout placements, primarily for inspection/tests."""
 
         return tuple(self._placements.values())
+
+    def set_locations(
+        self,
+        locations: Sequence[LocationMetadata],
+        *,
+        summaries: Mapping[str, SavedLocationWeatherSummary] | None = None,
+    ) -> None:
+        """Replace map inputs while retaining widgets for unchanged locations."""
+
+        self._locations = list(locations)
+        if summaries is not None:
+            self._summaries = dict(summaries)
+        if self.is_mounted:
+            self._sync_label_widgets()
+            self._schedule_reflow()
 
     def update_weather_summary(
         self,
@@ -237,7 +253,7 @@ class WorldLocationsMap(Container):
 
         visible: list[WorldLocationLabel] = []
         visited: set[str] = set()
-        for location in self._locations:
+        for location in self._ordered_locations():
             key = location_key(location)
             if key in visited:
                 continue
@@ -274,7 +290,7 @@ class WorldLocationsMap(Container):
     def _sync_label_widgets(self) -> None:
         locations = {
             location_key(location): location
-            for location in self._locations
+            for location in self._ordered_locations()
             if _valid_location(location)
         }
         for key in tuple(self._labels):
@@ -284,7 +300,7 @@ class WorldLocationsMap(Container):
         for key, location in locations.items():
             label = self._labels.get(key)
             if label is None:
-                label = WorldLocationLabel(location)
+                label = self._make_location_label(location)
                 self._labels[key] = label
                 self.mount(label)
             else:
@@ -309,6 +325,7 @@ class WorldLocationsMap(Container):
             height,
             land_style=land_style,
         )
+        self._current_frame = frame
         backdrop_key = (width, height, land_style)
         if backdrop_key != self._backdrop_key:
             self.query_one('#world-locations-backdrop', Static).update(
@@ -317,9 +334,34 @@ class WorldLocationsMap(Container):
             )
             self._backdrop_key = backdrop_key
 
+        candidates = self._callout_candidates(frame)
+        planned = plan_directional_callouts(
+            candidates,
+            canvas_width=width,
+            canvas_height=height,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )
+        placements = {placement.key: placement for placement in planned}
+        labels = self._callout_labels()
+        for key, placement in placements.items():
+            label = labels[key]
+            label.set_marker_on_right(placement.marker_on_right)
+            label.display = True
+            label.styles.offset = (placement.column, placement.row)
+        for key, label in labels.items():
+            if key not in placements:
+                label.display = False
+        self._placements = placements
+
+    def _callout_candidates(
+        self,
+        frame: GeographicFrame,
+    ) -> list[DirectionalCalloutCandidate[str]]:
+        """Build ranked location candidates; mixed maps may interleave features."""
+
         visited: set[str] = set()
-        candidates = []
-        for location in self._locations:
+        candidates: list[DirectionalCalloutCandidate[str]] = []
+        for location in self._ordered_locations():
             key = location_key(location)
             if key in visited:
                 continue
@@ -338,22 +380,25 @@ class WorldLocationsMap(Container):
                     width=cell_len(label.label_text),
                 )
             )
-        planned = plan_directional_callouts(
-            candidates,
-            canvas_width=width,
-            canvas_height=height,
-            policy=DirectionalCalloutPolicy(allow_row_shift=False),
-        )
-        placements = {placement.key: placement for placement in planned}
-        for key, placement in placements.items():
-            label = self._labels[key]
-            label.set_marker_on_right(placement.marker_on_right)
-            label.display = True
-            label.styles.offset = (placement.column, placement.row)
-        for key, label in self._labels.items():
-            if key not in placements:
-                label.display = False
-        self._placements = placements
+        return candidates
+
+    def _callout_labels(self) -> dict[str, WorldLocationLabel]:
+        """Return widgets addressed by candidate keys."""
+
+        return dict(self._labels)
+
+    def _make_location_label(
+        self,
+        location: LocationMetadata,
+    ) -> WorldLocationLabel:
+        """Create one label; dashboard maps override only interaction semantics."""
+
+        return WorldLocationLabel(location)
+
+    def _ordered_locations(self) -> Sequence[LocationMetadata]:
+        """Return logical focus and placement order for the current surface."""
+
+        return self._locations
 
 
 @lru_cache(maxsize=1)

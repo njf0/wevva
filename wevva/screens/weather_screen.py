@@ -46,7 +46,11 @@ from wevva.widgets.current_conditions import CurrentConditions
 from wevva.widgets.daily_forecast import DailyForecast
 from wevva.widgets.hourly_forecast import HourlyForecast
 from wevva.widgets.location_map import LocationMap
-from wevva.widgets.saved_locations import SavedLocationsModal, SavedLocationsSidebar
+from wevva.widgets.saved_locations import (
+    SavedLocationsModal,
+    SavedLocationsSidebar,
+    SavedLocationWeatherSummary,
+)
 from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsSidebar,
     WeatherAlertSummary,
@@ -103,6 +107,7 @@ class WeatherScreen(Screen[None]):
         ('i', 'alert_details', 'Warning details'),
         ('g', 'alerts_centre', 'Alerts Centre'),
         ('m', 'world_map', 'World Map'),
+        ('b', 'dashboard', 'Dashboard'),
     ]
     def __init__(
         self,
@@ -606,13 +611,26 @@ class WeatherScreen(Screen[None]):
             if location_key(current_location) not in saved_keys:
                 locations.append(current_location)
         self.saved_locations_sidebar.set_locations(locations)
+        summary_loader = getattr(self.app, 'saved_location_weather_summary', None)
+        if callable(summary_loader):
+            for location in locations:
+                summary = summary_loader(location)
+                if summary is not None:
+                    self.saved_locations_sidebar.update_weather_summary(
+                        location,
+                        summary,
+                    )
         has_content = bool(locations)
         if has_content != self._locations_sidebar_has_content:
             self._layout_budget = None
         self._locations_sidebar_has_content = has_content
         self._sync_sidebar_visibility()
 
-    def update_saved_location_weather(self, location, summary: str) -> None:
+    def update_saved_location_weather(
+        self,
+        location,
+        summary: SavedLocationWeatherSummary,
+    ) -> None:
         """Update compact weather text for one saved location."""
         if not hasattr(self, 'saved_locations_sidebar'):
             return
@@ -642,6 +660,11 @@ class WeatherScreen(Screen[None]):
         """Open the spatial overview of sidebar locations."""
 
         self.app.open_world_locations_screen()
+
+    def action_dashboard(self) -> None:
+        """Open the persistent unified dashboard."""
+
+        self.app.open_dashboard_screen()
 
     async def action_tropical_systems(self) -> None:
         """Open the dedicated active tropical-system workspace."""

@@ -574,6 +574,10 @@ class AlertsCentreScreen(Screen[None]):
         self._pending_language_changed = False
         self._filter_dialog_open = False
         self._preserve_country_on_resume = False
+        self._pending_alert_deep_link: tuple[
+            str,
+            tuple[str, str],
+        ] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -669,7 +673,21 @@ class AlertsCentreScreen(Screen[None]):
 
     def on_screen_resume(self) -> None:
         """Apply changes queued while this installed screen was suspended."""
-        if self._filter_dialog_open:
+        if self._pending_alert_deep_link is not None:
+            country_code, _ = self._pending_alert_deep_link
+            if country_code != self.selected_country_code:
+                self._choose_country(country_code)
+            else:
+                self._apply_pending_alert_deep_link(country_code)
+                if (
+                    self._pending_alert_deep_link is not None
+                    and (self._load_task is None or self._load_task.done())
+                ):
+                    self._start_country_load(
+                        refresh=False,
+                        preserve_existing=True,
+                    )
+        elif self._filter_dialog_open:
             # Returning from our child modal must retain the country being
             # filtered rather than reapplying the weather location's country.
             self._filter_dialog_open = False
@@ -685,6 +703,20 @@ class AlertsCentreScreen(Screen[None]):
         """Retain alert context after map navigation, unless superseded."""
 
         self._preserve_country_on_resume = preserve
+
+    def prepare_alert_deep_link(
+        self,
+        country_code: str,
+        alert_identity: tuple[str, str],
+    ) -> None:
+        """Queue one country/identity selection for the next current load."""
+
+        normalized = normalize_country_code(country_code)
+        if normalized is None or not all(
+            isinstance(value, str) and value for value in alert_identity
+        ):
+            return
+        self._pending_alert_deep_link = (normalized, alert_identity)
 
     def on_unmount(self) -> None:
         # ``asyncio.to_thread`` cancellation cannot stop the provider thread.
@@ -776,6 +808,11 @@ class AlertsCentreScreen(Screen[None]):
         active_location = getattr(self.app, 'location', None)
         active_country = normalize_country_code(getattr(active_location, 'country_code', None))
         candidates = (
+            (
+                self._pending_alert_deep_link[0]
+                if self._pending_alert_deep_link is not None
+                else None
+            ),
             active_country,
             self.initial_country_code,
             normalize_country_code(self.service.last_country_code),
@@ -825,6 +862,11 @@ class AlertsCentreScreen(Screen[None]):
             and isinstance(event.value, str)
             and event.value != self.selected_country_code
         ):
+            if (
+                self._pending_alert_deep_link is not None
+                and event.value != self._pending_alert_deep_link[0]
+            ):
+                self._pending_alert_deep_link = None
             self._choose_country(event.value)
 
     def on_option_list_option_selected(
@@ -905,6 +947,9 @@ class AlertsCentreScreen(Screen[None]):
         previous_country = self.selected_country_code
         self.selected_country_code = country.code
         self.service.last_country_code = country.code
+        note_country_used = getattr(self.app, 'note_bulletin_country_used', None)
+        if callable(note_country_used):
+            note_country_used(country.code)
         if self.country_select.value != country.code:
             self.country_select.value = country.code
         if previous_country != country.code:
@@ -1073,6 +1118,27 @@ class AlertsCentreScreen(Screen[None]):
             self.alert_filter_value,
             preferred_key=previous_key,
         )
+        if self._pending_alert_deep_link is not None:
+            self.call_after_refresh(
+                self._apply_pending_alert_deep_link,
+                country_code,
+            )
+
+    def _apply_pending_alert_deep_link(self, country_code: str) -> None:
+        pending = self._pending_alert_deep_link
+        if (
+            pending is None
+            or pending[0] != country_code
+            or self.selected_country_code != country_code
+        ):
+            return
+        identity = pending[1]
+        if not any(country_alert_identity(alert) == identity for alert in self.alerts):
+            return
+        self._pending_alert_deep_link = None
+        self.alert_filter_value = ''
+        self.alert_severity_filter = ''
+        self._apply_alert_filter('', preferred_key=identity)
 
     def _progress_callback(
         self,

@@ -287,7 +287,7 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
                 (NEW_YORK, 23),
                 (TOKYO, 28),
             ):
-                weather_screen.update_saved_location_weather(
+                app._update_saved_location_weather(
                     location,
                     SavedLocationWeatherSummary(
                         temperature=temperature,

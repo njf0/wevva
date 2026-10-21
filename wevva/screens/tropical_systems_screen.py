@@ -22,7 +22,6 @@ from textual.widgets import Footer, Header, Markdown, Static, Tab, Tabs
 from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from wevva.services.tropical import (
-    canonical_tropical_classification,
     get_tropical_products_async,
     sort_canonical_tropical_systems_by_severity,
 )
@@ -34,6 +33,7 @@ from wevva.tropical_layout import (
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_summary import TropicalStormSummary
 from wevva.widgets.tropical_systems import (
+    build_canonical_tropical_label,
     build_tropical_coordinates_text,
     canonical_storm_key,
     source_tab_label,
@@ -194,6 +194,9 @@ class TropicalSystemsScreen(Screen[None]):
         centre_weather_loader: CentreWeatherLoader | None = None,
         systems_loader: SystemsLoader | None = None,
         refresh_loader: SystemsLoader | None = None,
+        initial_storm_key: str | None = None,
+        initial_observation_source: str | None = None,
+        initial_observation_id: str | None = None,
     ) -> None:
         super().__init__()
         self.location_latitude = location_latitude
@@ -204,9 +207,31 @@ class TropicalSystemsScreen(Screen[None]):
         self._centre_weather_loader = centre_weather_loader
         self._systems_loader = systems_loader
         self._refresh_loader = refresh_loader
+        self._initial_storm_key = initial_storm_key
+        self._initial_observation_identity = (
+            (initial_observation_source, initial_observation_id)
+            if initial_observation_source is not None
+            and initial_observation_id is not None
+            else None
+        )
         self._refreshing_systems = False
-        self.selected_storm_index = 0
+        self.selected_storm_index = next(
+            (
+                index
+                for index, system in enumerate(self.systems)
+                if canonical_storm_key(system) == initial_storm_key
+            ),
+            0,
+        )
         self._source_by_storm: dict[str, int] = {}
+        if self.systems and self._initial_observation_identity is not None:
+            storm = self.systems[self.selected_storm_index]
+            source_index = _preferred_source_index(
+                storm,
+                self._initial_observation_identity,
+            )
+            if source_index is not None:
+                self._source_by_storm[canonical_storm_key(storm)] = source_index
         self._product_by_observation: dict[str, str] = {}
         self._products: dict[str, tuple[TropicalProduct, ...]] = {}
         self._last_update_by_observation: dict[str, datetime] = {}
@@ -235,7 +260,11 @@ class TropicalSystemsScreen(Screen[None]):
                         Tab(self._storm_tab_label(system), id=f'tropical-storm-{index}')
                         for index, system in enumerate(self.systems)
                     ),
-                    active='tropical-storm-0' if self.systems else None,
+                    active=(
+                        f'tropical-storm-{self.selected_storm_index}'
+                        if self.systems
+                        else None
+                    ),
                     id='tropical-storm-tabs',
                 )
                 storm_tabs.display = bool(self.systems)
@@ -277,7 +306,7 @@ class TropicalSystemsScreen(Screen[None]):
             content = self.query_one('#tropical-screen-content', Container)
             content.loading = True
             try:
-                await self._select_storm(0)
+                await self._select_storm(self.selected_storm_index)
             finally:
                 content.loading = False
         elif self._systems_loader is not None:
@@ -433,21 +462,27 @@ class TropicalSystemsScreen(Screen[None]):
             if self.systems and self.selected_storm_index < len(self.systems)
             else None
         )
-        previous_source = self.selected_observation.source if self.selected_observation is not None else None
+        previous_observation = self.selected_observation
+        previous_identity = (
+            (previous_observation.source, previous_observation.id)
+            if previous_observation is not None
+            else self._initial_observation_identity
+        )
         self.systems = sort_canonical_tropical_systems_by_severity(systems)
+        target_storm_key = previous_storm_key or self._initial_storm_key
         selected_index = next(
-            (index for index, system in enumerate(self.systems) if canonical_storm_key(system) == previous_storm_key),
+            (
+                index
+                for index, system in enumerate(self.systems)
+                if canonical_storm_key(system) == target_storm_key
+            ),
             0,
         )
-        if self.systems and previous_source is not None:
+        if self.systems and previous_identity is not None:
             selected_storm = self.systems[selected_index]
-            selected_source = next(
-                (
-                    index
-                    for index, observation in enumerate(selected_storm.observations)
-                    if observation.source == previous_source
-                ),
-                None,
+            selected_source = _preferred_source_index(
+                selected_storm,
+                previous_identity,
             )
             if selected_source is not None:
                 self._source_by_storm[canonical_storm_key(selected_storm)] = selected_source
@@ -874,20 +909,37 @@ class TropicalSystemsScreen(Screen[None]):
         return Group(*parts)
 
     def _storm_tab_label(self, storm: CanonicalTropicalSystem) -> Text:
-        name = _clean(storm.name) or 'Tropical System'
-        label = Text()
-        classification = canonical_tropical_classification(storm)
-        if classification:
-            theme = getattr(self.app, 'theme_variables', {})
-            role = _classification_colour_role(classification)
-            colour = theme.get(role) or theme.get(f'text-{role}')
-            label.append(
-                classification,
-                style=f'bold {colour}' if colour else 'bold',
-            )
-            label.append(' ')
-        label.append(name)
-        return label
+        return build_canonical_tropical_label(
+            storm,
+            getattr(self.app, 'theme_variables', {}),
+        )
+
+
+def _preferred_source_index(
+    storm: CanonicalTropicalSystem,
+    identity: tuple[str, str],
+) -> int | None:
+    """Find the exact source observation, then its refreshed source successor."""
+
+    source, system_id = identity
+    exact = next(
+        (
+            index
+            for index, observation in enumerate(storm.observations)
+            if observation.source == source and observation.id == system_id
+        ),
+        None,
+    )
+    if exact is not None:
+        return exact
+    return next(
+        (
+            index
+            for index, observation in enumerate(storm.observations)
+            if observation.source == source
+        ),
+        None,
+    )
 
 
 def _product_widgets(product: TropicalProduct) -> list[Static | Markdown]:
@@ -1125,30 +1177,6 @@ def _comparable_datetime(value: datetime) -> datetime:
 
 def _clean(value: object) -> str:
     return value.strip() if isinstance(value, str) else ''
-
-
-def _classification_colour_role(classification: str) -> str:
-    """Map issuing-centre wording to a stable Textual semantic colour role."""
-    value = classification.casefold().replace('-', ' ')
-    if (
-        'hurricane' in value
-        or 'typhoon' in value
-        or 'category' in value
-        or 'intense tropical cyclone' in value
-        or 'severe tropical cyclone' in value
-    ):
-        return 'error'
-    if 'severe tropical storm' in value or 'strong tropical storm' in value:
-        return 'warning'
-    if (
-        'tropical storm' in value
-        or 'moderate tropical storm' in value
-        or 'tropical cyclone' in value
-    ):
-        return 'accent'
-    if 'tropical depression' in value:
-        return 'secondary'
-    return 'primary'
 
 
 __all__ = ['TropicalSystemsScreen']

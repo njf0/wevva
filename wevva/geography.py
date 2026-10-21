@@ -430,6 +430,32 @@ def geojson_polygons(geometry: dict[str, Any] | None) -> MultiPolygon:
     return ()
 
 
+def representative_polygon_point(
+    geometry: dict[str, Any] | None,
+) -> LonLat | None:
+    """Return a stable interior point from the largest GeoJSON polygon.
+
+    Rings are unwrapped before area and centroid work so polygons crossing the
+    antimeridian are treated as compact shapes rather than near-global ones.
+    """
+
+    polygons = geojson_polygons(geometry)
+    if not polygons:
+        return None
+    unwrapped = tuple(_unwrap_polygon(polygon) for polygon in polygons)
+    polygon = max(unwrapped, key=_polygon_area)
+    if not polygon or len(polygon[0]) < 3:
+        return None
+
+    point = _ring_centroid(polygon[0])
+    if point is None or not _point_in_plane_polygon(*point, polygon):
+        point = _scanline_interior_point(polygon)
+    if point is None:
+        return None
+    longitude, latitude = point
+    return ((longitude + 180.0) % 360.0) - 180.0, latitude
+
+
 def geojson_polylines(geometry: dict[str, Any] | None) -> tuple[tuple[LonLat, ...], ...]:
     """Extract ordered Point/Polyline primitives from GeoJSON-like geometry."""
     if not isinstance(geometry, dict):
@@ -462,6 +488,122 @@ def point_in_polygon(longitude: float, latitude: float, polygon: Polygon) -> boo
 
 def wrapped_longitude_delta(longitude: float, origin: float) -> float:
     return ((longitude - origin + 180.0) % 360.0) - 180.0
+
+
+def _unwrap_polygon(polygon: Polygon) -> Polygon:
+    if not polygon or not polygon[0]:
+        return polygon
+    origin = polygon[0][0][0]
+    return tuple(
+        tuple(
+            (origin + wrapped_longitude_delta(longitude, origin), latitude)
+            for longitude, latitude in ring
+        )
+        for ring in polygon
+    )
+
+
+def _signed_ring_area(ring: LinearRing) -> float:
+    return sum(
+        first[0] * second[1] - second[0] * first[1]
+        for first, second in zip(ring, (*ring[1:], ring[0]))
+    ) / 2.0
+
+
+def _polygon_area(polygon: Polygon) -> float:
+    if not polygon:
+        return 0.0
+    return max(
+        0.0,
+        abs(_signed_ring_area(polygon[0]))
+        - sum(abs(_signed_ring_area(ring)) for ring in polygon[1:]),
+    )
+
+
+def _ring_centroid(ring: LinearRing) -> LonLat | None:
+    cross_sum = 0.0
+    longitude_sum = 0.0
+    latitude_sum = 0.0
+    for first, second in zip(ring, (*ring[1:], ring[0])):
+        cross = first[0] * second[1] - second[0] * first[1]
+        cross_sum += cross
+        longitude_sum += (first[0] + second[0]) * cross
+        latitude_sum += (first[1] + second[1]) * cross
+    if abs(cross_sum) < 1e-12:
+        return None
+    return (
+        longitude_sum / (3.0 * cross_sum),
+        latitude_sum / (3.0 * cross_sum),
+    )
+
+
+def _scanline_interior_point(polygon: Polygon) -> LonLat | None:
+    """Find the centre of the widest interior span on a small scanline set."""
+
+    outer = polygon[0]
+    min_y = min(latitude for _longitude, latitude in outer)
+    max_y = max(latitude for _longitude, latitude in outer)
+    if max_y <= min_y:
+        return None
+    centroid = _ring_centroid(outer)
+    candidate_latitudes = [
+        centroid[1] if centroid is not None else (min_y + max_y) / 2.0,
+        *(min_y + (max_y - min_y) * index / 18.0 for index in range(1, 18)),
+    ]
+    best: tuple[float, LonLat] | None = None
+    for latitude in candidate_latitudes:
+        intersections: list[float] = []
+        for ring in polygon:
+            for first, second in zip(ring, (*ring[1:], ring[0])):
+                if (first[1] > latitude) == (second[1] > latitude):
+                    continue
+                intersections.append(
+                    first[0]
+                    + (second[0] - first[0])
+                    * (latitude - first[1])
+                    / (second[1] - first[1])
+                )
+        intersections.sort()
+        for left, right in zip(intersections, intersections[1:]):
+            point = ((left + right) / 2.0, latitude)
+            width = right - left
+            if width > 0.0 and _point_in_plane_polygon(*point, polygon):
+                if best is None or width > best[0]:
+                    best = width, point
+    return None if best is None else best[1]
+
+
+def _point_in_plane_polygon(
+    longitude: float,
+    latitude: float,
+    polygon: Polygon,
+) -> bool:
+    if not polygon or not _point_in_plane_ring(longitude, latitude, polygon[0]):
+        return False
+    return all(
+        not _point_in_plane_ring(longitude, latitude, hole)
+        for hole in polygon[1:]
+    )
+
+
+def _point_in_plane_ring(
+    longitude: float,
+    latitude: float,
+    ring: LinearRing,
+) -> bool:
+    inside = False
+    for first, second in zip(ring, (*ring[1:], ring[0])):
+        if (first[1] > latitude) == (second[1] > latitude):
+            continue
+        intersect = (
+            (second[0] - first[0])
+            * (latitude - first[1])
+            / (second[1] - first[1])
+            + first[0]
+        )
+        if longitude < intersect:
+            inside = not inside
+    return inside
 
 
 def _coerce_polygons(raw_polygons: Any) -> MultiPolygon:
@@ -578,6 +720,7 @@ __all__ = [
     'polygon_points',
     'project_polygons',
     'project_visible_polygons',
+    'representative_polygon_point',
     'resolve_display_geography',
     'select_geographic_unit',
     'short_location_name',

@@ -100,6 +100,51 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app.weather_screen.loading_states, [True, False])
         self.assertEqual(self.app.weather_screen.messages, [])
 
+    async def test_dashboard_preview_reuses_cache_without_adopting_location(self) -> None:
+        preview_location = LocationMetadata(
+            latitude=48.8566,
+            longitude=2.3522,
+            country_code='FR',
+        )
+
+        first = await self.app.load_dashboard_forecast(preview_location)
+        second = await self.app.load_dashboard_forecast(preview_location)
+
+        self.app.controller.fetch.assert_awaited_once_with(
+            lat=48.8566,
+            lon=2.3522,
+            country_code='FR',
+        )
+        self.assertIs(first.current, self.event.current)
+        self.assertIs(second.hourly, self.event.hourly)
+        self.assertIs(self.app.location, self.location)
+
+    async def test_cancelled_dashboard_preview_cancels_provider_task(self) -> None:
+        preview_location = LocationMetadata(
+            latitude=48.8566,
+            longitude=2.3522,
+            country_code='FR',
+        )
+        started = asyncio.Event()
+
+        async def delayed_fetch(**kwargs):
+            del kwargs
+            started.set()
+            await asyncio.Event().wait()
+
+        self.app.controller.fetch = AsyncMock(side_effect=delayed_fetch)
+        task = asyncio.create_task(
+            self.app.load_dashboard_forecast(preview_location)
+        )
+        await started.wait()
+        task.cancel()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        self.assertEqual(self.app._dashboard_forecast_tasks, {})
+        self.assertEqual(self.app._forecast_cache, {})
+
 
 class SavedWeatherSummaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_saved_summary_uses_the_current_only_weather_request(self) -> None:

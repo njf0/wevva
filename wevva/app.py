@@ -28,6 +28,7 @@ from wevva.constants import DEFAULT_EMOJI_ENABLED
 from wevva.controller import WeatherController  # central async orchestrator
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
+    DashboardPlaceActivated,
     PlaceSelected,
     SavedLocationSelected,
     WeatherAlertsProgress,
@@ -36,6 +37,7 @@ from wevva.messages import (
     WeatherUpdated,
 )
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.settings_screen import SettingsScreen
@@ -48,7 +50,11 @@ from wevva.services.alerts import (
     match_alert_candidates_async,
     normalize_country_code,
 )
-from wevva.services.country_alerts import CountryAlertsService
+from wevva.services.alert_bulletin import AlertBulletinCoordinator
+from wevva.services.country_alerts import (
+    CountryAlertsService,
+    list_supported_alert_countries,
+)
 from wevva.services.warning_cache import WarningCache, WarningCacheProduct
 from wevva.services.tropical import (
     get_tropical_products_async,
@@ -61,6 +67,7 @@ from wevva.services.weather import (
     fetch_weather_summary,
 )
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
+from wevva.widgets.tropical_systems import canonical_storm_key
 
 
 ForecastCacheKey = tuple[float, float, str, str, str]
@@ -145,6 +152,10 @@ class Wevva(App, inherit_bindings=False):
         self._refresh_in_flight = False  # debounce concurrent refreshes
         self._refresh_generation = 0
         self._forecast_cache: dict[ForecastCacheKey, ForecastCacheEntry] = {}
+        self._dashboard_forecast_tasks: dict[
+            ForecastCacheKey,
+            asyncio.Task[WeatherUpdated],
+        ] = {}
         self._forecast_cache_clock = time.monotonic
         self._alerts_task: asyncio.Task[None] | None = None
         self._alert_indicator_generation: int | None = None
@@ -153,6 +164,12 @@ class Wevva(App, inherit_bindings=False):
             clock=lambda: self._warning_cache_clock(),
         )
         self.country_alerts_service = CountryAlertsService(cache=self.warning_cache)
+        self.alert_bulletin = AlertBulletinCoordinator(
+            self.country_alerts_service,
+            [country.code for country in list_supported_alert_countries()],
+            warning_language=warning_language,
+            on_update=self._on_bulletin_updated,
+        )
         self._alerts_centre_screen: AlertsCentreScreen | None = None
         self._tropical_system_cache: TropicalCacheEntry | None = None
         self._tropical_system_cache_clock = time.monotonic
@@ -164,6 +181,11 @@ class Wevva(App, inherit_bindings=False):
         ] = {}
         self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
         self._saved_weather_generation = 0
+        self._saved_location_weather_summaries: dict[
+            str,
+            SavedLocationWeatherSummary,
+        ] = {}
+        self._dashboard_screen: DashboardScreen | None = None
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
         self.emoji_enabled = bool(emoji_enabled)
         self.warning_language = warning_language
@@ -187,6 +209,11 @@ class Wevva(App, inherit_bindings=False):
             await self.action_refresh()
         else:
             self.push_screen(SearchScreen())
+
+    def on_unmount(self) -> None:
+        """Stop session-only bulletin work with the Textual application."""
+
+        self.alert_bulletin.stop()
 
     # ------------------------------------------------------------
     # Actions / key bindings
@@ -240,11 +267,20 @@ class Wevva(App, inherit_bindings=False):
 
     def _forecast_cache_key(self) -> ForecastCacheKey:
         """Key a complete forecast by requested coordinates and display units."""
-        assert self.location.latitude is not None
-        assert self.location.longitude is not None
+
+        return self._forecast_cache_key_for(self.location)
+
+    def _forecast_cache_key_for(
+        self,
+        location: LocationMetadata,
+    ) -> ForecastCacheKey:
+        """Key a complete forecast for a location without adopting it."""
+
+        assert location.latitude is not None
+        assert location.longitude is not None
         return (
-            self.location.latitude,
-            self.location.longitude,
+            location.latitude,
+            location.longitude,
             self.temperature_unit,
             self.wind_speed_unit,
             self.precipitation_unit,
@@ -266,6 +302,79 @@ class Wevva(App, inherit_bindings=False):
             daily=cached_event.daily,
         )
 
+    def dashboard_forecast_snapshot(
+        self,
+        location: LocationMetadata,
+    ) -> WeatherUpdated | None:
+        """Return a valid app-owned preview without starting provider work."""
+
+        if location.latitude is None or location.longitude is None:
+            return None
+        return self._cached_forecast(self._forecast_cache_key_for(location))
+
+    async def load_dashboard_forecast(
+        self,
+        location: LocationMetadata,
+    ) -> WeatherUpdated:
+        """Load one preview without changing the active Weather location."""
+
+        if location.latitude is None or location.longitude is None:
+            raise ValueError('Dashboard forecast requires coordinates')
+        cache_key = self._forecast_cache_key_for(location)
+        cached = self._cached_forecast(cache_key)
+        if cached is not None:
+            return cached
+
+        task = self._dashboard_forecast_tasks.get(cache_key)
+        if task is None:
+            task = asyncio.create_task(
+                self._fetch_dashboard_forecast(location, cache_key)
+            )
+            self._dashboard_forecast_tasks[cache_key] = task
+            task.add_done_callback(
+                lambda completed, key=cache_key: self._discard_dashboard_forecast_task(
+                    key,
+                    completed,
+                )
+            )
+        try:
+            return await task
+        finally:
+            if task.done() and self._dashboard_forecast_tasks.get(cache_key) is task:
+                self._dashboard_forecast_tasks.pop(cache_key, None)
+
+    def _discard_dashboard_forecast_task(
+        self,
+        cache_key: ForecastCacheKey,
+        task: asyncio.Task[WeatherUpdated],
+    ) -> None:
+        """Forget a completed preview request, including cancelled waiters."""
+
+        if self._dashboard_forecast_tasks.get(cache_key) is task:
+            self._dashboard_forecast_tasks.pop(cache_key, None)
+
+    async def _fetch_dashboard_forecast(
+        self,
+        location: LocationMetadata,
+        cache_key: ForecastCacheKey,
+    ) -> WeatherUpdated:
+        """Fetch and retain one Dashboard preview through the shared controller."""
+
+        assert location.latitude is not None
+        assert location.longitude is not None
+        event = await self.controller.fetch(
+            lat=location.latitude,
+            lon=location.longitude,
+            country_code=location.country_code,
+        )
+        self._forecast_cache[cache_key] = self._forecast_cache_clock(), event
+        return WeatherUpdated(
+            metadata=event.metadata,
+            current=event.current,
+            hourly=event.hourly,
+            daily=event.daily,
+        )
+
     def action_search(self):  # textual binding: 's'
         """Open place search screen (fresh instance)."""
         self.push_screen(SearchScreen())
@@ -274,29 +383,93 @@ class Wevva(App, inherit_bindings=False):
         """Open help screen."""
         self.push_screen(HelpScreen())
 
-    def open_alerts_centre_screen(self) -> None:
+    def open_alerts_centre_screen(
+        self,
+        *,
+        country_code: str | None = None,
+        alert_identity: tuple[str, str] | None = None,
+    ) -> None:
         """Open the installed country-alert workspace and its isolated cache."""
 
+        requested_country = normalize_country_code(country_code)
         if self._alerts_centre_screen is None:
             self._alerts_centre_screen = AlertsCentreScreen(
                 service=self.country_alerts_service,
-                initial_country_code=self.location.country_code,
+                initial_country_code=requested_country or self.location.country_code,
                 warning_language=self.warning_language,
                 place_weather_loader=self.load_alert_place_weather,
             )
             self.install_screen(self._alerts_centre_screen, 'alerts-centre')
         else:
             self._alerts_centre_screen.initial_country_code = normalize_country_code(
-                self.location.country_code
+                requested_country or self.location.country_code
             )
             self._alerts_centre_screen.apply_preferences(
                 warning_language=self.warning_language,
                 units_changed=False,
                 appearance_changed=False,
             )
+        if requested_country is not None and alert_identity is not None:
+            self._alerts_centre_screen.prepare_alert_deep_link(
+                requested_country,
+                alert_identity,
+            )
         self.push_screen('alerts-centre')
 
-    async def open_tropical_systems_screen(self) -> None:
+    def open_dashboard_screen(self) -> None:
+        """Open the one installed dashboard without starting provider work."""
+
+        if self._dashboard_screen is None:
+            self._dashboard_screen = DashboardScreen()
+            self.install_screen(self._dashboard_screen, 'dashboard')
+        if self.screen is not self._dashboard_screen:
+            self.push_screen('dashboard')
+
+    def note_bulletin_country_used(self, country_code: str | None) -> None:
+        """Promote one recently inspected country without restarting the queue."""
+
+        self.alert_bulletin.note_country_used(country_code)
+
+    def _sync_bulletin_priorities(self) -> None:
+        countries = [self.location.country_code]
+        if self._dashboard_screen is not None:
+            countries.append(self._dashboard_screen.selected_country_code())
+        countries.extend(location.country_code for location in self.saved_locations)
+        self.alert_bulletin.set_priority_countries(countries)
+
+    def _dashboard_bulletin_countries(self) -> list[str | None]:
+        countries: list[str | None] = [self.location.country_code]
+        if self._dashboard_screen is not None:
+            countries.append(self._dashboard_screen.selected_country_code())
+            countries.append(
+                self._dashboard_screen.selected_alert_country_code()
+            )
+        return countries
+
+    def refresh_dashboard_bulletin(self) -> None:
+        """Hard-refresh only the Dashboard's bounded local country set."""
+
+        self._sync_bulletin_priorities()
+        self.alert_bulletin.schedule_hard_refresh(
+            self._dashboard_bulletin_countries()
+        )
+
+    def _on_bulletin_updated(self, generation: int) -> None:
+        """Publish coordinator state without giving Dashboard fetch ownership."""
+
+        if self._dashboard_screen is None:
+            return
+        self._dashboard_screen.update_bulletin(
+            generation,
+            self.alert_bulletin.recent_alerts_snapshot(),
+        )
+
+    async def open_tropical_systems_screen(
+        self,
+        *,
+        system: CanonicalTropicalSystem | None = None,
+        observation: TropicalSystem | None = None,
+    ) -> None:
         """Open the dedicated global storm workspace from its own cache."""
         cached = self._cached_tropical_systems()
         systems = list(cached[1]) if cached is not None else []
@@ -317,6 +490,15 @@ class Wevva(App, inherit_bindings=False):
                 centre_weather_loader=self.load_tropical_centre_weather,
                 systems_loader=self.load_tropical_systems if cached is None else None,
                 refresh_loader=self.refresh_tropical_systems,
+                initial_storm_key=(
+                    canonical_storm_key(system) if system is not None else None
+                ),
+                initial_observation_source=(
+                    observation.source if observation is not None else None
+                ),
+                initial_observation_id=(
+                    observation.id if observation is not None else None
+                ),
             )
         )
 
@@ -360,15 +542,10 @@ class Wevva(App, inherit_bindings=False):
         )
 
     def open_world_locations_screen(self) -> None:
-        """Open a world overview using the saved-sidebar location state."""
+        """Open a world overview using application-owned location summaries."""
 
         locations = self._locations_for_saved_surfaces()
-        summaries = {
-            location_key(location): summary
-            for location in locations
-            if (summary := self.weather_screen.saved_location_weather_summary(location))
-            is not None
-        }
+        summaries = self.saved_location_weather_summaries(locations)
         self.push_screen(
             WorldLocationsScreen(
                 locations,
@@ -389,6 +566,33 @@ class Wevva(App, inherit_bindings=False):
             locations.append(self.location)
         return locations
 
+    def locations_for_dashboard(self) -> list[LocationMetadata]:
+        """Return active and saved places for the persistent dashboard."""
+
+        return self._locations_for_saved_surfaces()
+
+    def saved_location_weather_summary(
+        self,
+        location: LocationMetadata,
+    ) -> SavedLocationWeatherSummary | None:
+        """Return the application-owned compact summary for one location."""
+
+        return self._saved_location_weather_summaries.get(location_key(location))
+
+    def saved_location_weather_summaries(
+        self,
+        locations: Sequence[LocationMetadata],
+    ) -> dict[str, SavedLocationWeatherSummary]:
+        """Return known summaries for a bounded set of location surfaces."""
+
+        summaries: dict[str, SavedLocationWeatherSummary] = {}
+        for location in locations:
+            key = location_key(location)
+            summary = self._saved_location_weather_summaries.get(key)
+            if summary is not None:
+                summaries[key] = summary
+        return summaries
+
     def _update_saved_location_weather(
         self,
         location: LocationMetadata,
@@ -396,7 +600,14 @@ class Wevva(App, inherit_bindings=False):
     ) -> None:
         """Keep list and world-map saved-location surfaces synchronized."""
 
+        self._saved_location_weather_summaries[location_key(location)] = summary
         self.weather_screen.update_saved_location_weather(location, summary)
+        if self._dashboard_screen is not None:
+            self._dashboard_screen.update_weather_summary(
+                location,
+                summary,
+                temperature_unit=self.temperature_unit,
+            )
         if self.is_running and isinstance(self.screen, WorldLocationsScreen):
             self.screen.update_weather_summary(
                 location,
@@ -414,6 +625,14 @@ class Wevva(App, inherit_bindings=False):
             raise RuntimeError('Canonical tropical-system retrieval did not complete')
         self._cache_tropical_systems(systems)
         return systems
+
+    def tropical_systems_snapshot(
+        self,
+    ) -> tuple[CanonicalTropicalSystem, ...] | None:
+        """Return a fresh canonical cache snapshot without starting provider work."""
+
+        cached = self._cached_tropical_systems()
+        return None if cached is None else cached[1]
 
     async def refresh_tropical_systems(self) -> list[CanonicalTropicalSystem]:
         """Force a new shared canonical fetch for the active tropical screen."""
@@ -548,6 +767,8 @@ class Wevva(App, inherit_bindings=False):
         self.theme = new_theme
         self.emoji_enabled = new_emoji_enabled
         self.warning_language = new_warning_language
+        if warning_language_changed:
+            self.alert_bulletin.set_warning_language(self.warning_language)
 
         if self._alerts_centre_screen is not None:
             self._alerts_centre_screen.apply_preferences(
@@ -555,6 +776,8 @@ class Wevva(App, inherit_bindings=False):
                 units_changed=units_changed,
                 appearance_changed=appearance_changed,
             )
+        if appearance_changed and self._dashboard_screen is not None:
+            self._dashboard_screen.refresh_appearance()
 
         if units_changed:
             self.controller = WeatherController(
@@ -619,6 +842,9 @@ class Wevva(App, inherit_bindings=False):
             key=lambda item: location_label(item).casefold(),
         )
         self.weather_screen.update_saved_locations_sidebar()
+        self._sync_bulletin_priorities()
+        if self._dashboard_screen is not None:
+            self._dashboard_screen.sync_from_app()
 
     def _schedule_saved_weather_refresh(self) -> None:
         """Fetch compact weather summaries for all saved locations."""
@@ -653,7 +879,7 @@ class Wevva(App, inherit_bindings=False):
         if location.latitude is None or location.longitude is None:
             return
 
-        existing_summary = self.weather_screen.saved_location_weather_summary(location)
+        existing_summary = self.saved_location_weather_summary(location)
         if delay > 0:
             await asyncio.sleep(delay)
         if generation != self._saved_weather_generation:
@@ -692,6 +918,21 @@ class Wevva(App, inherit_bindings=False):
         self._update_saved_location_weather(location, summary)
 
     # ---------------- Messages ----------------
+    async def on_dashboard_place_activated(
+        self,
+        message: DashboardPlaceActivated,
+    ) -> None:
+        """Adopt a dashboard place and return to the existing Weather screen."""
+
+        self.location = message.location
+        if self._alerts_centre_screen is not None:
+            self._alerts_centre_screen.preserve_country_on_next_resume(False)
+        if self.screen is self._dashboard_screen:
+            await self.pop_screen()
+        elif self.screen is not self.weather_screen:
+            self.push_screen(self.weather_screen)
+        await self.action_refresh()
+
     async def on_place_selected(self, message: PlaceSelected) -> None:
         """Handle place selection → fetch → show main content.
 
@@ -929,6 +1170,9 @@ class Wevva(App, inherit_bindings=False):
             if self._alert_indicator_generation == refresh_generation:
                 self._alert_indicator_generation = None
                 self._set_warning_checking(False)
+            if self.is_running:
+                self._sync_bulletin_priorities()
+                self.alert_bulletin.start()
 
     async def _publish_alert_candidates(
         self,

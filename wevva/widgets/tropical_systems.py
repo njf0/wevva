@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from rich.console import Group
 from rich.markdown import Markdown
+from rich.style import Style
 from rich.text import Text
 from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
 
-from wevva.services.tropical import NearbyTropicalSystem
+from wevva.services.tropical import (
+    NearbyTropicalSystem,
+    canonical_tropical_classification,
+)
 
 _KILOMETRES_TO_MILES = 0.621371192237334
 
@@ -26,6 +30,24 @@ def source_tab_label(system: TropicalSystem) -> str:
     source = _clean(system.source)
     token = source.split('_', 1)[0] if source else ''
     return token.upper() or 'SOURCE'
+
+
+def build_canonical_tropical_label(
+    system: CanonicalTropicalSystem,
+    theme: dict[str, str],
+) -> Text:
+    """Build the shared classification-first label for a canonical system."""
+
+    name = _clean(system.name) or 'Tropical System'
+    classification = canonical_tropical_classification(system)
+    colour = theme.get('accent') or theme.get('text-accent')
+    style = Style(bold=True, color=colour)
+    label = Text()
+    if classification:
+        label.append(classification, style=style)
+        label.append(' ', style=style)
+    label.append(name, style=style)
+    return label
 
 
 def build_tropical_system_text(nearby: NearbyTropicalSystem, *, accent: str | None = None) -> Text:
@@ -58,12 +80,13 @@ def build_tropical_tab_label(nearby: NearbyTropicalSystem, *, accent: str | None
     system = nearby.system
     classification = _clean(system.classification)
     name = _system_name(system)
+    style = Style(bold=True, color=accent)
     label = Text()
     if classification:
-        label.append(classification, style=f'bold {accent}' if accent else 'bold')
+        label.append(classification, style=style)
         if name:
-            label.append(' ')
-    label.append(name)
+            label.append(' ', style=style)
+    label.append(name, style=style)
     return label
 
 
@@ -166,6 +189,7 @@ def _clean(value: object) -> str:
 
 
 __all__ = [
+    'build_canonical_tropical_label',
     'build_tropical_coordinates_text',
     'build_tropical_system_details',
     'build_tropical_system_text',

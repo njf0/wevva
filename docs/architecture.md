@@ -28,6 +28,10 @@ g key -> AlertsCentreScreen -> country-alert service/cache
 m key -> WorldLocationsScreen -> checked-in global map-unit geometry
                              -> cached saved-location summaries
                              -> SavedLocationSelected -> WeatherScreen + refresh
+
+b key -> installed DashboardScreen -> app-owned current/saved summaries
+                                   -> active/saved places on shared world geometry
+                                   -> repeated place activation -> WeatherScreen + refresh
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -37,7 +41,8 @@ equivalent.
 
 `Wevva` owns session state: the selected `LocationMetadata`, unit/theme
 settings, saved locations, refresh generations, short-lived forecast/warning
-caches, the reusable Alerts Centre/service, and background task handles.
+caches, the reusable Alerts Centre/service, the installed Dashboard, and
+background task handles.
 Complete forecast results, including air
 quality, are cached for fifteen minutes by requested coordinates and display
 units; the explicit `r` refresh bypasses that cache.
@@ -49,9 +54,10 @@ slow warning provider does not delay the weather display.
 
 Saved-location summaries take a separate, staggered weather-only path in
 `Wevva._fetch_saved_weather_summary`; they do not use the controller or request
-air quality and warnings. Each result updates both the sidebar cache and an
-open `WorldLocationsScreen`, so the spatial overview can render immediately
-from cached values and accept later results without issuing its own queries.
+air quality and warnings. `Wevva` retains each result for the session and
+forwards it to the Weather sidebar, the installed Dashboard, and an open
+`WorldLocationsScreen`. These surfaces can therefore render immediately from
+the same values and accept later results without issuing their own queries.
 
 ## Data and external boundaries
 
@@ -231,6 +237,116 @@ screen. The screen keeps the standard header/footer and places the map's single
 rounded frame inside `1 2` stage padding. Its fixed viewport ends at 78°S,
 retaining the Antarctic coast while assigning the southern polar cap's rows to
 the inhabited world.
+
+The Dashboard is a persistent installed workspace opened from Weather with
+`b`. `wevva/dashboard_layout.py` makes the pure presentation decision: a
+120×30-or-larger viewport shows the forecast rail, dominant world map, and
+alerts rail together; larger widths progressively grow both rails rather than
+assigning every surplus cell to the map. On very wide, tall terminals the
+central map is capped near the natural Braille projection aspect, leaving the
+unused lower centre available for later real content. Smaller viewports expose
+the same mounted panels through tabs. Its dashboard map subclasses the
+saved-locations map at narrow
+creation, ordering, and interaction hooks, retaining the shared projection,
+callout placement, temperature rendering, and resize behavior. Focus and hover
+only preview a place. Enter, Space, and click share one primary-action path:
+the first action selects a place and a repeated action adopts it, returns to
+the existing Weather screen, and refreshes there. Resize and tab changes are
+presentation-only. Mount, resume, and selection consult one application-owned
+preview loader, which serves a valid snapshot immediately, coalesces a missing
+coordinate/unit key through the same fifteen-minute complete-forecast cache
+used by Weather, and never adopts the previewed place as `Wevva.location`.
+The Dashboard cancels an obsolete wait and guards the result by selection
+generation, so a late response cannot replace a newer selection. Its fixed
+current summary follows the highlighted hour. A Dashboard-specific vertical
+hourly table shows hour, abbreviated condition, temperature, precipitation
+chance and amount, wind speed, gust, and direction without horizontal
+scrolling; it retains configured units and emits the ordinary
+`HourHighlighted` message. The adjacent Dashboard-specific daily table consumes
+the same cached snapshot, skips today like the ordinary daily forecast, and
+presents complete future-day
+rows without horizontal scrolling. It uses compact columns in the baseline
+rail and restores rain amount plus fuller labels when the rail or fallback pane
+is wide enough. The layout budget reduces current-summary height and daily row
+count at medium, compact, and short sizes while keeping the same mounted widget
+tree; hourly scrolling remains internal, so it does not move current or daily
+context.
+
+The Dashboard consumes the application's existing thirty-minute canonical
+tropical-system cache. A fresh cache is rendered immediately; otherwise one
+Dashboard waiter joins the application-owned, coalesced loader. Labels never
+load products, tracks, centre weather, or nearby-location matches. Each
+canonical group chooses one real source observation with a valid centre as its
+anchor, ordered by declared classification strength, newest issue time, then
+source and ID. This is a display choice only and does not merge observations.
+The world-map base exposes narrow candidate and label hooks so the Dashboard
+can send locations and storms through the same callout planner. Selected
+features rank first, then canonical storms, the active location, and ordinary
+saved locations; the resulting order also drives keyboard traversal.
+
+Canonical storm labels use the same accent-coloured, classification-first
+formatter as `TropicalSystemsScreen`. Focus or hover shows the
+anchor observation's movement, wind, source, and issue time. Activation records
+the Dashboard selection and opens a fresh Tropical Systems screen with stable
+storm and source/ID intent. The dedicated screen applies that intent both to an
+already-cached catalogue and after an initially empty catalogue loads, falling
+back to a refreshed observation from the same source if the exact ID changed.
+Returning reveals the existing Dashboard and restores the selected storm focus.
+
+The application owns one session alert-bulletin coordinator independently of
+Dashboard lifecycle. It starts after the first active-location warning request
+settles and stops with `Wevva`. A capped priority lane covers the active,
+Dashboard-selected, saved, and recently inspected Alerts Centre countries on
+the fifteen-minute cadence; a fair rolling lane staggers the remaining warning
+registry across a target two-hour cycle. Both lanes share a two-request
+semaphore, per-country/language refresh coalescing in `CountryAlertsService`,
+and bounded failure backoff. Dashboard hard refresh is limited to its active
+and selected country keys and never restarts the rolling queue. Retained
+complete-country catalogues hydrate immutable coordinator snapshots before new
+provider work. Warning-cache pruning applies separate limits to catalogues and
+reusable point candidates, while the bounded observation journal preferentially
+retains identities still present in its latest country snapshots.
+
+The Dashboard alert rail consumes those immutable snapshots without owning a
+loader. The coordinator combines complete country catalogues with the persisted
+observation journal, removes expired rows, deduplicates `(source, alert ID)`
+copies across countries, and orders the survivors by Wevva's local
+first-observed time. When an identity appears in several catalogues, the
+earliest country observation supplies its deep link, with country code as the
+stable tie-break. Application callbacks carry generation-numbered snapshots to
+the mounted Dashboard; mount and resume only read current state. The rail keeps
+stable identity-derived rows, one selection, and one fixed preview whose timing
+is explicitly labelled as first found by Wevva.
+
+Alert activation prepares a country/identity deep link before opening the
+installed Alerts Centre. The destination applies it only from the matching
+country's current load, clears local filters when the identity is found, and
+retains ordinary request-generation guards so a superseded country response
+cannot select the wrong document. The dashboard map owns one alert-marker
+widget above the ordinary callout layer. Feed hover or keyboard highlight may
+temporarily show that marker dimly; committed selection replaces it with a
+severity-coloured marker and a short cancellable pulse implemented by one
+finite task rather than a timer. Selection replacement, clearing, screen
+suspension, and unmount cancel the task, while a warm return restores the
+steady marker from the retained rail selection. Marker activation follows the
+same Alerts Centre deep link as the rail button.
+
+`representative_polygon_point()` is the shared Polygon/MultiPolygon boundary
+for these attention markers. It unwraps rings around the dateline, chooses the
+largest disconnected polygon component, prefers its centroid when that point
+is genuinely inside and outside holes, and otherwise chooses a deterministic
+interior scanline point. Geometry-less alerts deliberately remain selectable
+without adding a map marker.
+
+Dashboard alert rows are always two lines at their current rail width; long
+condition and country text is truncated rather than changing row height. A
+selection chevron is deliberately distinct from the geographic marker, and the
+fixed preview truncates condition and area independently so its local
+first-observed line remains visible. Alert deep links remember whether focus
+came from the list, open button, or marker and restore that control on return.
+Appearance-only settings changes rebuild Dashboard's cached Rich renderables
+for the new theme or emoji preference without starting forecast, tropical, or
+warning work.
 
 Weather-warning presence is a bordered focusable summary card at compact
 heights. Once three additional rows are available after the standard current
