@@ -4,7 +4,7 @@ import unittest
 
 from wevva.dashboard_layout import DashboardPresentation, dashboard_layout_for
 from wevva.widgets.dashboard_hourly_forecast import (
-    _paired_measure,
+    _measure,
     _wind_measure,
 )
 
@@ -113,47 +113,44 @@ class DashboardLayoutTests(unittest.TestCase):
 
 
 class DashboardForecastFormattingTests(unittest.TestCase):
-    def test_long_supported_units_do_not_inherit_value_colours(self) -> None:
-        temperature = _paired_measure(
+    def test_supported_units_inherit_value_colours(self) -> None:
+        temperature = _measure(
             72,
-            70,
             unit='°F',
-            primary_style='red',
-            secondary_style='blue',
+            style='red',
         )
-        rain = _paired_measure(
+        rain = _measure(
             85,
-            1.25,
             unit='%',
-            secondary_unit='inch',
-            primary_style='cyan',
-            secondary_style='cyan',
-            secondary_amount=True,
+            style='cyan',
         )
         wind = _wind_measure(
             12,
-            'ENE→',
-            22,
+            'ENE ↙',
             unit='mp/h',
             wind_style='green',
-            gust_style='yellow',
         )
 
-        self.assertEqual(temperature.plain, '72°F (70°F)')
-        self.assertEqual(rain.plain, '85% (1.2inch)')
-        self.assertEqual(wind.plain, '12mp/h ENE→ (22mp/h)')
+        self.assertEqual(temperature.plain, '72°F')
+        self.assertEqual(rain.plain, '85%')
+        self.assertEqual(wind.plain, '12mp/h ENE ↙')
         self.assertEqual(
             [(span.start, span.end) for span in temperature.spans],
-            [(0, 2), (6, 8)],
+            [(0, 4)],
         )
         self.assertEqual(
             [(span.start, span.end) for span in rain.spans],
-            [(0, 2), (5, 8)],
+            [(0, 3)],
         )
         self.assertEqual(
             [(span.start, span.end) for span in wind.spans],
-            [(0, 2), (7, 11), (13, 15)],
+            [(0, 6), (7, 12)],
         )
+        for value in (temperature, rain, wind):
+            self.assertTrue(
+                all('bold' in str(span.style) for span in value.spans),
+                value,
+            )
 
 
 if __name__ == '__main__':

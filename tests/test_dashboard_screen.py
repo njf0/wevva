@@ -187,14 +187,25 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(hourly.table.rows), 24)
             self.assertEqual(hourly.table.max_scroll_x, 0)
             hourly_row = hourly.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05')
+            self.assertEqual(hourly_row[0].plain, '05:00')
             self.assertEqual(hourly_row[1].plain, 'OC')
-            self.assertEqual(hourly_row[2].plain, '13°C (11°C)')
-            self.assertEqual(hourly_row[3].plain, '0% (0.0mm)')
-            self.assertEqual(hourly_row[4].plain, '8mp/h E← (14mp/h)')
+            self.assertEqual(hourly_row[2].plain, '13°C')
+            self.assertEqual(hourly_row[3].plain, '0%')
+            self.assertEqual(hourly_row[4].plain, '8mp/h E ←')
             self.assertEqual(
                 [(span.start, span.end) for span in hourly_row[2].spans],
-                [(0, 2), (6, 8)],
+                [(0, 4)],
+            )
+            self.assertEqual(
+                [(span.start, span.end) for span in hourly_row[4].spans],
+                [(0, 5), (6, 9)],
+            )
+            self.assertTrue(
+                all(
+                    'bold' in str(span.style)
+                    for cell in hourly_row[1:]
+                    for span in cell.spans
+                )
             )
             daily = screen.query_one(
                 '#dashboard-daily-forecast',
@@ -651,9 +662,47 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(len(screen.forecast_panel.hourly_forecast.table.columns), 5)
             self.assertEqual(screen.forecast_panel.hourly_forecast.table.max_scroll_x, 0)
+            self.assertEqual(
+                screen.forecast_panel.hourly_forecast.table.cell_padding,
+                1,
+            )
             self.assertEqual(len(screen.forecast_panel.daily_forecast.table.rows), 6)
-            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 5)
+            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 8)
+            self.assertEqual(
+                [
+                    key.value
+                    for key in screen.forecast_panel.daily_forecast.table.columns
+                ],
+                [
+                    'date',
+                    'condition',
+                    'temperature',
+                    'rain',
+                    'precipitation',
+                    'wind',
+                    'gust',
+                    'wind_direction',
+                ],
+            )
             self.assertEqual(screen.forecast_panel.daily_forecast.table.max_scroll_x, 0)
+            daily_row = screen.forecast_panel.daily_forecast.table.get_row_at(0)
+            self.assertEqual(daily_row[6].plain, '(19)')
+            hourly = screen.forecast_panel.hourly_forecast
+            daily = screen.forecast_panel.daily_forecast
+            separators = list(screen.forecast_panel.query('.dashboard-forecast-separator'))
+            self.assertEqual(separators[2].region.y, hourly.region.bottom)
+            self.assertEqual(daily.region.y, separators[2].region.bottom)
+            self.assertEqual(screen.forecast_panel.context_bar.region.y, daily.region.bottom)
+            self.assertTrue(
+                all(
+                    widget.border_title == ''
+                    for widget in (
+                        screen.forecast_panel.context_bar.location,
+                        screen.forecast_panel.context_bar.astronomy,
+                        screen.forecast_panel.context_bar.air_quality,
+                    )
+                )
+            )
 
     async def test_tropical_overlay_uses_source_anchor_and_deep_links(self) -> None:
         app = self._app()

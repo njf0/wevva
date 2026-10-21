@@ -94,21 +94,26 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   borders only inside the Dashboard. Do not duplicate their formatting logic.
 - Remove rounded borders from hourly, daily, and context sections. Separate
   the heading, current instruments, hourly forecast, daily forecast, Sun &
-  Moon, Location Data, and Air Quality with simple one-line separators.
+  Moon, Location Data, and Air Quality with consistent one-line top separators
+  in one muted colour and without embedded border titles.
 - Keep the hourly view vertical and internally scrollable, with no header and
   no day abbreviation. Each row contains:
 
   ```text
-  HH  Cond  <temp><unit> (<feels><unit>)  <chance>% (<amount><unit>)  <speed><unit> <dir> (<gust><unit>)
+  HH:MM  Cond  <temp><unit>  <chance>%  <speed><unit> <dir> <arrow>
   ```
 
-  Values retain the existing temperature/rain/wind/condition colours. Spaces,
-  parentheses, labels, and units use ordinary or dim text rather than inheriting
-  the value colour.
+  Values and their units retain the existing temperature/rain/wind/condition
+  colours; inter-column space remains unstyled. Feels-like temperature,
+  precipitation amount, and gusts remain in the current instruments rather
+  than being repeated in every hourly row. Preserve the space between a wind
+  direction label and its arrow.
 - Replace the Dashboard-specific daily cell formatting with the standard
-  `DailySummaryTable` field groups for date, condition, combined temperature
-  range, combined rain chance/amount, and combined wind speed/direction/gust.
-  Keep its header hidden and retain only the Dashboard's row-count budget.
+  `DailySummaryTable` formatting. At the expanded rail width, give rain chance,
+  precipitation amount, wind speed, gust, and direction separate columns with
+  explicit inter-column room. Narrower rails retain the standard complete
+  compact field groups rather than introducing horizontal scrolling. Keep its
+  header hidden and retain only the Dashboard's row-count budget.
 - Stack `AstronomyInfo`, `LocationInfo`, and `AirQualityWidget` below daily data
   without borders. Use their existing row-density controls and omit lower-
   priority rows when height is insufficient; do not horizontally scroll them.
@@ -358,9 +363,16 @@ two lower detail readers.
 Implemented by reusing `CurrentConditions`, `DailySummaryTable`, and
 `ContextBar` over the selected place's existing application-owned forecast
 snapshot. The Dashboard keeps only one custom vertical hourly adapter; its
-five Rich cells colour values independently from units and punctuation and do
-not expose a horizontal scroll path. The heading is name plus country only,
-and hourly selection updates both the standard current instruments and AQI.
+five Rich cells show full time, condition, temperature, rain chance, and
+wind/direction, with units sharing value colour and no repeated feels-like,
+amount, or gust fields. It does not expose a horizontal scroll path. The
+heading is name plus country only, and hourly selection updates both the
+standard current instruments and AQI.
+The hourly viewport grows only to its 24 real rows, so daily and context data
+follow it directly and surplus height remains below the complete stack.
+Expanded rails switch the standard daily table to separate rain, amount, wind,
+gust, and direction columns; compact rails keep its combined standard groups.
+All inner sections use untitled, consistently coloured top separators.
 The pure layout budget omits context cards in compact/medium modes, shows one
 row per card at the 120x30 baseline, and expands their existing density at
 taller sizes. `ContextBar` now accepts an explicit location, while the Weather
@@ -501,9 +513,10 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
 - The forecast heading shows centred name and country without admin regions.
 - Current conditions use the standard three digit-style instruments without
   borders; hourly, daily, astronomy, location, and AQI sections are borderless
-  and separated by lines.
+  and separated by untitled lines in one colour.
 - Hourly and daily content and styling match the formats specified in Scope,
-  including uncoloured punctuation and units.
+  including full hourly times, coloured units, spaced wind arrows, and the
+  expanded daily table's separate value columns.
 - The location context and AQI belong to the Dashboard-selected place, not
   accidentally to `app.location`; AQI follows the highlighted hour.
 - No tropical status/context prose is painted over the world map. Storm

@@ -215,7 +215,7 @@ class DailySummaryTable(DataTable):
         if DailyColumn.WIND_DIRECTION not in self._visible_columns:
             wind_speed_cell.append(f' {wind_dir}', style=f'bold {wind_col}')
         wind_speed_cell.justify = 'right'
-        gust_cell = Text(f'{wind_gust:.0f}{wind_unit}', style=wind_col, justify='right')
+        gust_cell = Text(f'({wind_gust:.0f})', style=wind_col, justify='right')
         wind_dir_cell = Text(f'{wind_dir}', style=f'bold {wind_col}', justify='right')
 
         # Sunrise / sunset

@@ -133,7 +133,8 @@ class DashboardForecastPanel(Container):
     DashboardForecastPanel DashboardHourlyForecast {
         width: 100%;
         max-width: 100%;
-        height: 2fr;
+        height: 1fr;
+        max-height: 24;
         min-height: 5;
     }
 
@@ -162,17 +163,17 @@ class DashboardForecastPanel(Container):
         self.border_title = 'Location Forecast'
         yield Static('No location selected', id='dashboard-forecast-place')
         yield Static(
-            '─ Current ────────────────────────────────────────────────',
+            '──────────────────────────────────────────────────────────',
             classes='dashboard-forecast-separator',
         )
         yield CurrentConditions(id='dashboard-current-conditions')
         yield Static(
-            '─ Hourly Forecast ─────────────────────────────────────────',
+            '──────────────────────────────────────────────────────────',
             classes='dashboard-forecast-separator',
         )
         yield DashboardHourlyForecast(id='dashboard-hourly-forecast')
         yield Static(
-            '─ Daily Forecast ──────────────────────────────────────────',
+            '──────────────────────────────────────────────────────────',
             classes='dashboard-forecast-separator',
         )
         yield DashboardDailyForecast(id='dashboard-daily-forecast')

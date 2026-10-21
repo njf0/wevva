@@ -16,8 +16,9 @@ from wevva.messages import HourHighlighted, WeatherUpdated
 from wevva.utils import rain_colour, temp_colour, wind_colour
 
 
-_MINIMUM_WIDTHS = (2, 3, 8, 7, 9)
-_PREFERRED_WIDTHS = (3, 4, 12, 12, 17)
+_MINIMUM_WIDTHS = (5, 3, 5, 4, 9)
+_PREFERRED_WIDTHS = (6, 5, 8, 6, 16)
+_COLUMN_COUNT = len(_MINIMUM_WIDTHS)
 
 
 class DashboardHourlyForecast(Container):
@@ -26,7 +27,8 @@ class DashboardHourlyForecast(Container):
     DEFAULT_CSS = """
     DashboardHourlyForecast {
         width: 100%;
-        height: 2fr;
+        height: 1fr;
+        max-height: 24;
         min-height: 5;
         border: none;
         background: $background;
@@ -47,6 +49,7 @@ class DashboardHourlyForecast(Container):
         self._hourly_model: Any | None = None
         self._indices: list[int] = []
         self._column_widths: tuple[int, ...] = ()
+        self._cell_padding = 0
 
     def compose(self) -> ComposeResult:
         table = DataTable(
@@ -72,8 +75,8 @@ class DashboardHourlyForecast(Container):
 
     def on_resize(self, event: Resize) -> None:
         event.stop()
-        widths = _fitted_widths(max(1, event.size.width - 1))
-        if widths != self._column_widths:
+        padding, widths = _fitted_layout(max(1, event.size.width - 1))
+        if padding != self._cell_padding or widths != self._column_widths:
             self._rebuild()
 
     def update_forecast(self, event: WeatherUpdated) -> None:
@@ -96,9 +99,10 @@ class DashboardHourlyForecast(Container):
         if model is None or not model.forecast_timeseries:
             return
 
-        self._column_widths = _fitted_widths(
+        self._cell_padding, self._column_widths = _fitted_layout(
             max(1, self.content_size.width - 1)
         )
+        table.cell_padding = self._cell_padding
         for key, width in zip(
             ('hour', 'condition', 'temperature', 'rain', 'wind'),
             self._column_widths,
@@ -125,19 +129,11 @@ class DashboardHourlyForecast(Container):
         point = model.get_point(index) or {}
         theme = self.app.theme_variables
         temperature = model.get_temperature(index)
-        feels = model.get_feels_temperature(index)
         probability = model.get_precipitation_probability(index)
-        amount = model.get_precipitation(index)
         wind = model.get_wind_speed(index)
-        gust = model.get_wind_gust(index)
         condition = get_condition(point.get('weather_code'))
         temperature_style = _temperature_style(
             temperature,
-            unit=self.app.temperature_unit,
-            theme=theme,
-        )
-        feels_style = _temperature_style(
-            feels,
             unit=self.app.temperature_unit,
             theme=theme,
         )
@@ -152,47 +148,37 @@ class DashboardHourlyForecast(Container):
             else 'dim'
         )
         wind_style = _wind_style(wind, theme)
-        gust_style = _wind_style(gust, theme)
         condition_style = (
             f'bold {theme.get(condition.color_var)}'
             if condition is not None and condition.color_var
             else 'bold'
         )
         time = point.get('time')
-        hour = time.strftime('%H') if time is not None else '--'
+        hour = time.strftime('%H:%M') if time is not None else '--:--'
         temp_unit = model.forecast_units.get('temperature_2m', '°C')
-        precip_unit = model.forecast_units.get('precipitation', 'mm')
         wind_unit = model.forecast_units.get('wind_speed_10m', '')
-        direction = (model.get_wind_direction(index) or '--').replace(' ', '')
+        direction = model.get_wind_direction(index) or '--'
         return (
             Text(hour, style='dim'),
             Text(
                 condition.abbr if condition is not None else '--',
                 style=condition_style,
             ),
-            _paired_measure(
+            _measure(
                 temperature,
-                feels,
                 unit=temp_unit,
-                primary_style=temperature_style,
-                secondary_style=feels_style,
+                style=temperature_style,
             ),
-            _paired_measure(
+            _measure(
                 probability,
-                amount,
                 unit='%',
-                secondary_unit=precip_unit,
-                primary_style=rain_style,
-                secondary_style=rain_style,
-                secondary_amount=True,
+                style=rain_style,
             ),
             _wind_measure(
                 wind,
                 direction,
-                gust,
                 unit=wind_unit,
                 wind_style=wind_style,
-                gust_style=gust_style,
             ),
         )
 
@@ -210,47 +196,30 @@ class DashboardHourlyForecast(Container):
             self.post_message(HourHighlighted(self._indices[event.cursor_row]))
 
 
-def _paired_measure(
-    primary: object,
-    secondary: object,
+def _measure(
+    value: object,
     *,
     unit: str,
-    primary_style: str,
-    secondary_style: str,
-    secondary_unit: str | None = None,
-    secondary_amount: bool = False,
+    style: str,
 ) -> Text:
     text = Text()
-    text.append(_number(primary), style=primary_style)
-    text.append(unit)
-    text.append(' (')
-    text.append(
-        _amount(secondary) if secondary_amount else _number(secondary),
-        style=secondary_style,
-    )
-    text.append(secondary_unit if secondary_unit is not None else unit)
-    text.append(')')
+    value_style = style if not _is_number(value) else f'bold {style}'
+    text.append(f'{_number(value)}{unit}', style=value_style)
     return text
 
 
 def _wind_measure(
     wind: object,
     direction: str,
-    gust: object,
     *,
     unit: str,
     wind_style: str,
-    gust_style: str,
 ) -> Text:
     text = Text()
-    text.append(_number(wind), style=wind_style)
-    text.append(unit)
+    value_style = wind_style if not _is_number(wind) else f'bold {wind_style}'
+    text.append(f'{_number(wind)}{unit}', style=value_style)
     text.append(' ')
-    text.append(direction, style=wind_style if direction != '--' else 'dim')
-    text.append(' (')
-    text.append(_number(gust), style=gust_style)
-    text.append(unit)
-    text.append(')')
+    text.append(direction, style=value_style if direction != '--' else 'dim')
     return text
 
 
@@ -289,13 +258,6 @@ def _number(value: object) -> str:
     return f'{round(value):.0f}'
 
 
-def _amount(value: object) -> str:
-    if not _is_number(value):
-        return '--'
-    assert isinstance(value, (int, float))
-    return f'{value:.1f}' if abs(value) < 10 else f'{round(value):.0f}'
-
-
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -310,6 +272,14 @@ def _fitted_widths(available: int) -> tuple[int, ...]:
         if remaining == 0:
             break
     return tuple(widths)
+
+
+def _fitted_layout(available: int) -> tuple[int, tuple[int, ...]]:
+    """Add even cell padding only when the rail can retain every field."""
+
+    padding = 1 if available >= sum(_MINIMUM_WIDTHS) + 2 * _COLUMN_COUNT else 0
+    content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
+    return padding, _fitted_widths(content_width)
 
 
 __all__ = ['DashboardHourlyForecast']

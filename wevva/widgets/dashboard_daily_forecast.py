@@ -11,15 +11,27 @@ from wevva.messages import WeatherUpdated
 from wevva.widgets.daily_summary import DailySummaryTable
 
 
-_DASHBOARD_COLUMNS = (
+_COMPACT_COLUMNS = (
     DailyColumn.DATE,
     DailyColumn.CONDITION,
     DailyColumn.TEMPERATURE,
     DailyColumn.RAIN,
     DailyColumn.WIND,
 )
-_MINIMUM_WIDTHS = (3, 3, 7, 7, 9)
-_PREFERRED_WIDTHS = (6, 4, 9, 11, 14)
+_COMPACT_MINIMUM_WIDTHS = (3, 3, 7, 7, 9)
+_COMPACT_PREFERRED_WIDTHS = (6, 4, 9, 11, 14)
+_SEPARATE_COLUMNS = (
+    DailyColumn.DATE,
+    DailyColumn.CONDITION,
+    DailyColumn.TEMPERATURE,
+    DailyColumn.RAIN,
+    DailyColumn.PRECIPITATION,
+    DailyColumn.WIND,
+    DailyColumn.GUST,
+    DailyColumn.WIND_DIRECTION,
+)
+_SEPARATE_MINIMUM_WIDTHS = (7, 3, 7, 5, 7, 7, 5, 5)
+_SEPARATE_PREFERRED_WIDTHS = _SEPARATE_MINIMUM_WIDTHS
 
 
 class DashboardDailyForecast(Container):
@@ -80,20 +92,46 @@ class DashboardDailyForecast(Container):
         if not self.is_mounted:
             return
         available = max(1, self.content_size.width - 1)
+        columns, widths = _fitted_layout(available)
         self.table.set_layout(
-            _DASHBOARD_COLUMNS,
+            columns,
             self._row_count,
-            column_widths=_fitted_widths(available),
+            column_widths=widths,
         )
 
 
-def _fitted_widths(available: int) -> tuple[int, ...]:
+def _fitted_layout(
+    available: int,
+) -> tuple[tuple[DailyColumn, ...], tuple[int, ...]]:
+    """Use separate standard fields when the widened rail can hold them."""
+
+    if available >= sum(_SEPARATE_MINIMUM_WIDTHS):
+        return _SEPARATE_COLUMNS, _fitted_widths(
+            available,
+            _SEPARATE_MINIMUM_WIDTHS,
+            _SEPARATE_PREFERRED_WIDTHS,
+            (4, 5, 6, 7, 0, 3, 2, 1),
+        )
+    return _COMPACT_COLUMNS, _fitted_widths(
+        available,
+        _COMPACT_MINIMUM_WIDTHS,
+        _COMPACT_PREFERRED_WIDTHS,
+        (4, 3, 2, 0, 1),
+    )
+
+
+def _fitted_widths(
+    available: int,
+    minimums: tuple[int, ...],
+    preferred: tuple[int, ...],
+    priority: tuple[int, ...],
+) -> tuple[int, ...]:
     """Fit standard field groups without introducing horizontal scrolling."""
 
-    widths = list(_MINIMUM_WIDTHS)
+    widths = list(minimums)
     remaining = max(0, available - sum(widths))
-    for index in (4, 3, 2, 0, 1):
-        addition = min(remaining, _PREFERRED_WIDTHS[index] - widths[index])
+    for index in priority:
+        addition = min(remaining, preferred[index] - widths[index])
         widths[index] += addition
         remaining -= addition
         if remaining == 0:

@@ -59,7 +59,7 @@ class ContextBar(Container):
     ContextBar.separated AirQualityWidget {
         border: none;
         border-top: solid $primary-muted;
-        border-title-color: $primary;
+        border-title-color: $primary-muted;
         margin: 0;
     }
     """
@@ -118,6 +118,12 @@ class ContextBar(Container):
             widget.styles.height = card_height
             widget.styles.margin = 0
             widget.set_row_count(row_count)
+        for widget, title in (
+            (self.location, 'Location Data'),
+            (self.astronomy, 'Sun & Moon'),
+            (self.air_quality, 'Air Quality'),
+        ):
+            widget.border_title = '' if separated else title
 
     # Reactive watchers ---------------------------------------------------
     def watch_forecast_metadata(self, metadata: Any | None) -> None:

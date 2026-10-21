@@ -266,16 +266,21 @@ generation, so a late response cannot replace a newer selection. The forecast
 rail reuses `CurrentConditions` for its borderless Temperature, Precipitation,
 and Wind instruments; the selected hourly row drives those instruments and the
 air-quality hour. A Dashboard-specific vertical hourly table shows hour,
-abbreviated condition, temperature plus feels-like, precipitation chance plus
-amount, and wind speed/direction/gust without horizontal scrolling. It retains
-configured units, builds value and punctuation spans separately, and emits the
-ordinary `HourHighlighted` message. The adjacent Dashboard adapter wraps the
-standard `DailySummaryTable`, selects its combined date, condition,
-temperature, rain, and wind field groups, and skips today through the standard
-model path. The borderless `ContextBar` stack receives the Dashboard-selected
+abbreviated condition, temperature, precipitation chance, and wind speed plus
+spaced direction/arrow without horizontal scrolling. Full `HH:MM` times are
+shown; feels-like temperature, precipitation amount, and gusts remain in the
+current instruments rather than being repeated in each row. Units inherit
+their value colour, while spacing remains unstyled. The table caps its height
+at its 24 actual rows so the daily/context stack follows it rather than being
+anchored to the rail bottom. The adjacent Dashboard adapter wraps the standard
+`DailySummaryTable` and skips today through the standard model path. Expanded
+rails use separate rain-chance, precipitation, wind, gust, and direction
+columns with fitted spacing; narrower rails retain the standard combined field
+groups without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on
-taller terminals, and omit the cards in compact/medium modes. The pure layout
+taller terminals, and omit the cards in compact/medium modes. Dashboard inner
+sections share untitled top separators in one muted colour. The pure layout
 budget reduces daily rows and current-instrument density at short sizes while
 keeping the same mounted widget tree; hourly scrolling remains internal, so it
 does not move the current, daily, or context sections.
