@@ -3,9 +3,45 @@
 import unittest
 
 from wevva.dashboard_layout import DashboardPresentation, dashboard_layout_for
+from wevva.widgets.dashboard_hourly_forecast import (
+    _paired_measure,
+    _wind_measure,
+)
 
 
 class DashboardLayoutTests(unittest.TestCase):
+    def test_qualification_size_matrix_uses_only_the_documented_bands(self) -> None:
+        expected = {
+            (80, 24): (DashboardPresentation.COMPACT, False, 2, 0),
+            (100, 30): (DashboardPresentation.MEDIUM, False, 4, 0),
+            (120, 30): (DashboardPresentation.WIDE, True, 3, 1),
+            (140, 40): (DashboardPresentation.WIDE, True, 6, 2),
+            (250, 70): (DashboardPresentation.WIDE, True, 6, 5),
+        }
+
+        for size, values in expected.items():
+            with self.subTest(size=size):
+                budget = dashboard_layout_for(*size)
+                self.assertEqual(
+                    (
+                        budget.presentation,
+                        budget.simultaneous,
+                        budget.daily_rows,
+                        budget.context_rows,
+                    ),
+                    values,
+                )
+                if budget.simultaneous:
+                    usable_height = size[1] - 2 - budget.stage_padding[0] * 2
+                    self.assertEqual(
+                        budget.map_height
+                        + budget.detail_gutter
+                        + budget.detail_height,
+                        usable_height,
+                    )
+                    self.assertGreaterEqual(budget.map_height, 14)
+                    self.assertGreaterEqual(budget.detail_height, 9)
+
     def test_full_dashboard_requires_both_baseline_dimensions(self) -> None:
         wide = dashboard_layout_for(120, 30)
         self.assertEqual(wide.presentation, DashboardPresentation.WIDE)
@@ -74,6 +110,50 @@ class DashboardLayoutTests(unittest.TestCase):
         self.assertEqual(medium.daily_rows, 2)
         self.assertEqual(medium.current_conditions_height, 5)
         self.assertEqual(medium.context_rows, 0)
+
+
+class DashboardForecastFormattingTests(unittest.TestCase):
+    def test_long_supported_units_do_not_inherit_value_colours(self) -> None:
+        temperature = _paired_measure(
+            72,
+            70,
+            unit='°F',
+            primary_style='red',
+            secondary_style='blue',
+        )
+        rain = _paired_measure(
+            85,
+            1.25,
+            unit='%',
+            secondary_unit='inch',
+            primary_style='cyan',
+            secondary_style='cyan',
+            secondary_amount=True,
+        )
+        wind = _wind_measure(
+            12,
+            'ENE→',
+            22,
+            unit='mp/h',
+            wind_style='green',
+            gust_style='yellow',
+        )
+
+        self.assertEqual(temperature.plain, '72°F (70°F)')
+        self.assertEqual(rain.plain, '85% (1.2inch)')
+        self.assertEqual(wind.plain, '12mp/h ENE→ (22mp/h)')
+        self.assertEqual(
+            [(span.start, span.end) for span in temperature.spans],
+            [(0, 2), (6, 8)],
+        )
+        self.assertEqual(
+            [(span.start, span.end) for span in rain.spans],
+            [(0, 2), (5, 8)],
+        )
+        self.assertEqual(
+            [(span.start, span.end) for span in wind.spans],
+            [(0, 2), (7, 11), (13, 15)],
+        )
 
 
 if __name__ == '__main__':

@@ -16,8 +16,10 @@ from wevva.services.alerts import normalize_country_code
 from wevva.services.country_alerts import (
     CountryAlertsService,
     country_alert_identity,
+    country_alert_search_text,
 )
 from wevva.services.warning_cache import WarningCacheProduct
+from wevva.utils.country_codes import get_country_name_by_alpha2
 
 
 BulletinKey = tuple[str, str]
@@ -25,12 +27,14 @@ BulletinKey = tuple[str, str]
 
 @dataclass(frozen=True, slots=True)
 class BulletinCatalogue:
-    """One complete country observation available to bulletin consumers."""
+    """One country observation and the identities published to the bulletin."""
 
     country_code: str
     warning_language: str
     alerts: tuple[Alert, ...]
     fetched_at: datetime
+    new_alert_identities: frozenset[tuple[str, str]] = frozenset()
+    visible_alert_identities: frozenset[tuple[str, str]] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +44,7 @@ class BulletinAlert:
     country_code: str
     alert: Alert
     first_observed: datetime
+    is_new: bool = False
 
 
 class AlertBulletinCoordinator:
@@ -118,7 +123,7 @@ class AlertBulletinCoordinator:
         )
 
     def recent_alerts_snapshot(self) -> tuple[BulletinAlert, ...]:
-        """Return current alerts ordered by Wevva's first observation time."""
+        """Return published active alerts ordered by first observation time."""
 
         now = _as_utc(self._wall_clock())
         observations = {
@@ -130,12 +135,14 @@ class AlertBulletinCoordinator:
             ): item.first_observed
             for item in self.service.observation_journal()
         }
-        rows: dict[tuple[str, str], BulletinAlert] = {}
+        candidates: dict[tuple[str, str], list[BulletinAlert]] = {}
         for catalogue in self.catalogues_snapshot():
             for alert in catalogue.alerts:
                 if alert.expires is not None and _as_utc(alert.expires) < now:
                     continue
                 identity = country_alert_identity(alert)
+                if identity not in catalogue.visible_alert_identities:
+                    continue
                 first_observed = observations.get(
                     (
                         catalogue.country_code,
@@ -148,16 +155,13 @@ class AlertBulletinCoordinator:
                     catalogue.country_code,
                     alert,
                     first_observed,
+                    identity in catalogue.new_alert_identities,
                 )
-                current = rows.get(identity)
-                if current is None or (
-                    candidate.first_observed,
-                    candidate.country_code,
-                ) < (
-                    current.first_observed,
-                    current.country_code,
-                ):
-                    rows[identity] = candidate
+                candidates.setdefault(identity, []).append(candidate)
+        rows = {
+            identity: _attributed_bulletin_row(identity_candidates)
+            for identity, identity_candidates in candidates.items()
+        }
         return tuple(
             sorted(
                 rows.values(),
@@ -244,7 +248,7 @@ class AlertBulletinCoordinator:
         return task
 
     async def hydrate(self) -> None:
-        """Load retained catalogues before starting provider work."""
+        """Load only fresh catalogues before starting provider work."""
 
         generation = self._schedule_generation
         keys = await self.service.cache.retained_keys(
@@ -257,11 +261,15 @@ class AlertBulletinCoordinator:
                 or country_code not in self._supported
             ):
                 continue
-            cached = await self.service.get_retained_alerts(
+            cached = await self.service.get_cached_alerts(
                 country_code,
                 warning_language=language,
             )
-            if cached is None or cached.fetched_at is None:
+            if (
+                cached is None
+                or cached.provisional
+                or cached.fetched_at is None
+            ):
                 continue
             self._catalogues[(country_code, language)] = BulletinCatalogue(
                 country_code,
@@ -402,11 +410,28 @@ class AlertBulletinCoordinator:
         self._failures.pop(key, None)
         self._retry_not_before.pop(key, None)
         self._last_success[key] = self._clock()
+        previous = self._catalogues.get(key)
+        current_alerts = tuple(alerts)
+        current_identities = frozenset(
+            country_alert_identity(alert) for alert in current_alerts
+        )
+        new_identities: frozenset[tuple[str, str]] = frozenset()
+        visible_identities: frozenset[tuple[str, str]] = frozenset()
+        if previous is not None:
+            previous_identities = frozenset(
+                country_alert_identity(alert) for alert in previous.alerts
+            )
+            new_identities = current_identities - previous_identities
+            visible_identities = (
+                previous.visible_alert_identities & current_identities
+            ) | new_identities
         self._catalogues[key] = BulletinCatalogue(
             country_code,
             key[1],
-            tuple(alerts),
+            current_alerts,
             _as_utc(self._wall_clock()),
+            new_identities,
+            visible_identities,
         )
         self._generation += 1
         self._notify_update()
@@ -453,6 +478,38 @@ def _language(value: str) -> str:
 
 def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _attributed_bulletin_row(candidates: Sequence[BulletinAlert]) -> BulletinAlert:
+    """Choose the country which best represents one shared-feed identity."""
+
+    def rank(row: BulletinAlert) -> tuple[int, datetime, str]:
+        source = row.alert.source_info
+        primary = normalize_country_code(
+            getattr(source, 'country_code', None)
+            or getattr(source, 'issuer_country_code', None)
+        )
+        additional = {
+            code
+            for value in getattr(source, 'additional_country_codes', ()) or ()
+            if (code := normalize_country_code(value)) is not None
+        }
+        country_name = get_country_name_by_alpha2(row.country_code) or ''
+        normalized_name = ' '.join(country_name.casefold().split())
+        territory_match = (
+            row.country_code in additional
+            and bool(normalized_name)
+            and normalized_name in country_alert_search_text(row.alert)
+        )
+        if territory_match:
+            priority = 0
+        elif row.country_code == primary:
+            priority = 1
+        else:
+            priority = 2
+        return priority, row.first_observed, row.country_code
+
+    return min(candidates, key=rank)
 
 
 __all__ = [

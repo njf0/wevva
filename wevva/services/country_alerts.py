@@ -277,6 +277,55 @@ def country_alert_identity(alert: Alert) -> tuple[str, str]:
     return alert.source, alert.id
 
 
+def country_alert_search_text(alert: Alert) -> str:
+    """Return normalized provider-neutral text used for local alert matching."""
+
+    source_name = getattr(alert.source_info, 'name', None) or ''
+    condition = _concise_alert_condition(alert)
+    fields = (
+        condition,
+        alert.event,
+        alert.headline,
+        *alert.area_names,
+        source_name,
+        alert.source,
+        alert.urgency,
+        alert.certainty,
+    )
+    return ' '.join(
+        ' '.join(str(value).casefold().split())
+        for value in fields
+        if value
+    )
+
+
+def _concise_alert_condition(alert: Alert) -> str:
+    words = (
+        (alert.event or alert.headline or 'Weather Alert')
+        .replace('_', ' ')
+        .split()
+    )
+    prefixes = {
+        'extreme',
+        'severe',
+        'moderate',
+        'minor',
+        'red',
+        'orange',
+        'amber',
+        'yellow',
+        'green',
+    }
+    while words and words[0].casefold().rstrip(':') in prefixes:
+        words.pop(0)
+    condition = ' '.join(words).strip()
+    return (
+        condition[:-8].strip()
+        if condition.casefold().endswith(' warning')
+        else condition
+    )
+
+
 def sort_country_alerts(alerts: Iterable[Alert]) -> list[Alert]:
     """Deduplicate and order country alerts for navigation."""
 
@@ -628,6 +677,7 @@ __all__ = [
     'SupportedAlertCountry',
     'country_alert_default_filter',
     'country_alert_identity',
+    'country_alert_search_text',
     'get_country_alert_observations_path',
     'list_supported_alert_countries',
     'sort_country_alerts',

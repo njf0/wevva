@@ -319,22 +319,36 @@ the fifteen-minute cadence; a fair rolling lane staggers the remaining warning
 registry across a target two-hour cycle. Both lanes share a two-request
 semaphore, per-country/language refresh coalescing in `CountryAlertsService`,
 and bounded failure backoff. Dashboard hard refresh is limited to its active
-and selected country keys and never restarts the rolling queue. Retained
-complete-country catalogues hydrate immutable coordinator snapshots before new
-provider work. Warning-cache pruning applies separate limits to catalogues and
-reusable point candidates, while the bounded observation journal preferentially
-retains identities still present in its latest country snapshots.
+and selected country keys and never restarts the rolling queue. Only complete
+country catalogues still inside `CountryAlertsService`'s fifteen-minute fresh
+window hydrate immutable coordinator snapshots before provider work; older
+provisional/retained entries do not populate the startup bulletin. Warning-cache
+pruning applies separate limits to catalogues and reusable point candidates,
+while the bounded observation journal preferentially retains identities still
+present in its latest country snapshots. An uncached or stale-startup
+catalogue's first successful result establishes its bulletin baseline and marks
+no identities new, including when that result is empty. It also publishes no
+rows: only identities added by a later successful refresh enter the bulletin.
+Published identities remain visible while still present, while `NEW` clears on
+their country's next successful refresh. A fresh hydrated catalogue is already
+a baseline but publishes no startup rows. Later successful snapshots carry
+only refresh-scoped additions; failed or cancelled work does not advance the
+baseline, and persisted `NEW` presentation state is never hydrated.
 
 The Dashboard alert rail consumes those immutable snapshots without owning a
 loader. The coordinator combines complete country catalogues with the persisted
-observation journal, removes expired rows, deduplicates `(source, alert ID)`
-copies across countries, and orders the survivors by Wevva's local
-first-observed time. When an identity appears in several catalogues, the
-earliest country observation supplies its deep link, with country code as the
-stable tie-break. Application callbacks carry generation-numbered snapshots to
-the mounted Dashboard; mount and resume only read current state. The rail keeps
-stable identity-derived rows, one selection, and one fixed preview whose timing
-is explicitly labelled as first found by Wevva.
+observation journal, filters each catalogue to identities admitted to the
+bulletin, removes expired rows, deduplicates `(source, alert ID)` copies across
+countries, and orders the survivors by Wevva's local first-observed time. For
+shared-feed duplicates, attribution first prefers an
+additional territory explicitly named in the provider-neutral alert text, then
+the source's declared primary country, and finally first-observed time plus
+country code. Application callbacks carry generation-numbered snapshots to the
+mounted Dashboard; mount and resume only read current state. The rail keeps
+stable identity-derived rows and one selection. Refresh-scoped `is_new` renders
+only its `NEW` token as dark background-theme text on the primary colour,
+matching Alerts Centre, and is neither durable unread state nor an issuance-
+time claim.
 
 Alert activation prepares a country/identity deep link before opening the
 installed Alerts Centre. The destination applies it only from the matching
@@ -343,11 +357,13 @@ retains ordinary request-generation guards so a superseded country response
 cannot select the wrong document. The dashboard map owns one alert-marker
 widget above the ordinary callout layer. Feed hover or keyboard highlight may
 temporarily show that marker dimly; committed selection replaces it with a
-severity-coloured marker and a short cancellable pulse implemented by one
-finite task rather than a timer. Selection replacement, clearing, screen
+severity-coloured marker and a four-phase, 0.24-second cancellable pulse
+implemented by one finite task rather than a timer. Its cell is a preferred
+avoidance input for place callouts, so a valid opposite-side placement wins
+before ordinary overlap fallback. Selection replacement, clearing, screen
 suspension, and unmount cancel the task, while a warm return restores the
-steady marker from the retained rail selection. Marker activation follows the
-same Alerts Centre deep link as the rail button.
+steady marker from the retained rail selection. Marker activation remains an
+explicit route to Alerts Centre; the rail has no duplicate open button.
 
 `representative_polygon_point()` is the shared Polygon/MultiPolygon boundary
 for these attention markers. It unwraps rings around the dateline, chooses the
@@ -357,11 +373,14 @@ interior scanline point. Geometry-less alerts deliberately remain selectable
 without adding a map marker.
 
 Dashboard alert rows are always two lines at their current rail width; long
-condition and country text is truncated rather than changing row height. A
-selection chevron is deliberately distinct from the geographic marker, and the
-fixed preview truncates condition and area independently so its local
-first-observed line remains visible. Alert deep links remember whether focus
-came from the list, open button, or marker and restore that control on return.
+condition and country text is truncated rather than changing row height. Native
+`OptionList` selection supplies row emphasis, with no synthetic chevron,
+reserved indentation, fixed preview, or row-level open control. Committed
+selection populates the lower reader's one-alert map and one complete Alert
+document tab without provider work. That tab reuses Alerts Centre's
+headline/timing/description/instruction renderer rather than fragmenting the
+provider document across separate tabs.
+Alert marker deep links restore marker focus on return.
 Appearance-only settings changes rebuild Dashboard's cached Rich renderables
 for the new theme or emoji preference without starting forecast, tropical, or
 warning work.

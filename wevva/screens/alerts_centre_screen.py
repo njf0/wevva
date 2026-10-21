@@ -45,6 +45,7 @@ from wevva.services.country_alerts import (
     SupportedAlertCountry,
     country_alert_default_filter,
     country_alert_identity,
+    country_alert_search_text,
     list_supported_alert_countries,
 )
 from wevva.widgets.country_alerts_map import (
@@ -1249,7 +1250,7 @@ class AlertsCentreScreen(Screen[None]):
             )
             and (
                 not normalized_query
-                or normalized_query in _alert_search_text(alert)
+                or normalized_query in country_alert_search_text(alert)
             )
         ]
         if self.alert_sort_value == 'new':
@@ -1612,21 +1613,6 @@ def _alert_severity_options(
         seen.add(value)
         options.append((label, value))
     return tuple(options)
-
-
-def _alert_search_text(alert: Alert) -> str:
-    source_name = getattr(alert.source_info, 'name', None) or ''
-    fields = (
-        alert_condition_name(alert),
-        alert.event,
-        alert.headline,
-        *alert.area_names,
-        source_name,
-        alert.source,
-        alert.urgency,
-        alert.certainty,
-    )
-    return ' '.join(' '.join(str(value).casefold().split()) for value in fields if value)
 
 
 def _positive_int(value: object) -> int | None:

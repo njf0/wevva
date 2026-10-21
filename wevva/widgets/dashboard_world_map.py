@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -289,6 +290,8 @@ class DashboardWorldMap(WorldLocationsMap):
         if changed or had_preview:
             self._cancel_alert_pulse()
         self._update_alert_marker()
+        if changed:
+            self._schedule_reflow()
         if changed and row is not None and pulse and self.alert_marker.display:
             generation = self._alert_pulse_generation
             self._alert_pulse_task = asyncio.create_task(
@@ -459,7 +462,7 @@ class DashboardWorldMap(WorldLocationsMap):
         try:
             for pulse_on in (True, False, True, False):
                 marker.set_class(pulse_on, 'pulse')
-                await asyncio.sleep(0.12)
+                await asyncio.sleep(0.24)
         except asyncio.CancelledError:
             raise
         finally:
@@ -530,6 +533,17 @@ class DashboardWorldMap(WorldLocationsMap):
         frame: GeographicFrame,
     ) -> list[DirectionalCalloutCandidate[str]]:
         location_candidates = super()._callout_candidates(frame)
+        marker_cell = self._selected_alert_marker_cell(frame)
+        if marker_cell is not None:
+            location_candidates = [
+                replace(
+                    candidate,
+                    preferred_avoidance=(
+                        candidate.preferred_avoidance | {marker_cell}
+                    ),
+                )
+                for candidate in location_candidates
+            ]
         by_key = {candidate.key: candidate for candidate in location_candidates}
         selected_location = by_key.pop(self._selected_location_key, None)
         active_location = by_key.pop(self._active_location_key, None)
@@ -574,6 +588,23 @@ class DashboardWorldMap(WorldLocationsMap):
             ordered.append(active_location)
         ordered.extend(by_key.values())
         return ordered
+
+    def _selected_alert_marker_cell(
+        self,
+        frame: GeographicFrame,
+    ) -> tuple[int, int] | None:
+        row = self._selected_alert
+        point = (
+            representative_polygon_point(row.alert.geometry)
+            if row is not None
+            else None
+        )
+        if point is None:
+            return None
+        longitude, latitude = point
+        return frame.canvas.cell_position(
+            frame.canvas.viewport.project(longitude, latitude)
+        )
 
     def _callout_labels(self):
         labels = dict(self._labels)

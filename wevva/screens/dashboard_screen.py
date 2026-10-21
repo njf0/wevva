@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 import hashlib
 from typing import ClassVar
 
-from rich.console import Group
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -20,7 +19,6 @@ from textual.widgets import Footer, Header, OptionList, Static, Tab, Tabs
 from textual.widgets.option_list import Option
 from wevva_warnings import (
     CanonicalTropicalSystem,
-    Alert,
     TropicalProduct,
     TropicalSystem,
 )
@@ -63,9 +61,8 @@ from wevva.widgets.tropical_products import (
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
 from wevva.widgets.weather_alerts import (
     alert_condition_name,
+    alert_renderable,
     alert_severity_color,
-    alert_text_renderables,
-    alert_timing_renderable,
 )
 from wevva.utils.country_codes import get_country_name_by_alpha2
 
@@ -431,7 +428,7 @@ class DashboardAlertsPanel(Container):
         self.border_title = 'Recent Alerts'
         yield DashboardAlertList(id='dashboard-alerts-list')
         yield Static(
-            'No current alerts found yet.\n\nThe session bulletin continues checking countries.',
+            'No bulletin alerts yet.\n\nThe session continues checking countries.',
             id='dashboard-alerts-empty',
         )
 
@@ -520,11 +517,21 @@ class DashboardAlertsPanel(Container):
         alert = row.alert
         colour = alert_severity_color(self.app.theme_variables, alert)
         label = Text(no_wrap=True, overflow='ellipsis')
+        prefix_width = 0
+        if row.is_new:
+            primary = self.app.theme_variables.get('primary', '#0178d4')
+            background = self.app.theme_variables.get('background', '#000000')
+            label.append('NEW', style=f'bold {background} on {primary}')
+            label.append(' ')
+            prefix_width = 4
         condition = Text(
             alert_condition_name(alert),
             style=f'bold {colour}' if colour else 'bold',
         )
-        condition.truncate(self._text_width(), overflow='ellipsis')
+        condition.truncate(
+            max(1, self._text_width() - prefix_width),
+            overflow='ellipsis',
+        )
         label.append_text(condition)
         country = get_country_name_by_alpha2(row.country_code) or row.country_code
         detail = Text(
@@ -849,12 +856,7 @@ class DashboardAlertDetailPanel(Container):
     }
     """
 
-    _TAB_IDS = {
-        'headline': 'dashboard-alert-headline-tab',
-        'timing': 'dashboard-alert-timing-tab',
-        'discussion': 'dashboard-alert-discussion-tab',
-        'instructions': 'dashboard-alert-instructions-tab',
-    }
+    _DOCUMENT_TAB_ID = 'dashboard-alert-document-tab'
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -864,10 +866,7 @@ class DashboardAlertDetailPanel(Container):
         self.border_title = 'Selected Alert'
         tabs = Tabs(
             Tab('Map', id='dashboard-alert-map-tab'),
-            Tab('Headline', id=self._TAB_IDS['headline']),
-            Tab('Timing', id=self._TAB_IDS['timing']),
-            Tab('Discussion', id=self._TAB_IDS['discussion']),
-            Tab('Instructions', id=self._TAB_IDS['instructions']),
+            Tab('Alert', id=self._DOCUMENT_TAB_ID),
             active='dashboard-alert-map-tab',
             id='dashboard-alert-detail-tabs',
         )
@@ -927,25 +926,12 @@ class DashboardAlertDetailPanel(Container):
         )
         if not same_selection:
             self.alert_map.reset_city_tooltips()
-        available = {
-            'headline': bool(
-                (alert.event or '').strip()
-                or (alert.headline or '').strip()
-                or any(area.strip() for area in alert.area_names)
-            ),
-            'timing': alert.onset is not None or alert.expires is not None,
-            'discussion': bool((alert.description or '').strip()),
-            'instructions': bool((alert.instruction or '').strip()),
-        }
-        for name, tab_id in self._TAB_IDS.items():
-            self.query_one(f'#{tab_id}', Tab).display = available[name]
         state.display = False
         self.tabs.display = True
         active_tab = (
             previous_tab
             if same_selection
             and previous_tab is not None
-            and self.query_one(f'#{previous_tab}', Tab).display
             else 'dashboard-alert-map-tab'
         )
         self.tabs.active = active_tab
@@ -968,38 +954,8 @@ class DashboardAlertDetailPanel(Container):
         if is_map:
             return
         body = self.query_one('#dashboard-alert-document-body', Static)
-        alert = row.alert
-        if tab_id == self._TAB_IDS['headline']:
-            body.update(self._headline_renderable(alert))
-        elif tab_id == self._TAB_IDS['timing']:
-            body.update(alert_timing_renderable(alert))
-        elif tab_id == self._TAB_IDS['discussion']:
-            body.update(Group(*alert_text_renderables(alert.description or '')))
-        elif tab_id == self._TAB_IDS['instructions']:
-            body.update(
-                Group(
-                    *alert_text_renderables(
-                        alert.instruction or '',
-                        base_style='italic',
-                    )
-                )
-            )
-
-    def _headline_renderable(self, alert: Alert) -> Group:
-        renderables: list[Text] = []
-        event = (alert.event or '').strip()
-        headline = (alert.headline or '').strip()
-        if event:
-            colour = alert_severity_color(self.app.theme_variables, alert)
-            renderables.append(
-                Text(event, style=f'bold {colour}' if colour else 'bold')
-            )
-        if headline and headline.casefold() != event.casefold():
-            renderables.append(Text(headline))
-        areas = ' · '.join(area.strip() for area in alert.area_names if area.strip())
-        if areas:
-            renderables.append(Text(areas, style='dim'))
-        return Group(*renderables)
+        if tab_id == self._DOCUMENT_TAB_ID:
+            body.update(alert_renderable(row.alert, include_timing=True))
 
 
 class DashboardScreen(Screen[None]):

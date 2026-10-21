@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-D implemented
+Complete — Slices A-F implemented
 
 ## Context
 
@@ -177,16 +177,11 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   selected alert as its sole alert and the alert identity selected. This reuses
   polygon fitting, dateline handling, packaged relevant-city selection, map
   labels, and the existing optional settlement-weather path.
-- Add only content-backed provider-neutral tabs:
-
-  - Headline for event/headline/area context;
-  - Timing for onset/expiry text;
-  - Discussion for `Alert.description`; and
-  - Instructions for `Alert.instruction`.
-
-  Omit tabs whose source fields are absent. Reuse the alert timing and text
-  renderers already used by `weather_alerts.py`; promote narrowly useful
-  helpers rather than embedding the full Alerts Centre screen.
+- Add one Alert tab after Map. Reuse the Alerts Centre's complete
+  `alert_renderable(..., include_timing=True)` presentation so headline,
+  active timing, description, instruction, and any official link read as one
+  coherent document rather than separate fragments. Alerts with sparse source
+  fields retain the renderer's honest fallback content.
 - Alert selection itself requires no new provider request because bulletin
   rows carry the complete cached `Alert`. Settlement current weather remains
   user-triggered and uses `app.load_alert_place_weather()`.
@@ -196,16 +191,37 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
 
 ### Bulletin correctness and `NEW` state
 
-- Extend a successful `BulletinCatalogue` snapshot with the service's
-  `new_alert_identities` for that exact country/language refresh. Hydrated
-  retained catalogues begin with an empty new set; stale persisted `NEW` state
-  is not presented as a fresh session discovery.
+- Treat the first successful fetch for an uncached country/language catalogue
+  as hidden baseline population, not as a discovery event or bulletin content.
+  Store its identities with empty visible and new sets. Only alerts first seen
+  on a later successful refresh of that same catalogue enter the bulletin and
+  qualify as `NEW`. Once admitted, they remain visible while present in later
+  successful catalogues, although their `NEW` state clears on the next
+  successful refresh. This prevents an initially discovered provider feed
+  from dumping all of its existing warnings into the bulletin.
+- Distinguish “no successful baseline yet” from “the successful baseline was
+  empty.” If the first successful fetch legitimately contains no alerts, a
+  warning appearing on the next successful lap is new. Failed or cancelled
+  fetches neither establish a baseline nor advance/clear the prior successful
+  comparison point.
+- Extend a successful `BulletinCatalogue` snapshot with identities absent from
+  that coordinator key's previous successful catalogue. Keep this comparison
+  at the bulletin boundary: an independent Alerts Centre refresh must not
+  consume the bulletin's next-lap discovery state. Hydrate only catalogue
+  cache entries still inside `CountryAlertsService`'s fifteen-minute freshness
+  window. Fresh hydrated catalogues are valid comparison baselines and begin
+  with empty visible and new sets; their next successful live refresh may
+  identify additions, but their current alerts never become startup bulletin
+  rows. Older provisional/retained entries remain hidden; that country's first
+  successful live refresh establishes a hidden baseline, and only later
+  additions enter the bulletin.
 - Add an immutable `is_new` value to each derived `BulletinAlert`. It reflects
   the latest successful catalogue refresh for the attributed country and is
   replaced/cleared by that country's next successful refresh. It is not a
   durable unread system and does not add acknowledgement persistence.
-- Prefix newly fetched feed rows with reverse-styled `NEW`, without applying
-  reverse style to the remaining condition, country, or time text.
+- Prefix newly fetched feed rows with the Alerts Centre's dark-background-text
+  on primary-colour `NEW` badge, without applying that background to the
+  remaining condition, country, or time text.
 - Correct shared-feed country attribution before row rendering. Move the
   provider-neutral alert search text out of `alerts_centre_screen.py` so both
   the default territory filter and bulletin attribution use the same fields.
@@ -373,31 +389,54 @@ while Tropical Systems tabs again colour only the classification.
 ### Slice D — selected-alert reader and rail simplification
 
 Remove preview/open controls and chevron padding, mount the one-alert
-`CountryAlertsMap`, and add content-backed headline/timing/discussion/
-instruction tabs using promoted warning renderers.
+`CountryAlertsMap`, and pair it with one complete alert-document tab using the
+Alerts Centre renderer.
 
 Depends on Slice A's lower-right pane. It can proceed independently of Slice C.
 
 Implemented with a single-alert `CountryAlertsMap` and one persistent document
-body behind content-backed Map, Headline, Timing, Discussion, and Instructions
-tabs. Bulletin selection supplies the complete cached `Alert`; it starts no
-warning-provider request. The existing warning timing/body renderers are now
-small public presentation helpers, and alert-map city tooltips share one
-formatter while Dashboard hover weather remains delayed, cancellable, and
-loaded through `Wevva.load_alert_place_weather()`. The rail now relies on the
-native `OptionList` selection treatment, with no fixed preview, open button,
-synthetic chevron, or reserved indentation. Geometry-less warnings retain the
-honest country-map fallback and do not acquire invented warning polygons.
+body behind Map and Alert tabs. The Alert tab directly reuses the Alerts
+Centre's complete headline/timing/provider-prose renderer. Bulletin selection
+supplies the complete cached `Alert`; it starts no warning-provider request.
+Alert-map city tooltips share one formatter while Dashboard hover weather
+remains delayed, cancellable, and loaded through
+`Wevva.load_alert_place_weather()`. The rail relies on the native `OptionList`
+selection treatment, with no fixed preview, open button, synthetic chevron, or
+reserved indentation. Geometry-less warnings retain the honest country-map
+fallback and do not acquire invented warning polygons.
 
 ### Slice E — bulletin attribution, `NEW`, and map collision polish
 
-Attach refresh-scoped new identities, implement source/territory attribution,
-render `NEW`, slow the pulse, and reserve the alert marker during world callout
-placement. This slice changes existing bulletin/map behavior only after the new
+Establish an explicit successful-fetch baseline for each country/language
+catalogue, attach refresh-scoped new identities only from the second successful
+uncached fetch onward, implement source/territory attribution, render `NEW`,
+slow the pulse, and reserve the alert marker during world callout placement.
+This slice changes existing bulletin/map behavior only after the new
 selected-alert presentation is stable.
 
 Depends on Slice D's final alert-row shape. Attribution and `NEW` should first
-be covered with service-level tests before visual integration.
+be covered with service-level tests before visual integration. Those tests must
+cover a non-empty first fetch producing no `NEW`, a later added identity
+becoming `NEW`, a successfully empty baseline, fresh-catalogue startup, stale
+retained data staying hidden, and failed refreshes preserving the last
+successful comparison point.
+
+Implemented by storing refresh-scoped new identities and the independently
+visible bulletin identities on each immutable `BulletinCatalogue`, then
+deriving immutable `BulletinAlert.is_new` rows after country attribution. An
+uncached first success always establishes a hidden baseline with empty visible
+and new sets; a successfully empty catalogue still establishes that baseline,
+failed refreshes retain the prior successful snapshot, and the next unchanged
+success clears former `NEW` state without removing still-active admitted rows.
+Cross-country duplicates now
+prefer an explicitly named additional territory, then the warning source's
+primary country, before the existing observation-time/code fallback. Dashboard
+rows render only the `NEW` token as dark text on the primary colour, matching
+Alerts Centre. Startup hydration now admits only fresh, non-provisional
+country catalogues; older retained entries remain hidden and the first live
+success replaces them as a hidden baseline. The selected marker cell is
+passed through the callout planner's existing preferred-avoidance input, and
+its finite four-phase pulse now uses 0.24-second phases.
 
 ### Slice F — responsive and combined-view qualification
 
@@ -409,6 +448,17 @@ separator density, and tab truncation discovered here.
 
 Depends on Slices B-E. It must not grow into unrelated cleanup or new provider
 features.
+
+Completed without changing the production layout budgets. Deterministic
+coverage now qualifies the stable widget tree at 80x24, 100x30, 120x30,
+140x40, and 250x70; the mounted resize path crosses compact, medium, and wide
+presentations while preserving the same five region widgets. It also covers
+pane and map-feature keyboard order, honest empty states, supported long unit
+labels with separately styled values, and late place-forecast results in
+addition to the existing late tropical-product, missing-field,
+geometry-less-alert, theme/emoji, and shared-feed cases. The explicit
+map/detail minima and separator density remained usable, so qualification did
+not justify another breakpoint, tab abstraction, or provider-specific branch.
 
 ## Likely risks
 
@@ -433,6 +483,9 @@ features.
 - Rich styling assembled as one string can accidentally colour punctuation and
   units. Hourly cells and `NEW` labels should be constructed from explicit
   `Text.append()` spans.
+- An empty alert tuple cannot by itself indicate whether bulletin discovery has
+  run successfully. Baseline readiness must be explicit so an uncached first
+  fetch and a previously fetched empty provider result are not conflated.
 - Hiding borders removes two rows of implicit layout chrome. Separator and
   DataTable heights must be budgeted explicitly to avoid clipped last rows.
 
@@ -460,13 +513,19 @@ features.
 - A committed storm selection shows track/cone immediately when available and
   lazily reuses cached official products without stale-selection replacement.
 - Alert rows have no fixed preview, open button, chevron, or extra selection
-  padding. Selection populates the alert detail pane and its available tabs.
+  padding. Selection populates Map and one complete Alerts Centre-style Alert
+  document tab.
 - Selected-alert Map reuses polygon/city behavior and geometry-less alerts
   remain honest rather than acquiring invented geometry.
 - Ordinary US shared-feed alerts are labelled United States, while explicitly
   territory-matched alerts retain the correct territory.
-- Only identities new in the latest successful in-session catalogue refresh
-  show reverse-styled `NEW`; retained startup data is not falsely marked new.
+- Only identities introduced between a catalogue's last two successful
+  snapshots show the primary-colour `NEW` badge. An uncached first successful
+  fetch establishes a hidden baseline and contributes no rows. Only
+  still-fresh startup catalogues may act as comparison baselines, and they too
+  remain hidden. Older retained catalogues remain hidden, their first live
+  replacement becomes the hidden baseline, and only later additions are
+  admitted.
 - Place labels avoid the selected alert marker when an opposite-side valid
   callout exists.
 - The slower marker pulse remains finite and is cancelled on replacement,
@@ -503,8 +562,11 @@ and pulse cadence must not be claimed from deterministic tests alone.
 - Provider-backed tabs are conditional. Empty Public Advisory, Forecast
   Discussion, timing, or instruction placeholders are less useful than simply
   omitting unavailable tabs.
-- `NEW` means found by the latest successful in-session country refresh, not
-  unread by the user and not newly issued by the provider.
+- `NEW` means found by comparison with the previous successful country
+  snapshot, not unread by the user and not necessarily newly issued by the
+  provider. More precisely, it means absent from that catalogue's last
+  successful baseline and present in its latest successful refresh. Initial
+  uncached population is neither `NEW` nor visible bulletin content.
 - Separator lines and stage hatch replace nested rounded boxes. Major outer
   regions may retain their existing frame titles where they aid orientation.
 - The implementation target is the useful 95 percent with direct reuse and
@@ -513,4 +575,10 @@ and pulse cadence must not be claimed from deterministic tests alone.
 
 ## Outcome
 
-To be completed after implementation.
+The Dashboard is now a functional, cache-aware overview rather than a set of
+screen shortcuts. Its single responsive widget tree provides the complete
+selected-location forecast, an interaction-safe world map, lazy exact-source
+tropical details, selected-alert maps and documents, and a correctly
+attributed session bulletin with refresh-scoped `NEW` state. Compact terminals
+retain each region through ordered pane tabs, and large terminals expose the
+combined map/detail composition without duplicating fetch or selection state.
