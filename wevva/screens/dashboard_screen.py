@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import hashlib
 from typing import ClassVar
 
+from rich.console import Group
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -15,10 +16,11 @@ from textual.containers import Container, VerticalScroll
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, OptionList, Static, Tab, Tabs
+from textual.widgets import Footer, Header, OptionList, Static, Tab, Tabs
 from textual.widgets.option_list import Option
 from wevva_warnings import (
     CanonicalTropicalSystem,
+    Alert,
     TropicalProduct,
     TropicalSystem,
 )
@@ -33,7 +35,16 @@ from wevva.messages import (
     DashboardPlacePressed,
     DashboardTropicalActivated,
     HourHighlighted,
+    PlaceSelected,
     WeatherUpdated,
+)
+from wevva.widgets.country_alerts_map import (
+    CountryAlertCityLabel,
+    CountryAlertSettlementPreviewCancelled,
+    CountryAlertSettlementPreviewRequested,
+    CountryAlertSettlementSelected,
+    CountryAlertsMap,
+    country_alert_place_weather_tooltip,
 )
 from wevva.widgets.context_bar import ContextBar
 from wevva.widgets.current_conditions import CurrentConditions
@@ -50,7 +61,12 @@ from wevva.widgets.tropical_products import (
     tropical_product_widgets,
 )
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
-from wevva.widgets.weather_alerts import alert_condition_name, alert_severity_color
+from wevva.widgets.weather_alerts import (
+    alert_condition_name,
+    alert_severity_color,
+    alert_text_renderables,
+    alert_timing_renderable,
+)
 from wevva.utils.country_codes import get_country_name_by_alpha2
 
 
@@ -307,12 +323,7 @@ class DashboardForecastPanel(Container):
         status.display = True
 
 class DashboardAlertList(OptionList):
-    """Keep Enter as an explicit open action while click/Space selects."""
-
-    class OpenRequested(Message):
-        def __init__(self, option_id: str | None) -> None:
-            super().__init__()
-            self.option_id = option_id
+    """Alert list which reports transient map previews."""
 
     class PreviewChanged(Message):
         def __init__(self, option_id: str | None) -> None:
@@ -366,27 +377,11 @@ class DashboardAlertList(OptionList):
         super().watch_highlighted(highlighted)
         self._post_preview_if_changed()
 
-    def on_key(self, event: events.Key) -> None:
-        if event.key != 'enter':
-            return
-        option_id = None
-        if self.highlighted is not None and 0 <= self.highlighted < len(self.options):
-            option_id = self.options[self.highlighted].id
-        event.stop()
-        event.prevent_default()
-        self.post_message(self.OpenRequested(option_id))
-
-
 class DashboardAlertsPanel(Container):
-    """Stable alert rows and one fixed bulletin preview."""
+    """Stable bulletin rows with one committed selection."""
 
     class Selected(Message):
         def __init__(self, row: BulletinAlert | None) -> None:
-            super().__init__()
-            self.row = row
-
-    class OpenRequested(Message):
-        def __init__(self, row: BulletinAlert) -> None:
             super().__init__()
             self.row = row
 
@@ -423,21 +418,6 @@ class DashboardAlertsPanel(Container):
         content-align: center middle;
     }
 
-    #dashboard-alert-preview {
-        width: 100%;
-        height: 8;
-        margin-top: 1;
-        padding: 0 1;
-        border: round $primary-muted;
-        overflow: hidden;
-    }
-
-    #dashboard-alert-open {
-        width: 100%;
-        min-width: 0;
-        height: 3;
-        margin-top: 1;
-    }
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -454,8 +434,6 @@ class DashboardAlertsPanel(Container):
             'No current alerts found yet.\n\nThe session bulletin continues checking countries.',
             id='dashboard-alerts-empty',
         )
-        yield Static('Select an alert to preview it.', id='dashboard-alert-preview')
-        yield Button('Open alert', id='dashboard-alert-open', disabled=True)
 
     @property
     def alert_list(self) -> DashboardAlertList:
@@ -494,7 +472,6 @@ class DashboardAlertsPanel(Container):
         self.alert_list.display = bool(rows)
         if self.selected_row is None:
             self._selected_identity = None
-        self._render_preview()
         if selected_identity is not None and self._selected_identity is None:
             self.post_message(self.Selected(None))
 
@@ -503,7 +480,6 @@ class DashboardAlertsPanel(Container):
         self.alert_list.clear_preview()
         self.alert_list.highlighted = None
         self._refresh_option_labels()
-        self._render_preview()
         self.post_message(self.Selected(None))
 
     def on_option_list_option_selected(
@@ -521,7 +497,6 @@ class DashboardAlertsPanel(Container):
             None if identity == self._selected_identity else identity
         )
         self._refresh_option_labels()
-        self._render_preview()
         self.post_message(self.Selected(self.selected_row))
 
     def on_dashboard_alert_list_preview_changed(
@@ -533,27 +508,6 @@ class DashboardAlertsPanel(Container):
             self.Previewed(self._by_option_id.get(event.option_id or ''))
         )
 
-    def on_dashboard_alert_list_open_requested(
-        self,
-        event: DashboardAlertList.OpenRequested,
-    ) -> None:
-        event.stop()
-        row = self._by_option_id.get(event.option_id or '') or self.selected_row
-        if row is None:
-            return
-        self._selected_identity = country_alert_identity(row.alert)
-        self._refresh_option_labels()
-        self._render_preview()
-        self.post_message(self.Selected(row))
-        self.post_message(self.OpenRequested(row))
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != 'dashboard-alert-open':
-            return
-        event.stop()
-        if row := self.selected_row:
-            self.post_message(self.OpenRequested(row))
-
     def on_resize(self, event: Resize) -> None:
         del event
         width = self._text_width()
@@ -561,76 +515,24 @@ class DashboardAlertsPanel(Container):
             return
         self._last_text_width = width
         self._refresh_option_labels()
-        self._render_preview()
-
-    def focus_selected(self, *, open_button: bool = False) -> bool:
-        """Restore focus to the selected row or its explicit open control."""
-
-        row = self.selected_row
-        if row is None:
-            return False
-        if open_button:
-            self.query_one('#dashboard-alert-open', Button).focus()
-            return True
-        option_id = _bulletin_option_id(row)
-        self.alert_list.highlighted = self.alert_list.get_option_index(option_id)
-        self.alert_list.focus()
-        return True
-
-    def _render_preview(self) -> None:
-        preview = self.query_one('#dashboard-alert-preview', Static)
-        button = self.query_one('#dashboard-alert-open', Button)
-        row = self.selected_row
-        button.disabled = row is None
-        if row is None:
-            preview.update('Select an alert to preview it.')
-            return
-        country = get_country_name_by_alpha2(row.country_code) or row.country_code
-        alert = row.alert
-        preview_width = max(8, preview.content_size.width)
-        text = Text()
-        severity = (alert.severity or 'Alert').strip().title()
-        colour = alert_severity_color(self.app.theme_variables, alert)
-        text.append(severity, style=f'bold {colour}' if colour else 'bold')
-        text.append(f' · {alert_condition_name(alert)}')
-        text.truncate(preview_width, overflow='ellipsis')
-        text.append(f'\n{country}', style='bold')
-        area = ' · '.join(value.strip() for value in alert.area_names if value.strip())
-        if area:
-            area_text = Text(area, style='dim')
-            area_text.truncate(preview_width, overflow='ellipsis')
-            text.append('\n')
-            text.append_text(area_text)
-        text.append(
-            f'\nFirst found by Wevva {_relative_observation(row.first_observed)}',
-            style='italic dim',
-        )
-        preview.update(text)
 
     def _row_label(self, row: BulletinAlert) -> Text:
         alert = row.alert
         colour = alert_severity_color(self.app.theme_variables, alert)
         label = Text(no_wrap=True, overflow='ellipsis')
-        selected = country_alert_identity(alert) == self._selected_identity
-        accent = (
-            self.app.theme_variables.get('accent')
-            or self.app.theme_variables.get('text-accent')
-        )
-        indicator_style = f'bold {accent}' if accent else 'bold'
-        label.append('▸ ' if selected else '  ', style=indicator_style)
         condition = Text(
             alert_condition_name(alert),
             style=f'bold {colour}' if colour else 'bold',
         )
-        condition.truncate(max(1, self._text_width() - 2), overflow='ellipsis')
+        condition.truncate(self._text_width(), overflow='ellipsis')
         label.append_text(condition)
         country = get_country_name_by_alpha2(row.country_code) or row.country_code
         detail = Text(
             f'{country} · {_relative_observation(row.first_observed)}',
             style='dim',
         )
-        label.append('\n  ')
-        detail.truncate(max(1, self._text_width() - 2), overflow='ellipsis')
+        label.append('\n')
+        detail.truncate(self._text_width(), overflow='ellipsis')
         label.append_text(detail)
         return label
 
@@ -898,7 +800,7 @@ class DashboardTropicalPanel(Container):
 
 
 class DashboardAlertDetailPanel(Container):
-    """Persistent lower-centre home for one committed bulletin selection."""
+    """Provider-neutral map and document reader for one bulletin alert."""
 
     DEFAULT_CSS = """
     DashboardAlertDetailPanel {
@@ -909,6 +811,31 @@ class DashboardAlertDetailPanel(Container):
         border: round $primary;
         border-title-color: $primary;
         background: $background;
+    }
+
+    #dashboard-alert-detail-tabs {
+        width: 100%;
+        height: 2;
+    }
+
+    #dashboard-alert-detail-content {
+        width: 100%;
+        height: 1fr;
+        overflow: hidden hidden;
+    }
+
+    #dashboard-alert-map {
+        width: 100%;
+        height: 100%;
+        min-height: 1;
+        border: none;
+    }
+
+    #dashboard-alert-document {
+        width: 100%;
+        height: 100%;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
     }
 
     #dashboard-alert-detail-state {
@@ -922,25 +849,157 @@ class DashboardAlertDetailPanel(Container):
     }
     """
 
+    _TAB_IDS = {
+        'headline': 'dashboard-alert-headline-tab',
+        'timing': 'dashboard-alert-timing-tab',
+        'discussion': 'dashboard-alert-discussion-tab',
+        'instructions': 'dashboard-alert-instructions-tab',
+    }
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._row: BulletinAlert | None = None
+
     def compose(self) -> ComposeResult:
         self.border_title = 'Selected Alert'
-        yield Static(
-            'Select an alert from the bulletin.',
-            id='dashboard-alert-detail-state',
+        tabs = Tabs(
+            Tab('Map', id='dashboard-alert-map-tab'),
+            Tab('Headline', id=self._TAB_IDS['headline']),
+            Tab('Timing', id=self._TAB_IDS['timing']),
+            Tab('Discussion', id=self._TAB_IDS['discussion']),
+            Tab('Instructions', id=self._TAB_IDS['instructions']),
+            active='dashboard-alert-map-tab',
+            id='dashboard-alert-detail-tabs',
         )
+        tabs.display = False
+        yield tabs
+        with Container(id='dashboard-alert-detail-content'):
+            alert_map = CountryAlertsMap(id='dashboard-alert-map')
+            alert_map.display = False
+            yield alert_map
+            document = VerticalScroll(id='dashboard-alert-document')
+            document.display = False
+            with document:
+                yield Static(id='dashboard-alert-document-body')
+            yield Static(
+                'Select an alert from the bulletin.',
+                id='dashboard-alert-detail-state',
+            )
+
+    @property
+    def tabs(self) -> Tabs:
+        return self.query_one('#dashboard-alert-detail-tabs', Tabs)
+
+    @property
+    def alert_map(self) -> CountryAlertsMap:
+        return self.query_one('#dashboard-alert-map', CountryAlertsMap)
 
     def show_alert(self, row: BulletinAlert | None) -> None:
-        """Show honest Slice A state for the committed alert identity."""
+        """Present only tabs backed by the committed bulletin alert."""
 
+        previous_identity = (
+            country_alert_identity(self._row.alert)
+            if self._row is not None
+            else None
+        )
+        next_identity = (
+            country_alert_identity(row.alert) if row is not None else None
+        )
+        same_selection = previous_identity == next_identity
+        previous_tab = self.tabs.active if self.is_mounted else None
+        self._row = row
         state = self.query_one('#dashboard-alert-detail-state', Static)
         if row is None:
             state.update('Select an alert from the bulletin.')
+            state.display = True
+            self.tabs.display = False
+            self.alert_map.display = False
+            self.query_one('#dashboard-alert-document').display = False
+            self.alert_map.clear()
             return
+        alert = row.alert
         country = get_country_name_by_alpha2(row.country_code) or row.country_code
-        state.update(
-            f'{alert_condition_name(row.alert)}\n{country}\n\n'
-            'Map and warning details are not available here yet.'
+        self.alert_map.update_country(
+            row.country_code,
+            country,
+            [alert],
+            selected_alert_key=country_alert_identity(alert),
         )
+        if not same_selection:
+            self.alert_map.reset_city_tooltips()
+        available = {
+            'headline': bool(
+                (alert.event or '').strip()
+                or (alert.headline or '').strip()
+                or any(area.strip() for area in alert.area_names)
+            ),
+            'timing': alert.onset is not None or alert.expires is not None,
+            'discussion': bool((alert.description or '').strip()),
+            'instructions': bool((alert.instruction or '').strip()),
+        }
+        for name, tab_id in self._TAB_IDS.items():
+            self.query_one(f'#{tab_id}', Tab).display = available[name]
+        state.display = False
+        self.tabs.display = True
+        active_tab = (
+            previous_tab
+            if same_selection
+            and previous_tab is not None
+            and self.query_one(f'#{previous_tab}', Tab).display
+            else 'dashboard-alert-map-tab'
+        )
+        self.tabs.active = active_tab
+        self._show_tab(active_tab)
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tabs is not self.tabs or event.tab.id is None:
+            return
+        event.stop()
+        self._show_tab(event.tab.id)
+
+    def _show_tab(self, tab_id: str) -> None:
+        row = self._row
+        if row is None:
+            return
+        is_map = tab_id == 'dashboard-alert-map-tab'
+        self.alert_map.display = is_map
+        document = self.query_one('#dashboard-alert-document', VerticalScroll)
+        document.display = not is_map
+        if is_map:
+            return
+        body = self.query_one('#dashboard-alert-document-body', Static)
+        alert = row.alert
+        if tab_id == self._TAB_IDS['headline']:
+            body.update(self._headline_renderable(alert))
+        elif tab_id == self._TAB_IDS['timing']:
+            body.update(alert_timing_renderable(alert))
+        elif tab_id == self._TAB_IDS['discussion']:
+            body.update(Group(*alert_text_renderables(alert.description or '')))
+        elif tab_id == self._TAB_IDS['instructions']:
+            body.update(
+                Group(
+                    *alert_text_renderables(
+                        alert.instruction or '',
+                        base_style='italic',
+                    )
+                )
+            )
+
+    def _headline_renderable(self, alert: Alert) -> Group:
+        renderables: list[Text] = []
+        event = (alert.event or '').strip()
+        headline = (alert.headline or '').strip()
+        if event:
+            colour = alert_severity_color(self.app.theme_variables, alert)
+            renderables.append(
+                Text(event, style=f'bold {colour}' if colour else 'bold')
+            )
+        if headline and headline.casefold() != event.casefold():
+            renderables.append(Text(headline))
+        areas = ' · '.join(area.strip() for area in alert.area_names if area.strip())
+        if areas:
+            renderables.append(Text(areas, style='dim'))
+        return Group(*renderables)
 
 
 class DashboardScreen(Screen[None]):
@@ -1057,6 +1116,9 @@ class DashboardScreen(Screen[None]):
         self._tropical_product_task: asyncio.Task[None] | None = None
         self._tropical_detail_generation = 0
         self._tropical_detail_key: tuple[str, str, str] | None = None
+        self._alert_place_weather_generation = 0
+        self._alert_place_weather_task: asyncio.Task[None] | None = None
+        self._alert_place_weather_label: CountryAlertCityLabel | None = None
         self._bulletin_generation = -1
         self._alert_return_focus: str | None = None
 
@@ -1144,6 +1206,7 @@ class DashboardScreen(Screen[None]):
 
     def on_screen_suspend(self) -> None:
         self.world_map.pause_alert_marker()
+        self._cancel_alert_place_weather()
 
     def on_unmount(self) -> None:
         self._cancel_forecast_wait()
@@ -1151,6 +1214,7 @@ class DashboardScreen(Screen[None]):
             self._tropical_wait_task.cancel()
             self._tropical_wait_task = None
         self._cancel_tropical_product_wait()
+        self._cancel_alert_place_weather()
 
     def on_resize(self, event: Resize) -> None:
         self._apply_layout(event.size.width, event.size.height)
@@ -1241,6 +1305,8 @@ class DashboardScreen(Screen[None]):
             self.app.alert_bulletin.generation,
             self.app.alert_bulletin.recent_alerts_snapshot(),
         )
+        self._cancel_alert_place_weather()
+        self.alert_detail_panel.alert_map.reset_city_tooltips()
         self._show_persistent_location()
 
     def on_dashboard_place_pressed(self, message: DashboardPlacePressed) -> None:
@@ -1288,6 +1354,7 @@ class DashboardScreen(Screen[None]):
         message: DashboardAlertsPanel.Selected,
     ) -> None:
         message.stop()
+        self._cancel_alert_place_weather()
         self.world_map.set_selected_alert(message.row)
         self.alert_detail_panel.show_alert(message.row)
         if message.row is not None:
@@ -1300,23 +1367,6 @@ class DashboardScreen(Screen[None]):
         message.stop()
         self.world_map.set_alert_preview(message.row)
 
-    def on_dashboard_alerts_panel_open_requested(
-        self,
-        message: DashboardAlertsPanel.OpenRequested,
-    ) -> None:
-        message.stop()
-        row = message.row
-        focused = self.app.focused
-        self._alert_return_focus = (
-            'button'
-            if isinstance(focused, Button) and focused.id == 'dashboard-alert-open'
-            else 'list'
-        )
-        self.app.open_alerts_centre_screen(
-            country_code=row.country_code,
-            alert_identity=country_alert_identity(row.alert),
-        )
-
     def on_dashboard_alert_marker_activated(
         self,
         message: DashboardAlertMarker.Activated,
@@ -1328,6 +1378,111 @@ class DashboardScreen(Screen[None]):
             country_code=row.country_code,
             alert_identity=country_alert_identity(row.alert),
         )
+
+    def on_country_alert_settlement_selected(
+        self,
+        event: CountryAlertSettlementSelected,
+    ) -> None:
+        """Keep the focused-alert map's city click as a full-weather action."""
+
+        event.stop()
+        self._cancel_alert_place_weather()
+        row = self.alerts_panel.selected_row
+        country_code = event.place.country_code or (row.country_code if row else '')
+        self.post_message(
+            PlaceSelected(
+                location=LocationMetadata(
+                    latitude=event.place.latitude,
+                    longitude=event.place.longitude,
+                    name=event.place.name,
+                    admin=event.place.region_name,
+                    country=get_country_name_by_alpha2(country_code) or country_code,
+                    country_code=country_code,
+                )
+            )
+        )
+
+    def on_country_alert_settlement_preview_requested(
+        self,
+        event: CountryAlertSettlementPreviewRequested,
+    ) -> None:
+        """Load compact city weather only after a map label is inspected."""
+
+        event.stop()
+        self._cancel_alert_place_weather()
+        self._alert_place_weather_generation += 1
+        generation = self._alert_place_weather_generation
+        self._alert_place_weather_label = event.label
+        event.label.reset_tooltip()
+        self._alert_place_weather_task = asyncio.create_task(
+            self._load_alert_place_weather(generation, event.label)
+        )
+
+    def on_country_alert_settlement_preview_cancelled(
+        self,
+        event: CountryAlertSettlementPreviewCancelled,
+    ) -> None:
+        event.stop()
+        if event.label is self._alert_place_weather_label:
+            self._cancel_alert_place_weather()
+
+    async def _load_alert_place_weather(
+        self,
+        generation: int,
+        label: CountryAlertCityLabel,
+    ) -> None:
+        task = asyncio.current_task()
+        try:
+            await asyncio.sleep(0.15)
+            response = await self.app.load_alert_place_weather(
+                label.place.latitude,
+                label.place.longitude,
+                self.app.temperature_unit,
+                self.app.wind_speed_unit,
+                self.app.precipitation_unit,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if self._alert_place_weather_request_is_current(generation, label):
+                label.tooltip = country_alert_place_weather_tooltip(
+                    label.place,
+                    None,
+                    theme=self.app.theme_variables,
+                    temperature_unit=self.app.temperature_unit,
+                    emoji_enabled=self.app.emoji_enabled,
+                )
+            return
+        finally:
+            if self._alert_place_weather_task is task:
+                self._alert_place_weather_task = None
+        if self._alert_place_weather_request_is_current(generation, label):
+            label.tooltip = country_alert_place_weather_tooltip(
+                label.place,
+                response,
+                theme=self.app.theme_variables,
+                temperature_unit=self.app.temperature_unit,
+                emoji_enabled=self.app.emoji_enabled,
+            )
+
+    def _alert_place_weather_request_is_current(
+        self,
+        generation: int,
+        label: CountryAlertCityLabel,
+    ) -> bool:
+        return (
+            self.is_attached
+            and generation == self._alert_place_weather_generation
+            and label is self._alert_place_weather_label
+            and label.is_attached
+        )
+
+    def _cancel_alert_place_weather(self) -> None:
+        self._alert_place_weather_generation += 1
+        if self._alert_place_weather_task is not None:
+            self._alert_place_weather_task.cancel()
+            self._alert_place_weather_task = None
+        self._alert_place_weather_label = None
 
     def _sync_tropical_systems(self) -> None:
         snapshot = self.app.tropical_systems_snapshot()
@@ -1644,14 +1799,6 @@ class DashboardScreen(Screen[None]):
         if alert_focus == 'marker' and self.world_map.alert_marker.display:
             self.world_map.alert_marker.focus()
             return
-        if (
-            alert_focus in {'list', 'button'}
-            and self.alerts_panel.display
-            and self.alerts_panel.focus_selected(
-                open_button=alert_focus == 'button'
-            )
-        ):
-            return
         if self._layout_budget is None or self._layout_budget.simultaneous:
             self.world_map.focus_preferred_location()
         elif self._active_pane == 'map':
@@ -1659,6 +1806,7 @@ class DashboardScreen(Screen[None]):
 
     def action_back(self) -> None:
         self._cancel_forecast_wait()
+        self._cancel_alert_place_weather()
         self.app.pop_screen()
 
     def action_previous_feature(self) -> None:

@@ -36,7 +36,6 @@ from wevva.alerts_centre_layout import (
     AlertsCentrePresentation,
     alerts_centre_layout_for,
 )
-from wevva.conditions import get_condition
 from wevva.geography import PopulatedPlace
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected
@@ -54,8 +53,8 @@ from wevva.widgets.country_alerts_map import (
     CountryAlertSettlementPreviewRequested,
     CountryAlertSettlementSelected,
     CountryAlertsMap,
+    country_alert_place_weather_tooltip,
 )
-from wevva.utils import bearing_to_direction, rain_colour, temp_colour, wind_colour
 from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsPanel,
     alert_condition_name,
@@ -1456,7 +1455,7 @@ class AlertsCentreScreen(Screen[None]):
         self._cancel_place_weather_preview()
         label.reset_tooltip()
         if self._place_weather_loader is None:
-            label.tooltip = self._place_weather_unavailable_tooltip(place)
+            label.tooltip = self._place_weather_tooltip(place, None)
             return
         self._place_weather_generation += 1
         generation = self._place_weather_generation
@@ -1497,7 +1496,7 @@ class AlertsCentreScreen(Screen[None]):
             raise
         except Exception:
             if self._place_weather_request_is_current(generation, label, cache_key):
-                label.tooltip = self._place_weather_unavailable_tooltip(label.place)
+                label.tooltip = self._place_weather_tooltip(label.place, None)
             return
         finally:
             if self._place_weather_task is task:
@@ -1535,113 +1534,17 @@ class AlertsCentreScreen(Screen[None]):
     def _place_weather_tooltip(
         self,
         place: PopulatedPlace,
-        response: dict[str, Any],
+        response: dict[str, Any] | None,
     ) -> Text:
         """Build a compact, non-interactive current-weather preview."""
 
-        current = response.get('current')
-        units = response.get('current_units')
-        if not isinstance(current, dict):
-            return self._place_weather_unavailable_tooltip(place)
-        if not isinstance(units, dict):
-            units = {}
-
-        theme = self.app.theme_variables
-        tooltip = _place_tooltip_heading(place, theme.get('primary'))
-        condition_line = Text()
-
-        code = current.get('weather_code')
-        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
-        if condition is not None:
-            if getattr(self.app, 'emoji_enabled', True):
-                emoji = condition.day_emoji if current.get('is_day') != 0 else condition.night_emoji
-                condition_line.append(f'{emoji} ', style='italic')
-            condition_line.append(condition.name, style='italic')
-
-        measurements: list[Text] = []
-        temperature = _number(current.get('temperature_2m'))
-        if temperature is not None:
-            colour = temp_colour(
-                temperature,
-                scale='theme_temperature',
-                hex=True,
-                unit=getattr(self.app, 'temperature_unit', 'celsius'),
-                theme_colours=theme,
-            )
-            temperature_text = Text(f'{round(temperature):g}', style=f'bold {colour}')
-            temperature_text.append(
-                str(units.get('temperature_2m') or '°C'),
-                style=str(colour),
-            )
-            measurements.append(temperature_text)
-
-        probability = _number(current.get('precipitation_probability'))
-        amount = _number(current.get('precipitation'))
-        if probability is not None or amount is not None:
-            precipitation_text = Text()
-            if probability is not None:
-                colour = rain_colour(
-                    probability,
-                    hex=True,
-                    min_colour=theme.get('foreground', '#ffffff'),
-                    max_colour=theme.get('primary', '#0178d4'),
-                )
-                precipitation_text.append(f'{probability:g}%', style=f'bold {colour}')
-            if amount is not None:
-                if probability is not None:
-                    precipitation_text.append(' ')
-                precipitation_text.append(
-                    f'({amount:g} {units.get("precipitation") or "mm"})',
-                    style=theme.get('text-primary'),
-                )
-            measurements.append(precipitation_text)
-
-        speed = _number(current.get('wind_speed_10m'))
-        gust = _number(current.get('wind_gusts_10m'))
-        direction = _number(current.get('wind_direction_10m'))
-        if speed is not None:
-            colour = wind_colour(
-                speed,
-                hex=True,
-                min_colour=theme.get('foreground', '#ffffff'),
-                max_colour=theme.get('secondary', '#00a0a0'),
-            )
-            wind_text = Text(f'{round(speed):g}', style=f'bold {colour}')
-            if gust is not None:
-                wind_text.append(f' ({round(gust):g})', style=f'bold {colour}')
-            wind_text.append(
-                f' {units.get("wind_speed_10m") or "km/h"}',
-                style=str(colour),
-            )
-            if direction is not None:
-                wind_text.append(f' {bearing_to_direction(direction)}')
-            measurements.append(wind_text)
-
-        details = Text()
-        for measurement in measurements:
-            if details:
-                details.append(' · ', style='dim')
-            details.append_text(measurement)
-
-        if condition_line:
-            tooltip.append('\n')
-            tooltip.append_text(condition_line)
-        if details:
-            tooltip.append('\n')
-            tooltip.append_text(details)
-        if not condition_line and not details:
-            tooltip.append('\nNo current observations', style='dim italic')
-        tooltip.append('\nClick for full forecast', style='dim')
-        return tooltip
-
-    def _place_weather_unavailable_tooltip(self, place: PopulatedPlace) -> Text:
-        tooltip = _place_tooltip_heading(
+        return country_alert_place_weather_tooltip(
             place,
-            self.app.theme_variables.get('primary'),
+            response,
+            theme=self.app.theme_variables,
+            temperature_unit=getattr(self.app, 'temperature_unit', 'celsius'),
+            emoji_enabled=getattr(self.app, 'emoji_enabled', True),
         )
-        tooltip.append('\nCurrent weather unavailable', style='dim italic')
-        tooltip.append('\nClick for full forecast', style='dim')
-        return tooltip
 
 
 def _alert_area_label(alert: Alert) -> str:
@@ -1676,21 +1579,6 @@ def _ellipsize_area_label(label: str) -> str:
         return label
     shortened = label[: _ALERT_AREA_LABEL_MAX_LENGTH - 1].rstrip(' ,;:-')
     return f'{shortened}…'
-
-
-def _place_tooltip_heading(place: PopulatedPlace, colour: str | None) -> Text:
-    heading = Text()
-    heading.append(place.name, style=f'bold {colour}' if colour else 'bold')
-    region = ' '.join(place.region_name.split())
-    if region and region.casefold() != place.name.casefold():
-        heading.append(f', {region}', style='dim')
-    return heading
-
-
-def _number(value: object) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
 
 
 def _place_weather_cache_key(

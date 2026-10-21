@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-C implemented
+In progress — Slices A-D implemented
 
 ## Context
 
@@ -377,6 +377,17 @@ Remove preview/open controls and chevron padding, mount the one-alert
 instruction tabs using promoted warning renderers.
 
 Depends on Slice A's lower-right pane. It can proceed independently of Slice C.
+
+Implemented with a single-alert `CountryAlertsMap` and one persistent document
+body behind content-backed Map, Headline, Timing, Discussion, and Instructions
+tabs. Bulletin selection supplies the complete cached `Alert`; it starts no
+warning-provider request. The existing warning timing/body renderers are now
+small public presentation helpers, and alert-map city tooltips share one
+formatter while Dashboard hover weather remains delayed, cancellable, and
+loaded through `Wevva.load_alert_place_weather()`. The rail now relies on the
+native `OptionList` selection treatment, with no fixed preview, open button,
+synthetic chevron, or reserved indentation. Geometry-less warnings retain the
+honest country-map fallback and do not acquire invented warning polygons.
 
 ### Slice E — bulletin attribution, `NEW`, and map collision polish
 

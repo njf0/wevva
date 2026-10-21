@@ -29,6 +29,7 @@ from wevva.geography import (
     project_visible_polygons,
     viewport_from_lonlat,
 )
+from wevva.conditions import get_condition
 from wevva.services.country_alerts import country_alert_identity
 from wevva.widgets.geographic_scope import (
     GeographicCanvas,
@@ -45,6 +46,7 @@ from wevva.widgets.weather_alerts import (
     alert_severity_color,
     alert_severity_surface_color,
 )
+from wevva.utils import bearing_to_direction, rain_colour, temp_colour, wind_colour
 
 
 PlaceKey = tuple[float, float]
@@ -373,6 +375,126 @@ class CountryAlertRegionLabel(Static):
         display: none;
     }
     """
+
+
+def country_alert_place_weather_tooltip(
+    place: PopulatedPlace,
+    response: Mapping[str, object] | None,
+    *,
+    theme: Mapping[str, str],
+    temperature_unit: str,
+    emoji_enabled: bool,
+) -> Text:
+    """Build the compact current-weather tooltip shared by alert maps."""
+
+    tooltip = Text()
+    tooltip.append(
+        place.name,
+        style=f'bold {theme.get("primary")}' if theme.get('primary') else 'bold',
+    )
+    region = ' '.join(place.region_name.split())
+    if region and region.casefold() != place.name.casefold():
+        tooltip.append(f', {region}', style='dim')
+
+    current = response.get('current') if response is not None else None
+    units = response.get('current_units') if response is not None else None
+    if not isinstance(current, Mapping):
+        tooltip.append('\nCurrent weather unavailable', style='dim italic')
+        tooltip.append('\nClick for full forecast', style='dim')
+        return tooltip
+    if not isinstance(units, Mapping):
+        units = {}
+
+    condition_line = Text()
+    code = current.get('weather_code')
+    condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+    if condition is not None:
+        if emoji_enabled:
+            emoji = condition.day_emoji if current.get('is_day') != 0 else condition.night_emoji
+            condition_line.append(f'{emoji} ', style='italic')
+        condition_line.append(condition.name, style='italic')
+
+    measurements: list[Text] = []
+    temperature = _weather_number(current.get('temperature_2m'))
+    if temperature is not None:
+        colour = temp_colour(
+            temperature,
+            scale='theme_temperature',
+            hex=True,
+            unit=temperature_unit,
+            theme_colours=theme,
+        )
+        temperature_text = Text(f'{round(temperature):g}', style=f'bold {colour}')
+        temperature_text.append(
+            str(units.get('temperature_2m') or '°C'),
+            style=str(colour),
+        )
+        measurements.append(temperature_text)
+
+    probability = _weather_number(current.get('precipitation_probability'))
+    amount = _weather_number(current.get('precipitation'))
+    if probability is not None or amount is not None:
+        precipitation_text = Text()
+        if probability is not None:
+            colour = rain_colour(
+                probability,
+                hex=True,
+                min_colour=theme.get('foreground', '#ffffff'),
+                max_colour=theme.get('primary', '#0178d4'),
+            )
+            precipitation_text.append(f'{probability:g}', style=f'bold {colour}')
+            precipitation_text.append('%')
+        if amount is not None:
+            if probability is not None:
+                precipitation_text.append(' ')
+            precipitation_text.append(
+                f'({amount:g} {units.get("precipitation") or "mm"})',
+                style=theme.get('text-primary'),
+            )
+        measurements.append(precipitation_text)
+
+    speed = _weather_number(current.get('wind_speed_10m'))
+    if speed is not None:
+        colour = wind_colour(
+            speed,
+            hex=True,
+            min_colour=theme.get('foreground', '#ffffff'),
+            max_colour=theme.get('secondary', '#00a0a0'),
+        )
+        wind_text = Text(f'{round(speed):g}', style=f'bold {colour}')
+        gust = _weather_number(current.get('wind_gusts_10m'))
+        if gust is not None:
+            wind_text.append(f' ({round(gust):g})', style=f'bold {colour}')
+        wind_text.append(
+            f' {units.get("wind_speed_10m") or "km/h"}',
+            style=str(colour),
+        )
+        direction = _weather_number(current.get('wind_direction_10m'))
+        if direction is not None:
+            wind_text.append(f' {bearing_to_direction(direction)}')
+        measurements.append(wind_text)
+
+    details = Text()
+    for measurement in measurements:
+        if details:
+            details.append(' · ', style='dim')
+        details.append_text(measurement)
+    if condition_line:
+        tooltip.append('\n')
+        tooltip.append_text(condition_line)
+    if details:
+        tooltip.append('\n')
+        tooltip.append_text(details)
+    if not condition_line and not details:
+        tooltip.append('\nNo current observations', style='dim italic')
+    tooltip.append('\nClick for full forecast', style='dim')
+    return tooltip
+
+
+def _weather_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 class CountryAlertSettlementSelected(Message):
@@ -922,6 +1044,7 @@ __all__ = [
     'CountryAlertsMap',
     'CountryAlertsMapGeometry',
     'CountryAlertsMapPlacement',
+    'country_alert_place_weather_tooltip',
     'build_country_alert_polygon_layers',
     'build_country_alerts_map_geometry',
     'build_country_alerts_map_view',

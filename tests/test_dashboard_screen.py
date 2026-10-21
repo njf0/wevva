@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 
 from rich.text import Text
 from textual.containers import VerticalScroll
-from textual.widgets import OptionList, Static, Tabs
+from textual.widgets import OptionList, Static, Tab, Tabs
 from wevva_warnings import (
     Alert,
     CanonicalTropicalSystem,
@@ -33,6 +33,11 @@ from wevva.widgets.dashboard_world_map import (
     DashboardTropicalLabel,
 )
 from wevva.widgets.dashboard_hourly_forecast import DashboardHourlyForecast
+from wevva.widgets.country_alerts_map import (
+    CountryAlertCityLabel,
+    CountryAlertSettlementPreviewRequested,
+    CountryAlertsMap,
+)
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 
 
@@ -223,9 +228,19 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app.action_refresh.assert_not_awaited()
             app.controller.fetch.assert_not_awaited()
 
-    async def test_recent_alert_selection_and_open_use_stable_deep_link(self) -> None:
+    async def test_recent_alert_selection_populates_dashboard_reader(self) -> None:
         app = self._app()
         app.open_alerts_centre_screen = Mock()
+        app.load_alert_place_weather = AsyncMock(
+            return_value={
+                'current': {
+                    'temperature_2m': 12,
+                    'weather_code': 1,
+                    'is_day': 1,
+                },
+                'current_units': {'temperature_2m': '°C'},
+            }
+        )
         alert = Alert(
             id='flood-1',
             source='fixture',
@@ -233,6 +248,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             headline='Extremely long river flooding warning',
             severity='Severe',
             area_names=['A deliberately long affected-area label for the Lower Rhine'],
+            onset=datetime(2026, 10, 21, 8, tzinfo=UTC),
+            expires=datetime(2026, 10, 21, 18, tzinfo=UTC),
+            description='River levels are expected to remain high.',
+            instruction='Avoid flooded roads.',
             geometry={
                 'type': 'Polygon',
                 'coordinates': [
@@ -265,45 +284,70 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(selected_prompt, Text)
             selected_lines = selected_prompt.plain.splitlines()
             self.assertEqual(len(selected_lines), 2)
-            self.assertTrue(selected_lines[0].startswith('▸ '))
+            self.assertFalse(selected_lines[0].startswith('▸ '))
             self.assertTrue(
                 all(len(line) <= panel._text_width() for line in selected_lines)
             )
+            self.assertEqual(len(panel.query('#dashboard-alert-preview')), 0)
+            self.assertEqual(len(panel.query('#dashboard-alert-open')), 0)
             marker = screen.world_map.query_one(
                 '#dashboard-alert-marker',
                 DashboardAlertMarker,
             )
             self.assertTrue(marker.display)
             self.assertIs(marker.row, row)
-            self.assertIn(
-                'River Flood',
-                screen.query_one(
-                    '#dashboard-alert-detail-state',
-                    Static,
-                ).render().plain,
+            detail = screen.alert_detail_panel
+            alert_map = detail.query_one('#dashboard-alert-map', CountryAlertsMap)
+            self.assertTrue(alert_map.display)
+            self.assertEqual(len(alert_map.alert_layers), 1)
+            self.assertTrue(alert_map.geometry.selected_alert_polygons)
+            self.assertEqual(alert_map.alert_layers[0].key, ('fixture', 'flood-1'))
+            self.assertEqual(
+                [tab.id for tab in detail.query(Tab) if tab.display],
+                [
+                    'dashboard-alert-map-tab',
+                    'dashboard-alert-headline-tab',
+                    'dashboard-alert-timing-tab',
+                    'dashboard-alert-discussion-tab',
+                    'dashboard-alert-instructions-tab',
+                ],
             )
+            detail.tabs.active = 'dashboard-alert-discussion-tab'
+            await pilot.pause()
+            self.assertTrue(
+                detail.query_one(
+                    '#dashboard-alert-document',
+                    VerticalScroll,
+                ).display
+            )
+            screen.update_bulletin(1, (row,))
+            await pilot.pause()
+            self.assertEqual(
+                detail.tabs.active,
+                'dashboard-alert-discussion-tab',
+            )
+            labels = list(alert_map.query(CountryAlertCityLabel))
+            self.assertTrue(labels)
+            screen.on_country_alert_settlement_preview_requested(
+                CountryAlertSettlementPreviewRequested(label=labels[0])
+            )
+            await pilot.pause(0.2)
+            app.load_alert_place_weather.assert_awaited_once()
+            self.assertIn('12°C', labels[0].tooltip.plain)
             await pilot.pause(0.55)
             self.assertIsNone(screen.world_map._alert_pulse_task)
             self.assertFalse(marker.has_class('pulse'))
-            self.assertIn(
-                'First found by Wevva',
-                panel.query_one('#dashboard-alert-preview', Static).render().plain,
-            )
             app.refresh_dashboard_bulletin()
             app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
                 ['DE', None, 'DE']
             )
 
-            panel.post_message(panel.OpenRequested(row))
+            marker.action_activate()
             await pilot.pause()
             app.open_alerts_centre_screen.assert_called_once_with(
                 country_code='DE',
                 alert_identity=('fixture', 'flood-1'),
             )
-
-            marker.action_activate()
-            await pilot.pause()
-            self.assertEqual(app.open_alerts_centre_screen.call_count, 2)
 
             panel.on_option_list_option_selected(
                 OptionList.OptionSelected(panel.alert_list, option, 0)
@@ -311,6 +355,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
             self.assertFalse(marker.display)
+            self.assertFalse(detail.tabs.display)
             self.assertIn(
                 'Select an alert',
                 screen.query_one(
@@ -323,7 +368,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 OptionList.OptionSelected(panel.alert_list, option, 0)
             )
             await pilot.pause()
-            self.assertIsNotNone(screen.world_map._alert_pulse_task)
+            self.assertTrue(marker.display)
             screen.action_back()
             await _settle(pilot)
             self.assertIsNot(app.screen, screen)
@@ -370,6 +415,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIs(panel.selected_row, geometryless)
             self.assertFalse(marker.display)
+            self.assertTrue(alert_map.display)
+            self.assertFalse(alert_map.geometry.selected_alert_polygons)
+            self.assertEqual(
+                [tab.id for tab in detail.query(Tab) if tab.display],
+                [
+                    'dashboard-alert-map-tab',
+                    'dashboard-alert-headline-tab',
+                ],
+            )
             screen.update_bulletin(3, ())
             await pilot.pause()
             self.assertIsNone(panel.selected_row)

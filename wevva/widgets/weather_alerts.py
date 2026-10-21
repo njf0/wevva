@@ -771,18 +771,18 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
     heading.stylize('markdown.h3')
     renderables: list[object] = [heading]
     if include_timing:
-        renderables.extend((Text(''), _alert_timing_renderable(alert)))
+        renderables.extend((Text(''), alert_timing_renderable(alert)))
     if alert.description and alert.description.strip():
-        renderables.extend((Text(''), *_alert_text_renderables(alert.description)))
+        renderables.extend((Text(''), *alert_text_renderables(alert.description)))
     if alert.instruction and alert.instruction.strip():
-        renderables.extend((Text(''), *_alert_text_renderables(alert.instruction, base_style='italic')))
+        renderables.extend((Text(''), *alert_text_renderables(alert.instruction, base_style='italic')))
     official_link = _official_warning_link(alert)
     if official_link is not None:
         renderables.extend((Text(''), official_link))
     return Group(*renderables)
 
 
-def _alert_timing_renderable(alert: Alert) -> Text:
+def alert_timing_renderable(alert: Alert) -> Text:
     """Render the same concise local timing used by the weather alert panel."""
 
     def local_time(value: datetime | None) -> datetime | None:
@@ -910,7 +910,7 @@ def _normalise_alert_text(value: str) -> str:
     return '\n'.join(lines)
 
 
-def _alert_text_renderables(value: str, *, base_style: str = '') -> list[object]:
+def alert_text_renderables(value: str, *, base_style: str = '') -> list[object]:
     """Turn bulletin blocks into literal Rich text with native wrapping."""
     renderables: list[object] = []
     for block in _alert_text_blocks(value):
