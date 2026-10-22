@@ -255,11 +255,13 @@ tabs. Its dashboard map subclasses the saved-locations map at narrow
 creation, ordering, and interaction hooks, retaining the shared projection,
 callout placement, temperature rendering, and resize behavior. Only saved
 locations receive world-map callouts; the active Weather location may still
-seed the forecast rail without being retained as an extra map label. Focus and
-hover are visual-only. Enter, Space, and click share one primary-action path
-which commits the place to the Dashboard forecast rail; repeating it leaves the
-selection in place. City selection in the lower tropical-track and alert maps
-uses that same rail-only path. `w` remains the explicit route back to Weather,
+seed the forecast rail without being retained as an extra map label. When that
+location is already saved, its existing callout is also the initial reverse-
+styled selection on entry from Weather; an unsaved current place still gains no
+callout. Focus and hover are visual-only. Enter, Space, and click share one
+primary-action path which commits the place to the Dashboard forecast rail;
+repeating it leaves the selection in place. City selection in the lower
+tropical-track and alert maps uses that same rail-only path. `w` remains the explicit route back to Weather,
 and a Dashboard selection never adopts `Wevva.location`. Resize and tab changes
 are presentation-only. Mount, resume, and selection consult one application-owned
 forecast loader, which serves a valid snapshot immediately and coalesces a
@@ -283,12 +285,15 @@ columns with fitted spacing; narrower rails retain the standard combined field
 groups without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on
-taller terminals, and omit the cards in compact/medium modes. Dashboard inner
+taller terminals, and omit the cards in compact/medium modes. The Dashboard
+runs the same one-second context refresh while it is current as Weather, so the
+selected place's local clock and sunrise/sunset relative times continue to
+advance; the timer pauses while the persistent screen is suspended. Its inner
 sections share untitled top separators in one muted colour, and Dashboard
 hourly/daily zebra rows use a fully visible background step rather than the
 framework's translucent stripe. The selected tropical and alert detail frames
-identify their contents with an accent storm-name title or severity-coloured
-alert-condition title. The pure layout
+identify their contents with an accent classification-and-storm-name title or
+severity-coloured alert-condition title. The pure layout
 budget reduces daily rows and current-instrument density at short sizes while
 keeping the same mounted widget tree; hourly scrolling remains internal, so it
 does not move the current, daily, or context sections.
@@ -603,6 +608,9 @@ provider-supplied forecast fixes define the complete viewport without a
 connecting line. When explicit lead hours include daily boundaries, visible
 forecast markers and compact labels use only the 24-hour fixes (`24h`, `48h`,
 and so on); the full supplied horizon remains in scope.
+The fitted storm bounds carry fifteen percent geographic margin on every side
+before the shared canvas fits them to the available aspect ratio, keeping track
+and cone edges clear of the frame while continuing to fill the viewport.
 When supplied, an official cone is a subdued warning-coloured Braille layer. The
 track and cone layers render whenever supplied and have no separate visibility
 bindings or notification state. A missing track uses the local unavailable

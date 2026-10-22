@@ -161,6 +161,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(screen.tropical_panel.display)
             self.assertTrue(screen.alert_detail_panel.display)
             self.assertTrue(screen.alerts_panel.display)
+            self.assertIsNotNone(screen._time_refresh_timer)
             self.assertIn(
                 'No active tropical systems',
                 screen.query_one(
@@ -594,6 +595,29 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app.screen, weather)
             self.assertEqual(app.location, BERLIN)
 
+    async def test_saved_weather_location_is_selected_when_dashboard_opens(self) -> None:
+        app = self._app()
+        app.location = LONDON
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+
+            await pilot.press('b')
+            await _settle(pilot)
+
+            dashboard = app.screen
+            self.assertIsInstance(dashboard, DashboardScreen)
+            london = next(
+                label
+                for label in dashboard.world_map.query(DashboardLocationLabel)
+                if label.location.name == 'London'
+            )
+            self.assertIsNone(dashboard._selected_location)
+            self.assertEqual(
+                dashboard.world_map.selected_location_key,
+                location_key(LONDON),
+            )
+            self.assertTrue(london.has_class('selected-place'))
+
     async def test_resize_reuses_panels_and_compact_tabs(self) -> None:
         app = self._app()
         async with app.run_test(size=(120, 30)) as pilot:
@@ -850,7 +874,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 dashboard.world_map.selected_tropical_key,
                 label.tropical_key,
             )
-            self.assertEqual(dashboard.tropical_panel.border_title, 'NANGKA')
+            self.assertEqual(
+                dashboard.tropical_panel.border_title,
+                'Typhoon NANGKA',
+            )
             self.assertIs(app.focused, label)
             app.load_tropical_products.assert_awaited_once_with(jma)
             detail_tabs = dashboard.tropical_panel.tabs

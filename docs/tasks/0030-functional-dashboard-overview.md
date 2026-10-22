@@ -129,7 +129,8 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
 
 - Show saved-location labels only. A distinct active Weather location can
   remain the default forecast-rail subject, but must not be added to the world
-  map merely because it is current or selected.
+  map merely because it is current or selected. If the active Weather location
+  is saved, reverse its existing label on the initial Dashboard transition.
 - Remove underlining from active, selected, focused, and hovered Dashboard map
   labels. Persistent selection and pointer/keyboard focus use reverse styling;
   the active unselected location may remain bold.
@@ -174,9 +175,11 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   late result cannot replace a newer selection.
 - Keep one selected source observation; do not merge tracks, cones, products,
   or meteorology from competing issuers.
-- When a storm is selected, use its name and the theme accent for the lower
-  pane's border title and border. Selecting a relevant city inside its track
-  map updates the Dashboard forecast rail without opening Weather.
+- When a storm is selected, use its classification plus name and the theme
+  accent for the lower pane's border title and border. Give its track-fitted
+  map a modest fifteen-percent geographic margin. Selecting a relevant city
+  inside its track map updates the Dashboard forecast rail without opening
+  Weather.
 
 ### Selected alert detail
 
@@ -391,7 +394,10 @@ All inner sections use untitled, consistently coloured top separators.
 The pure layout budget omits context cards in compact/medium modes, shows one
 row per card at the 120x30 baseline, and expands their existing density at
 taller sizes. `ContextBar` now accepts an explicit location, while the Weather
-screen continues through the same update boundary.
+screen continues through the same update boundary. While Dashboard is current,
+its one-second timer refreshes the selected location's clock and the astronomy
+rows (including sunrise/sunset relative times); the persistent screen pauses
+that timer while suspended.
 
 ### Slice C — tropical selection and detail reader
 
@@ -540,12 +546,15 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   opaque background step.
 - The location context and AQI belong to the Dashboard-selected place, not
   accidentally to `app.location`; AQI follows the highlighted hour.
+- The displayed local time and sunrise/sunset relative values continue to
+  update while Dashboard is current.
 - No tropical status/context prose is painted over the world map. Storm
   tooltips have only the agreed title, movement, and wind lines.
 - Dashboard storm labels and `★` markers use accent; Tropical Systems workspace
   tabs colour classification but leave the name plain.
-- A committed storm selection shows track/cone immediately when available and
-  lazily reuses cached official products without stale-selection replacement.
+- A committed storm selection titles its frame with classification and name,
+  shows a modestly padded track/cone immediately when available, and lazily
+  reuses cached official products without stale-selection replacement.
 - Alert rows have no fixed preview, open button, chevron, or extra selection
   padding. Selection populates Map and one complete Alerts Centre-style Alert
   document tab.

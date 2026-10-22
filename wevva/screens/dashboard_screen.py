@@ -28,8 +28,6 @@ from wevva.config import location_key
 from wevva.dashboard_layout import DashboardLayoutBudget, dashboard_layout_for
 from wevva.layout import CurrentDensity
 from wevva.location_metadata import LocationMetadata
-from wevva.services.alert_bulletin import BulletinAlert
-from wevva.services.country_alerts import country_alert_identity
 from wevva.messages import (
     DashboardPlacePressed,
     DashboardTropicalActivated,
@@ -37,6 +35,8 @@ from wevva.messages import (
     PlaceSelected,
     WeatherUpdated,
 )
+from wevva.services.alert_bulletin import BulletinAlert
+from wevva.services.country_alerts import country_alert_identity
 from wevva.widgets.country_alerts_map import (
     CountryAlertCityLabel,
     CountryAlertSettlementPreviewCancelled,
@@ -681,8 +681,11 @@ class DashboardTropicalPanel(Container):
         if system is None or observation is None:
             self.show_overview(())
             return
+        classification = (observation.classification or '').strip()
+        name = (system.name or observation.name or '').strip()
         self._set_frame(
-            (system.name or observation.name or 'Tropical System').strip(),
+            ' '.join(part for part in (classification, name) if part)
+            or 'Tropical System',
             self.app.theme_variables.get('accent')
             or self.app.theme_variables.get('text-accent'),
         )
@@ -1110,6 +1113,7 @@ class DashboardScreen(Screen[None]):
         self._alert_place_weather_label: CountryAlertCityLabel | None = None
         self._bulletin_generation = -1
         self._alert_return_focus: str | None = None
+        self._time_refresh_timer = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -1183,9 +1187,15 @@ class DashboardScreen(Screen[None]):
         self.sub_title = 'Weather, locations, storms, and alerts'
         self.sync_from_app()
         self._apply_layout(self.size.width, self.size.height)
+        self._time_refresh_timer = self.set_interval(
+            1,
+            self.forecast_panel.context_bar.refresh_time_display,
+        )
         self.call_after_refresh(self.world_map.focus_preferred_location)
 
     def on_screen_resume(self) -> None:
+        if self._time_refresh_timer is not None:
+            self._time_refresh_timer.resume()
         self.sync_from_app()
         self.world_map.set_selected_alert(
             self.alerts_panel.selected_row,
@@ -1194,10 +1204,15 @@ class DashboardScreen(Screen[None]):
         self.call_after_refresh(self._restore_focus)
 
     def on_screen_suspend(self) -> None:
+        if self._time_refresh_timer is not None:
+            self._time_refresh_timer.pause()
         self.world_map.pause_alert_marker()
         self._cancel_alert_place_weather()
 
     def on_unmount(self) -> None:
+        if self._time_refresh_timer is not None:
+            self._time_refresh_timer.stop()
+            self._time_refresh_timer = None
         self._cancel_forecast_wait()
         if self._tropical_wait_task is not None:
             self._tropical_wait_task.cancel()
@@ -1242,7 +1257,9 @@ class DashboardScreen(Screen[None]):
         self.world_map.set_locations(locations, summaries=summaries)
         self.world_map.set_temperature_unit(self.app.temperature_unit)
         self.world_map.set_active_location(self.app.location)
-        self.world_map.set_selected_location(self._selected_location)
+        self.world_map.set_selected_location(
+            self._selected_location or self.app.location
+        )
         self._sync_tropical_systems()
         if (
             self._selected_tropical_system is not None
