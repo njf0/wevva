@@ -306,7 +306,7 @@ features rank first, then canonical storms, the active location, and ordinary
 saved locations; the resulting order also drives keyboard traversal.
 
 Canonical storm map labels use an accent-coloured, classification-first
-formatter, including their marker bullet. Their native tooltip contains only
+formatter, including their `★` marker. Their native tooltip contains only
 the classification/name title and available movement and wind lines; no storm
 status or focused-tooltip copy is painted over the world map. The Tropical
 Systems workspace uses a separate tab formatter which colours only the
@@ -371,12 +371,12 @@ installed Alerts Centre. The destination applies it only from the matching
 country's current load, clears local filters when the identity is found, and
 retains ordinary request-generation guards so a superseded country response
 cannot select the wrong document. The dashboard map owns one alert-marker
-widget above the ordinary callout layer. Feed hover or keyboard highlight may
-temporarily show that marker dimly; committed selection replaces it with a
-severity-coloured marker and a four-phase, 0.24-second cancellable pulse
-implemented by one finite task rather than a timer. Its cell is a preferred
-avoidance input for place callouts, so a valid opposite-side placement wins
-before ordinary overlap fallback. Selection replacement, clearing, screen
+widget above the ordinary callout layer. Feed hover or keyboard highlight shows
+the same severity-coloured, reverse-video `!`; committed selection flashes it
+for forty 0.25-second phases before restoring that steady reversed appearance.
+The finite ten-second pulse is implemented by one task rather than a timer.
+Its cell is a preferred avoidance input for place callouts, so a valid
+opposite-side placement wins before ordinary overlap fallback. Selection replacement, clearing, screen
 suspension, and unmount cancel the task, while a warm return restores the
 steady marker from the retained rail selection. Marker activation remains an
 explicit route to Alerts Centre; the rail has no duplicate open button.

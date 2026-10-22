@@ -43,6 +43,7 @@ from wevva.widgets.country_alerts_map import (
     CountryAlertsMap,
 )
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
+from wevva.widgets.tropical_track import TropicalFixLabel
 
 
 BERLIN = LocationMetadata(
@@ -375,6 +376,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 DashboardAlertMarker,
             )
             self.assertTrue(marker.display)
+            self.assertEqual(marker.render().plain, '!')
             self.assertIs(marker.row, row)
             alert_cell = tuple(marker.offset)
             saved_candidate = next(
@@ -449,8 +451,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app.load_alert_place_weather.assert_awaited_once()
             self.assertIn('12°C', labels[0].tooltip.plain)
             await pilot.pause(1.05)
-            self.assertIsNone(screen.world_map._alert_pulse_task)
-            self.assertFalse(marker.has_class('pulse'))
+            self.assertIsNotNone(screen.world_map._alert_pulse_task)
             app.refresh_dashboard_bulletin()
             app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
                 ['DE', 'DE', 'DE']
@@ -469,6 +470,8 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
             self.assertFalse(marker.display)
+            self.assertIsNone(screen.world_map._alert_pulse_task)
+            self.assertFalse(marker.has_class('pulse'))
             self.assertFalse(detail.tabs.display)
             self.assertEqual(detail.border_title, 'Selected Alert')
             self.assertIn(
@@ -792,6 +795,19 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     label='Forecast Discussion',
                     content='Official forecast discussion',
                 ),
+                TropicalProduct(
+                    kind='forecast',
+                    label='Forecast',
+                    data={
+                        'points': [
+                            {
+                                'latitude': 30.0,
+                                'longitude': 137.0,
+                                'lead_hours': 24,
+                            }
+                        ]
+                    },
+                ),
             ]
         )
         app.load_tropical_centre_weather = AsyncMock(return_value={})
@@ -806,6 +822,8 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(labels), 2)
             label = next(item for item in labels if item.system.name == 'NANGKA')
             self.assertIn('Typhoon NANGKA', label.label_text)
+            self.assertIn('★', label.label_text)
+            self.assertNotIn('•', label.label_text)
             self.assertIs(label.observation, jma)
             self.assertTrue(label.display)
             placement_keys = [
@@ -841,6 +859,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 ['Track and Cone', 'Public Advisory', 'Forecast Discussion'],
             )
             self.assertTrue(dashboard.tropical_panel.track.available)
+            self.assertEqual(
+                [
+                    fix._body_text
+                    for fix in dashboard.tropical_panel.track.query(TropicalFixLabel)
+                ],
+                ['Now', '24h'],
+            )
             detail_tabs.active = 'dashboard-tropical-product-0'
             await _settle(pilot)
             product_body = dashboard.query_one(

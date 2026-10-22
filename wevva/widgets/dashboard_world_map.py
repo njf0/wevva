@@ -139,9 +139,9 @@ class DashboardTropicalLabel(Static, can_focus=True):
         accent = theme.get('accent') or theme.get('text-accent')
         if marker_on_right:
             label.append_text(self._body)
-            label.append(' •', style=accent)
+            label.append(' ★', style=accent)
         else:
-            label.append('• ', style=accent)
+            label.append('★ ', style=accent)
             label.append_text(self._body)
         self.label_text = label.plain
         self.update(label)
@@ -180,23 +180,22 @@ class DashboardAlertMarker(Static, can_focus=True):
         height: 1;
         min-width: 1;
         background: $background;
-        text-style: bold;
+        text-style: bold reverse;
         pointer: pointer;
     }
 
-    DashboardAlertMarker.preview {
-        text-style: dim;
-    }
-
-    DashboardAlertMarker.pulse,
     DashboardAlertMarker:hover,
     DashboardAlertMarker:focus {
         text-style: bold reverse;
     }
+
+    DashboardAlertMarker.pulse {
+        text-style: bold;
+    }
     """
 
     def __init__(self) -> None:
-        super().__init__('●', markup=False, id='dashboard-alert-marker')
+        super().__init__('!', markup=False, id='dashboard-alert-marker')
         self.row: BulletinAlert | None = None
         self.preview = False
 
@@ -460,9 +459,9 @@ class DashboardWorldMap(WorldLocationsMap):
     async def _pulse_alert_marker(self, generation: int) -> None:
         marker = self.alert_marker
         try:
-            for pulse_on in (True, False, True, False):
-                marker.set_class(pulse_on, 'pulse')
-                await asyncio.sleep(0.24)
+            for phase in range(40):
+                marker.set_class(phase % 2 == 0, 'pulse')
+                await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
         finally:

@@ -158,7 +158,7 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
 
   `Movement` and `Wind` are dim; their values are not. Omit a complete line if
   its value is missing. Do not append source or issue-time text here.
-- Keep every Dashboard map storm label and its bullet in the theme accent.
+- Keep every Dashboard map storm label and its `★` marker in the theme accent.
   Remove underline from selected storm labels and use reverse styling.
 - Restore the Tropical Systems workspace tab treatment independently: the
   classification is classification/severity-coloured and the name is plain.
@@ -254,8 +254,10 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   This prevents an ordinary US shared-feed alert from being labelled American
   Samoa while retaining correct attribution for an alert that explicitly
   names American Samoa, Guam, or another shared-feed territory.
-- Slow the existing four-phase selection pulse from 0.12 seconds to 0.24
-  seconds per phase. It remains finite, cancellable, and timer-free afterward.
+- Use a severity-coloured reverse-video `!` for highlighted and selected alert
+  markers. Flash a committed selection for approximately ten seconds, then
+  leave it in the steady reversed appearance. The pulse remains finite,
+  cancellable, and timer-free afterward.
 
 ## Non-goals
 
@@ -463,7 +465,8 @@ Alerts Centre. Startup hydration now admits only fresh, non-provisional
 country catalogues; older retained entries remain hidden and the first live
 success replaces them as a hidden baseline. The selected marker cell is
 passed through the callout planner's existing preferred-avoidance input, and
-its finite four-phase pulse now uses 0.24-second phases.
+its finite pulse now uses forty 0.25-second phases before returning to a steady
+reverse-video exclamation mark.
 
 ### Slice F — responsive and combined-view qualification
 
@@ -539,7 +542,7 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   accidentally to `app.location`; AQI follows the highlighted hour.
 - No tropical status/context prose is painted over the world map. Storm
   tooltips have only the agreed title, movement, and wind lines.
-- Dashboard storm labels and bullets use accent; Tropical Systems workspace
+- Dashboard storm labels and `★` markers use accent; Tropical Systems workspace
   tabs colour classification but leave the name plain.
 - A committed storm selection shows track/cone immediately when available and
   lazily reuses cached official products without stale-selection replacement.
@@ -560,8 +563,9 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   admitted.
 - Place labels avoid the selected alert marker when an opposite-side valid
   callout exists.
-- The slower marker pulse remains finite and is cancelled on replacement,
-  clear, suspension, or unmount.
+- The roughly ten-second alert-marker pulse returns to a steady reversed `!`
+  and remains finite and cancellable on replacement, clear, suspension, or
+  unmount.
 - Existing full Weather, Tropical Systems, Alerts Centre, bulletin scheduling,
   hard-refresh caps, and application cache behavior remain intact.
 
