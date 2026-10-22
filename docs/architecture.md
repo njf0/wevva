@@ -608,9 +608,10 @@ provider-supplied forecast fixes define the complete viewport without a
 connecting line. When explicit lead hours include daily boundaries, visible
 forecast markers and compact labels use only the 24-hour fixes (`24h`, `48h`,
 and so on); the full supplied horizon remains in scope.
-The fitted storm bounds carry fifteen percent geographic margin on every side
-before the shared canvas fits them to the available aspect ratio, keeping track
-and cone edges clear of the frame while continuing to fill the viewport.
+The fitted storm bounds carry a small five-percent geographic inset before the
+shared canvas fits them to the available aspect ratio. This keeps track and
+cone edges clear of the frame without shrinking the plotted scope inside its
+full Dashboard pane.
 When supplied, an official cone is a subdued warning-coloured Braille layer. The
 track and cone layers render whenever supplied and have no separate visibility
 bindings or notification state. A missing track uses the local unavailable

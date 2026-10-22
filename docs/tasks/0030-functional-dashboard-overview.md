@@ -177,7 +177,8 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   or meteorology from competing issuers.
 - When a storm is selected, use its classification plus name and the theme
   accent for the lower pane's border title and border. Give its track-fitted
-  map a modest fifteen-percent geographic margin. Selecting a relevant city
+  map a small five-percent geographic inset so it fills the pane without
+  clipping its bounds. Selecting a relevant city
   inside its track map updates the Dashboard forecast rail without opening
   Weather.
 

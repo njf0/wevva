@@ -299,7 +299,7 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         self.assertTrue(scope.places)
         self.assertEqual(scope.forecast_marker_indices, tuple(range(1, 9)))
         storm_width = max(point.x for point in scope.storm) - min(point.x for point in scope.storm)
-        self.assertAlmostEqual(scope.viewport.width / storm_width, 1.3)
+        self.assertAlmostEqual(scope.viewport.width / storm_width, 1.1)
 
     def test_hawaii_track_context_floor_reserves_useful_land_height(self) -> None:
         scope = build_storm_scope_geometry(
