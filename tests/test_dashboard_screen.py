@@ -32,6 +32,7 @@ from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.dashboard_daily_forecast import DashboardDailyForecast
 from wevva.widgets.dashboard_world_map import (
     DashboardAlertMarker,
+    DashboardIncomingAlertMarker,
     DashboardLocationLabel,
     DashboardTropicalLabel,
 )
@@ -376,6 +377,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 '#dashboard-alert-marker',
                 DashboardAlertMarker,
             )
+            incoming = list(
+                screen.world_map.query(DashboardIncomingAlertMarker)
+            )
+            self.assertEqual(len(incoming), 1)
+            self.assertTrue(incoming[0].display)
             self.assertTrue(marker.display)
             self.assertEqual(marker.render().plain, '!')
             self.assertIs(marker.row, row)
@@ -452,7 +458,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app.load_alert_place_weather.assert_awaited_once()
             self.assertIn('12°C', labels[0].tooltip.plain)
             await pilot.pause(1.05)
-            self.assertIsNotNone(screen.world_map._alert_pulse_task)
+            self.assertIsNotNone(
+                screen.world_map._incoming_alert_pulse_task
+            )
             app.refresh_dashboard_bulletin()
             app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
                 ['DE', 'DE', 'DE']
@@ -471,7 +479,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
             self.assertFalse(marker.display)
-            self.assertIsNone(screen.world_map._alert_pulse_task)
+            self.assertIsNotNone(
+                screen.world_map._incoming_alert_pulse_task
+            )
             self.assertFalse(marker.has_class('pulse'))
             self.assertFalse(detail.tabs.display)
             self.assertEqual(detail.border_title, 'Selected Alert')
@@ -491,13 +501,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             screen.action_back()
             await _settle(pilot)
             self.assertIsNot(app.screen, screen)
-            self.assertIsNone(screen.world_map._alert_pulse_task)
+            self.assertIsNone(screen.world_map._incoming_alert_pulse_task)
             await pilot.press('b')
             await _settle(pilot)
             self.assertIs(app.screen, screen)
             self.assertIs(panel.selected_row, row)
             self.assertTrue(marker.display)
-            self.assertIsNone(screen.world_map._alert_pulse_task)
+            self.assertIsNone(screen.world_map._incoming_alert_pulse_task)
             await pilot.press('escape')
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
@@ -546,6 +556,94 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             screen.update_bulletin(3, ())
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
+
+    async def test_new_alert_batch_flashes_all_cells_at_highest_severity(self) -> None:
+        app = self._app()
+        same_area = {
+            'type': 'Polygon',
+            'coordinates': [
+                [[-1, 50], [1, 50], [1, 52], [-1, 52], [-1, 50]]
+            ],
+        }
+        other_area = {
+            'type': 'Polygon',
+            'coordinates': [
+                [[138, 34], [141, 34], [141, 37], [138, 37], [138, 34]]
+            ],
+        }
+        rows = (
+            BulletinAlert(
+                'GB',
+                Alert(
+                    id='rain',
+                    source='fixture',
+                    event='Rain Warning',
+                    headline='Rain warning',
+                    severity='Moderate',
+                    geometry=same_area,
+                ),
+                datetime.now(UTC),
+                True,
+            ),
+            BulletinAlert(
+                'GB',
+                Alert(
+                    id='wind',
+                    source='fixture',
+                    event='Wind Warning',
+                    headline='Wind warning',
+                    severity='Extreme',
+                    geometry=same_area,
+                ),
+                datetime.now(UTC),
+                True,
+            ),
+            BulletinAlert(
+                'JP',
+                Alert(
+                    id='snow',
+                    source='fixture',
+                    event='Snow Warning',
+                    headline='Snow warning',
+                    severity='Minor',
+                    geometry=other_area,
+                ),
+                datetime.now(UTC),
+                True,
+            ),
+        )
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            screen = app.screen
+            self.assertIsInstance(screen, DashboardScreen)
+
+            screen.update_bulletin(1, rows)
+            await _settle(pilot)
+
+            markers = [
+                marker
+                for marker in screen.world_map.query(
+                    DashboardIncomingAlertMarker
+                )
+                if marker.display
+            ]
+            self.assertEqual(len(markers), 2)
+            self.assertEqual({marker.count for marker in markers}, {1, 2})
+            grouped = next(marker for marker in markers if marker.count == 2)
+            self.assertEqual(grouped.row.alert.id, 'wind')
+            self.assertIsNotNone(
+                screen.world_map._incoming_alert_pulse_task
+            )
+
+            screen.world_map.set_selected_alert(rows[0])
+            await pilot.pause()
+            self.assertFalse(screen.world_map.alert_marker.has_class('pulse'))
+            self.assertIsNotNone(
+                screen.world_map._incoming_alert_pulse_task
+            )
 
     async def test_place_hover_is_visual_and_repeated_selection_stays_dashboard(self) -> None:
         app = self._app()
@@ -939,6 +1037,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
     async def test_selected_place_loads_preview_without_becoming_active(self) -> None:
         app = self._app()
         app._forecast_cache.pop(app._forecast_cache_key_for(LONDON))
+        app._saved_location_weather_summaries[location_key(LONDON)] = (
+            SavedLocationWeatherSummary(error=True)
+        )
         event = weather_update(with_warnings=False)
         app.controller.fetch = AsyncMock(return_value=event)
 
@@ -952,6 +1053,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 for label in dashboard.world_map.query(DashboardLocationLabel)
                 if label.location.name == 'London'
             )
+            self.assertIn('--', london.label_text)
 
             london.action_select_location()
             await _settle(pilot, cycles=8)
@@ -974,6 +1076,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(
                 'London',
                 dashboard.query_one('#dashboard-forecast-place', Static).render().plain,
+            )
+            self.assertNotIn('--', london.label_text)
+            self.assertEqual(
+                app.saved_location_weather_summary(LONDON).temperature,
+                13,
             )
 
     async def test_late_place_forecast_cannot_replace_newer_selection(self) -> None:

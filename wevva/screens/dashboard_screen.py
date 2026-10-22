@@ -1199,7 +1199,6 @@ class DashboardScreen(Screen[None]):
         self.sync_from_app()
         self.world_map.set_selected_alert(
             self.alerts_panel.selected_row,
-            pulse=False,
         )
         self.call_after_refresh(self._restore_focus)
 
@@ -1355,12 +1354,18 @@ class DashboardScreen(Screen[None]):
 
         if not self.is_mounted or generation < self._bulletin_generation:
             return
+        arrived_while_open = (
+            self._bulletin_generation >= 0
+            and generation > self._bulletin_generation
+            and self.app.screen is self
+        )
         self._bulletin_generation = generation
         self.alerts_panel.update_alerts(rows)
         self.world_map.set_selected_alert(
             self.alerts_panel.selected_row,
-            pulse=False,
         )
+        if arrived_while_open and any(row.is_new for row in rows):
+            self.world_map.flash_new_alerts(rows)
         self.alert_detail_panel.show_alert(self.alerts_panel.selected_row)
 
     def on_dashboard_alerts_panel_selected(

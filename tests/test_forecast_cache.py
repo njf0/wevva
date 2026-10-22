@@ -170,6 +170,48 @@ class SavedWeatherSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary.temperature_unit, '°C')
         self.assertFalse(summary.error)
 
+    async def test_missing_temperature_gets_one_short_retry(self) -> None:
+        location = LocationMetadata(
+            latitude=19.7297,
+            longitude=-155.09,
+            country_code='US',
+        )
+        app = Wevva(
+            initial_location=LocationMetadata(
+                latitude=52.52,
+                longitude=13.405,
+                country_code='DE',
+            )
+        )
+        app.weather_screen = _WeatherScreen()
+        app._saved_weather_generation = 1
+        summary_fetch = AsyncMock(
+            side_effect=[
+                {'current': {}, 'current_units': {}},
+                {
+                    'current': {
+                        'temperature_2m': 27.0,
+                        'weather_code': 1,
+                        'is_day': 1,
+                    },
+                    'current_units': {'temperature_2m': '°C'},
+                },
+            ]
+        )
+
+        with (
+            patch('wevva.app.fetch_weather_summary', new=summary_fetch),
+            patch('wevva.app.asyncio.sleep', new=AsyncMock()) as retry_sleep,
+        ):
+            await app._fetch_saved_weather_summary(location, generation=1)
+
+        self.assertEqual(summary_fetch.await_count, 2)
+        retry_sleep.assert_awaited_once()
+        self.assertEqual(
+            app.weather_screen.saved_location_weather_summary(location).temperature,
+            27.0,
+        )
+
 
 class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_current_conditions_request_omits_hourly_and_daily_payloads(self) -> None:

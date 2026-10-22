@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import ClassVar
@@ -73,6 +73,37 @@ ForecastCacheKey = tuple[float, float, str, str, str]
 ForecastCacheEntry = tuple[float, WeatherUpdated]
 TropicalCacheEntry = tuple[float, tuple[CanonicalTropicalSystem, ...]]
 TropicalProductCacheKey = tuple[str, str, str]
+_SAVED_WEATHER_RETRY_DELAY_SECONDS = 0.75
+
+
+def _saved_weather_summary(
+    current: Mapping[str, object],
+    units: Mapping[str, object],
+) -> SavedLocationWeatherSummary:
+    """Build the compact shared-location reading from current conditions."""
+
+    temperature = current.get('temperature_2m')
+    code = current.get('weather_code')
+    condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
+    condition_emoji = ''
+    if condition is not None:
+        condition_emoji = (
+            condition.night_emoji
+            if current.get('is_day') == 0
+            else condition.day_emoji
+        )
+    unit = units.get('temperature_2m', '°C')
+    return SavedLocationWeatherSummary(
+        temperature=(
+            temperature
+            if isinstance(temperature, (int, float))
+            and not isinstance(temperature, bool)
+            else None
+        ),
+        temperature_unit=unit if isinstance(unit, str) else '°C',
+        condition=condition,
+        condition_emoji=condition_emoji,
+    )
 
 
 def _weather_fetch_failure_message(error: Exception) -> str:
@@ -322,6 +353,7 @@ class Wevva(App, inherit_bindings=False):
         cache_key = self._forecast_cache_key_for(location)
         cached = self._cached_forecast(cache_key)
         if cached is not None:
+            self._update_summary_from_forecast(location, cached)
             return cached
 
         task = self._dashboard_forecast_tasks.get(cache_key)
@@ -337,7 +369,9 @@ class Wevva(App, inherit_bindings=False):
                 )
             )
         try:
-            return await task
+            event = await task
+            self._update_summary_from_forecast(location, event)
+            return event
         finally:
             if task.done() and self._dashboard_forecast_tasks.get(cache_key) is task:
                 self._dashboard_forecast_tasks.pop(cache_key, None)
@@ -351,6 +385,23 @@ class Wevva(App, inherit_bindings=False):
 
         if self._dashboard_forecast_tasks.get(cache_key) is task:
             self._dashboard_forecast_tasks.pop(cache_key, None)
+
+    def _update_summary_from_forecast(
+        self,
+        location: LocationMetadata,
+        event: WeatherUpdated,
+    ) -> None:
+        """Promote useful Dashboard current data to shared location surfaces."""
+
+        timeseries = getattr(event.current, 'forecast_timeseries', ())
+        if not timeseries or not isinstance(timeseries[0], Mapping):
+            return
+        units = getattr(event.current, 'forecast_units', {})
+        if not isinstance(units, Mapping):
+            units = {}
+        summary = _saved_weather_summary(timeseries[0], units)
+        if summary.temperature is not None:
+            self._update_saved_location_weather(location, summary)
 
     async def _fetch_dashboard_forecast(
         self,
@@ -883,36 +934,39 @@ class Wevva(App, inherit_bindings=False):
             await asyncio.sleep(delay)
         if generation != self._saved_weather_generation:
             return
-        try:
-            data = await fetch_weather_summary(
-                lat=location.latitude,
-                lon=location.longitude,
-                temperature_unit=self.temperature_unit,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            if existing_summary is None:
-                summary = SavedLocationWeatherSummary(error=True)
+        summary: SavedLocationWeatherSummary | None = None
+        for attempt in range(2):
+            try:
+                data = await fetch_weather_summary(
+                    lat=location.latitude,
+                    lon=location.longitude,
+                    temperature_unit=self.temperature_unit,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if attempt == 1:
+                    if existing_summary is None:
+                        summary = SavedLocationWeatherSummary(error=True)
+                    break
             else:
-                return
-        else:
-            current = data.get('current', {})
-            units = data.get('current_units', {})
-            temp = current.get('temperature_2m')
-            code = current.get('weather_code')
-            condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
-            condition_emoji = ''
-            if condition is not None:
-                condition_emoji = condition.night_emoji if current.get('is_day') == 0 else condition.day_emoji
-            summary = SavedLocationWeatherSummary(
-                temperature=temp if isinstance(temp, (int, float)) else None,
-                temperature_unit=units.get('temperature_2m', '°C'),
-                condition=condition,
-                condition_emoji=condition_emoji,
-            )
+                if not isinstance(data, Mapping):
+                    data = {}
+                current = data.get('current', {})
+                units = data.get('current_units', {})
+                if not isinstance(current, Mapping):
+                    current = {}
+                if not isinstance(units, Mapping):
+                    units = {}
+                summary = _saved_weather_summary(current, units)
+                if summary.temperature is not None or attempt == 1:
+                    break
 
-        if generation != self._saved_weather_generation:
+            await asyncio.sleep(_SAVED_WEATHER_RETRY_DELAY_SECONDS)
+            if generation != self._saved_weather_generation:
+                return
+
+        if generation != self._saved_weather_generation or summary is None:
             return
         self._update_saved_location_weather(location, summary)
 
@@ -952,20 +1006,9 @@ class Wevva(App, inherit_bindings=False):
             self.location.timezone_abbreviation = event.metadata.timezone_abbreviation
         self._has_successful_fetch = True
         current_point = event.current.forecast_timeseries[0] if event.current.forecast_timeseries else {}
-        temp = current_point.get('temperature_2m')
-        code = current_point.get('weather_code')
-        condition = get_condition(int(code)) if isinstance(code, (int, float)) else None
-        condition_emoji = ''
-        if condition is not None:
-            condition_emoji = condition.night_emoji if current_point.get('is_day') == 0 else condition.day_emoji
         self._update_saved_location_weather(
             self.location,
-            SavedLocationWeatherSummary(
-                temperature=temp if isinstance(temp, (int, float)) else None,
-                temperature_unit=event.current.forecast_units.get('temperature_2m', '°C'),
-                condition=condition,
-                condition_emoji=condition_emoji,
-            ),
+            _saved_weather_summary(current_point, event.current.forecast_units),
         )
         self.weather_screen.update_saved_locations_sidebar()
 

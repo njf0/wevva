@@ -266,7 +266,11 @@ and a Dashboard selection never adopts `Wevva.location`. Resize and tab changes
 are presentation-only. Mount, resume, and selection consult one application-owned
 forecast loader, which serves a valid snapshot immediately and coalesces a
 missing coordinate/unit key through the same fifteen-minute complete-forecast
-cache used by Weather.
+cache used by Weather. A successful complete Dashboard forecast promotes its
+current temperature through the existing app-owned saved-summary update path,
+so a `--` map label is repaired in place. The lightweight startup summary
+request makes one short retry when it fails or omits temperature; it does not
+enter an open-ended retry loop.
 The Dashboard cancels an obsolete wait and guards the result by selection
 generation, so a late response cannot replace a newer selection. The forecast
 rail reuses `CurrentConditions` for its borderless Temperature, Precipitation,
@@ -375,15 +379,20 @@ Alert activation prepares a country/identity deep link before opening the
 installed Alerts Centre. The destination applies it only from the matching
 country's current load, clears local filters when the identity is found, and
 retains ordinary request-generation guards so a superseded country response
-cannot select the wrong document. The dashboard map owns one alert-marker
-widget above the ordinary callout layer. Feed hover or keyboard highlight shows
-the same severity-coloured, reverse-video `!`; committed selection flashes it
-for forty 0.25-second phases before restoring that steady reversed appearance.
-The finite ten-second pulse is implemented by one task rather than a timer.
-Its cell is a preferred avoidance input for place callouts, so a valid
-opposite-side placement wins before ordinary overlap fallback. Selection replacement, clearing, screen
-suspension, and unmount cancel the task, while a warm return restores the
-steady marker from the retained rail selection. Marker activation remains an
+cannot select the wrong document. The dashboard map owns one steady selected-
+alert marker above the ordinary callout layer. Feed hover or keyboard highlight
+shows the same severity-coloured, reverse-video `!`; committed selection does
+not pulse it. A separate temporary marker pool flashes a newly discovered
+bulletin batch for forty 0.25-second phases, then disappears. New alerts which
+project to the same world-map cell share one `!` using the most severe alert's
+colour, while distinct cells flash together. Only a generation received while
+Dashboard is current starts this pulse, so cached `NEW` rows do not replay it
+on entry or resume. The finite ten-second pulse is implemented by one task
+rather than a timer. The selected marker's cell is a preferred avoidance input
+for place callouts, so a valid opposite-side placement wins before ordinary
+overlap fallback. Screen suspension and unmount cancel temporary presentation,
+while a warm return restores the steady marker from the retained rail
+selection. Marker activation remains an
 explicit route to Alerts Centre; the rail has no duplicate open button.
 
 `representative_polygon_point()` is the shared Polygon/MultiPolygon boundary

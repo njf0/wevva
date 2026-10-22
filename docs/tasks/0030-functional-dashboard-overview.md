@@ -259,9 +259,12 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   Samoa while retaining correct attribution for an alert that explicitly
   names American Samoa, Guam, or another shared-feed territory.
 - Use a severity-coloured reverse-video `!` for highlighted and selected alert
-  markers. Flash a committed selection for approximately ten seconds, then
-  leave it in the steady reversed appearance. The pulse remains finite,
-  cancellable, and timer-free afterward.
+  markers. Selection remains steady. When a live bulletin update introduces
+  `NEW` alerts while Dashboard is current, flash all geographically usable new
+  alerts for approximately ten seconds, then remove those temporary markers.
+  Alerts which project to one map cell share the most severe colour; distinct
+  cells flash together. The pulse remains finite, cancellable, and timer-free
+  afterward, and cached `NEW` state does not replay on entry or resume.
 
 ## Non-goals
 
@@ -399,6 +402,10 @@ screen continues through the same update boundary. While Dashboard is current,
 its one-second timer refreshes the selected location's clock and the astronomy
 rows (including sunrise/sunset relative times); the persistent screen pauses
 that timer while suspended.
+Successful Dashboard forecast loads also promote their current temperature to
+the existing shared saved-location summary, repairing a `--` map callout in
+place. The lightweight initial summary fetch gets one short retry only when it
+fails or returns without a temperature.
 
 ### Slice C — tropical selection and detail reader
 
@@ -470,10 +477,11 @@ primary country, before the existing observation-time/code fallback. Dashboard
 rows render only the `NEW` token as dark text on the primary colour, matching
 Alerts Centre. Startup hydration now admits only fresh, non-provisional
 country catalogues; older retained entries remain hidden and the first live
-success replaces them as a hidden baseline. The selected marker cell is
-passed through the callout planner's existing preferred-avoidance input, and
-its finite pulse now uses forty 0.25-second phases before returning to a steady
-reverse-video exclamation mark.
+success replaces them as a hidden baseline. The selected marker cell is passed
+through the callout planner's existing preferred-avoidance input. Selection now
+remains steady; newly arrived bulletin batches use a separate temporary marker
+pool, grouped by projected map cell at the highest severity, with forty
+0.25-second phases before disappearing.
 
 ### Slice F — responsive and combined-view qualification
 
@@ -535,6 +543,8 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   no resize or tab switch starts a network request.
 - Location hover/focus changes emphasis only. Committed selection updates the
   forecast rail, and repeated selection does not open Weather.
+- A successful committed-location forecast replaces a missing `--` map
+  temperature through the existing shared summary path.
 - World-map place callouts are saved locations only; lower tropical/alert map
   city selections also update the rail in place.
 - The forecast heading shows centred name and country without admin regions.
@@ -573,9 +583,9 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   admitted.
 - Place labels avoid the selected alert marker when an opposite-side valid
   callout exists.
-- The roughly ten-second alert-marker pulse returns to a steady reversed `!`
-  and remains finite and cancellable on replacement, clear, suspension, or
-  unmount.
+- A live batch of new alerts flashes all distinct map cells for roughly ten
+  seconds, combines cell overlaps at their highest severity, then disappears;
+  selection itself remains a steady reversed `!`.
 - Existing full Weather, Tropical Systems, Alerts Centre, bulletin scheduling,
   hard-refresh caps, and application cache behavior remain intact.
 

@@ -159,8 +159,9 @@ class DashboardTropicalLabel(Static, can_focus=True):
         self.focus()
         self.action_activate()
 
+
 class DashboardAlertMarker(Static, can_focus=True):
-    """The dashboard's sole selected or transient alert marker."""
+    """The dashboard's steady selected or transient-preview alert marker."""
 
     class Activated(Message):
         def __init__(self, row: BulletinAlert) -> None:
@@ -187,10 +188,6 @@ class DashboardAlertMarker(Static, can_focus=True):
     DashboardAlertMarker:hover,
     DashboardAlertMarker:focus {
         text-style: bold reverse;
-    }
-
-    DashboardAlertMarker.pulse {
-        text-style: bold;
     }
     """
 
@@ -220,12 +217,49 @@ class DashboardAlertMarker(Static, can_focus=True):
             self.action_activate()
 
 
+class DashboardIncomingAlertMarker(Static):
+    """One temporary marker for newly discovered alerts in a map cell."""
+
+    DEFAULT_CSS = """
+    DashboardIncomingAlertMarker {
+        position: absolute;
+        layer: incoming-alerts;
+        width: 1;
+        height: 1;
+        min-width: 1;
+        background: $background;
+        text-style: bold reverse;
+    }
+
+    DashboardIncomingAlertMarker.pulse {
+        text-style: bold;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__('!', markup=False)
+        self.row: BulletinAlert | None = None
+        self.count = 0
+
+    def show_alert(self, row: BulletinAlert, count: int) -> None:
+        self.row = row
+        self.count = count
+        self.styles.color = alert_severity_color(
+            self.app.theme_variables,
+            row.alert,
+        )
+        condition = alert_condition_name(row.alert)
+        self.tooltip = (
+            f'{count} new alerts · {condition}' if count > 1 else condition
+        )
+
+
 class DashboardWorldMap(WorldLocationsMap):
     """One projection containing location and canonical-storm callouts."""
 
     DEFAULT_CSS = """
     DashboardWorldMap {
-        layers: map labels alert-marker;
+        layers: map labels alert-marker incoming-alerts;
     }
     """
 
@@ -246,9 +280,11 @@ class DashboardWorldMap(WorldLocationsMap):
         self._selected_tropical_key: str | None = None
         self._selected_alert: BulletinAlert | None = None
         self._preview_alert: BulletinAlert | None = None
-        self._alert_pulse_task: asyncio.Task[None] | None = None
-        self._alert_pulse_generation = 0
         self._alert_marker_widget: DashboardAlertMarker | None = None
+        self._incoming_alerts: tuple[BulletinAlert, ...] = ()
+        self._incoming_alert_markers: list[DashboardIncomingAlertMarker] = []
+        self._incoming_alert_pulse_task: asyncio.Task[None] | None = None
+        self._incoming_alert_pulse_generation = 0
 
     def compose(self) -> ComposeResult:
         yield from super().compose()
@@ -277,25 +313,33 @@ class DashboardWorldMap(WorldLocationsMap):
     def set_selected_alert(
         self,
         row: BulletinAlert | None,
-        *,
-        pulse: bool = True,
     ) -> None:
-        """Replace the one persistent alert marker and its bounded pulse."""
+        """Replace the one persistent, steady alert marker."""
 
         changed = _bulletin_identity(row) != _bulletin_identity(self._selected_alert)
-        had_preview = self._preview_alert is not None
         self._selected_alert = row
         self._preview_alert = None
-        if changed or had_preview:
-            self._cancel_alert_pulse()
         self._update_alert_marker()
         if changed:
             self._schedule_reflow()
-        if changed and row is not None and pulse and self.alert_marker.display:
-            generation = self._alert_pulse_generation
-            self._alert_pulse_task = asyncio.create_task(
-                self._pulse_alert_marker(generation)
-            )
+
+    def flash_new_alerts(self, rows: Sequence[BulletinAlert]) -> None:
+        """Flash every geographically usable alert in one new bulletin batch."""
+
+        self._cancel_incoming_alert_pulse()
+        self._incoming_alerts = tuple(
+            row
+            for row in rows
+            if row.is_new
+            and representative_polygon_point(row.alert.geometry) is not None
+        )
+        self._sync_incoming_alert_markers()
+        if not self._incoming_alerts:
+            return
+        generation = self._incoming_alert_pulse_generation
+        self._incoming_alert_pulse_task = asyncio.create_task(
+            self._pulse_incoming_alerts(generation)
+        )
 
     def set_alert_preview(self, row: BulletinAlert | None) -> None:
         """Temporarily replace the marker without committing map selection."""
@@ -305,14 +349,13 @@ class DashboardWorldMap(WorldLocationsMap):
         if _bulletin_identity(row) == _bulletin_identity(self._preview_alert):
             return
         self._preview_alert = row
-        self._cancel_alert_pulse()
         self._update_alert_marker()
 
     def pause_alert_marker(self) -> None:
         """Stop transient marker behavior while Dashboard is not current."""
 
         self._preview_alert = None
-        self._cancel_alert_pulse()
+        self._cancel_incoming_alert_pulse()
         if self.is_mounted:
             self._update_alert_marker()
 
@@ -418,6 +461,7 @@ class DashboardWorldMap(WorldLocationsMap):
     def _reflow(self) -> None:
         super()._reflow()
         self._position_alert_marker()
+        self._sync_incoming_alert_markers()
 
     def _update_alert_marker(self) -> None:
         if not self.is_mounted:
@@ -456,31 +500,67 @@ class DashboardWorldMap(WorldLocationsMap):
         )
         self.alert_marker.styles.offset = (column, map_row)
 
-    async def _pulse_alert_marker(self, generation: int) -> None:
-        marker = self.alert_marker
+    def _sync_incoming_alert_markers(self) -> None:
+        frame = self._current_frame
+        if not self.is_mounted or frame is None:
+            return
+        grouped: dict[tuple[int, int], list[BulletinAlert]] = {}
+        for row in self._incoming_alerts:
+            point = representative_polygon_point(row.alert.geometry)
+            if point is None:
+                continue
+            longitude, latitude = point
+            cell = frame.canvas.cell_position(
+                frame.canvas.viewport.project(longitude, latitude)
+            )
+            grouped.setdefault(cell, []).append(row)
+
+        while len(self._incoming_alert_markers) < len(grouped):
+            marker = DashboardIncomingAlertMarker()
+            marker.display = False
+            self._incoming_alert_markers.append(marker)
+            self.mount(marker)
+        for marker in self._incoming_alert_markers:
+            marker.display = False
+        for marker, (cell, rows) in zip(
+            self._incoming_alert_markers,
+            grouped.items(),
+        ):
+            row = max(rows, key=_alert_severity_rank)
+            marker.show_alert(row, len(rows))
+            marker.styles.offset = cell
+            marker.display = True
+
+    async def _pulse_incoming_alerts(self, generation: int) -> None:
         try:
             for phase in range(40):
-                marker.set_class(phase % 2 == 0, 'pulse')
+                for marker in self._incoming_alert_markers:
+                    if marker.display:
+                        marker.set_class(phase % 2 == 0, 'pulse')
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
         finally:
-            if generation == self._alert_pulse_generation:
-                marker.remove_class('pulse')
-                if self._alert_pulse_task is asyncio.current_task():
-                    self._alert_pulse_task = None
+            if generation == self._incoming_alert_pulse_generation:
+                self._incoming_alerts = ()
+                for marker in self._incoming_alert_markers:
+                    marker.remove_class('pulse')
+                    marker.display = False
+                if self._incoming_alert_pulse_task is asyncio.current_task():
+                    self._incoming_alert_pulse_task = None
 
-    def _cancel_alert_pulse(self) -> None:
-        self._alert_pulse_generation += 1
-        if self._alert_pulse_task is not None:
-            self._alert_pulse_task.cancel()
-            self._alert_pulse_task = None
-        marker = self._alert_marker_widget
-        if marker is not None and marker.is_attached:
+    def _cancel_incoming_alert_pulse(self) -> None:
+        self._incoming_alert_pulse_generation += 1
+        if self._incoming_alert_pulse_task is not None:
+            self._incoming_alert_pulse_task.cancel()
+            self._incoming_alert_pulse_task = None
+        self._incoming_alerts = ()
+        for marker in self._incoming_alert_markers:
             marker.remove_class('pulse')
+            marker.display = False
 
     def on_unmount(self) -> None:
-        self._cancel_alert_pulse()
+        self._cancel_incoming_alert_pulse()
 
     def _sync_tropical_label_widgets(self) -> None:
         anchored: dict[
@@ -623,6 +703,21 @@ def _bulletin_identity(row: BulletinAlert | None) -> tuple[str, str] | None:
     return None if row is None else country_alert_identity(row.alert)
 
 
+def _alert_severity_rank(row: BulletinAlert) -> int:
+    severity = (row.alert.severity or '').strip().casefold()
+    return {
+        'extreme': 4,
+        'red': 4,
+        'severe': 3,
+        'orange': 3,
+        'amber': 3,
+        'moderate': 2,
+        'yellow': 2,
+        'minor': 1,
+        'green': 1,
+    }.get(severity, 0)
+
+
 def _tropical_tooltip(
     system: CanonicalTropicalSystem,
     observation: TropicalSystem,
@@ -643,6 +738,7 @@ def _tropical_tooltip(
 __all__ = [
     'DashboardLocationLabel',
     'DashboardAlertMarker',
+    'DashboardIncomingAlertMarker',
     'DashboardTropicalLabel',
     'DashboardWorldMap',
 ]
