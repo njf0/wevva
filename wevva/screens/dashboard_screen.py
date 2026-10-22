@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 import hashlib
 from typing import ClassVar
@@ -680,6 +681,11 @@ class DashboardTropicalPanel(Container):
         if system is None or observation is None:
             self.show_overview(())
             return
+        self._set_frame(
+            (system.name or observation.name or 'Tropical System').strip(),
+            self.app.theme_variables.get('accent')
+            or self.app.theme_variables.get('text-accent'),
+        )
         self._observation = observation
         self._products = ()
         self._product_indices.clear()
@@ -795,6 +801,10 @@ class DashboardTropicalPanel(Container):
         self._products = ()
         if not self.is_mounted:
             return
+        self._set_frame(
+            'Tropical System',
+            self.app.theme_variables.get('primary'),
+        )
         self.tabs.display = False
         self.track.clear()
         self.query_one(
@@ -805,6 +815,12 @@ class DashboardTropicalPanel(Container):
         state = self.query_one('#dashboard-tropical-detail-state', Static)
         state.update(message)
         state.display = True
+
+    def _set_frame(self, title: str, colour: str | None) -> None:
+        self.border_title = title or 'Tropical System'
+        if colour:
+            self.styles.border = ('round', colour)
+            self.styles.border_title_color = colour
 
 
 class DashboardAlertDetailPanel(Container):
@@ -910,6 +926,10 @@ class DashboardAlertDetailPanel(Container):
         self._row = row
         state = self.query_one('#dashboard-alert-detail-state', Static)
         if row is None:
+            self._set_frame(
+                'Selected Alert',
+                self.app.theme_variables.get('primary'),
+            )
             state.update('Select an alert from the bulletin.')
             state.display = True
             self.tabs.display = False
@@ -918,6 +938,10 @@ class DashboardAlertDetailPanel(Container):
             self.alert_map.clear()
             return
         alert = row.alert
+        self._set_frame(
+            alert_condition_name(alert),
+            alert_severity_color(self.app.theme_variables, alert),
+        )
         country = get_country_name_by_alpha2(row.country_code) or row.country_code
         self.alert_map.update_country(
             row.country_code,
@@ -957,6 +981,12 @@ class DashboardAlertDetailPanel(Container):
         body = self.query_one('#dashboard-alert-document-body', Static)
         if tab_id == self._DOCUMENT_TAB_ID:
             body.update(alert_renderable(row.alert, include_timing=True))
+
+    def _set_frame(self, title: str, colour: str | None) -> None:
+        self.border_title = title or 'Selected Alert'
+        if colour:
+            self.styles.border = ('round', colour)
+            self.styles.border_title_color = colour
 
 
 class DashboardScreen(Screen[None]):
@@ -1006,6 +1036,8 @@ class DashboardScreen(Screen[None]):
         height: 1fr;
         layout: horizontal;
         overflow: hidden hidden;
+        background: $background;
+        hatch: right $background-lighten-1;
     }
 
     #dashboard-forecast-panel {
@@ -1204,7 +1236,8 @@ class DashboardScreen(Screen[None]):
         available = {location_key(location): location for location in locations}
         if self._selected_location is not None:
             self._selected_location = available.get(
-                location_key(self._selected_location)
+                location_key(self._selected_location),
+                self._selected_location,
             )
         self.world_map.set_locations(locations, summaries=summaries)
         self.world_map.set_temperature_unit(self.app.temperature_unit)
@@ -1268,11 +1301,18 @@ class DashboardScreen(Screen[None]):
 
     def on_dashboard_place_pressed(self, message: DashboardPlacePressed) -> None:
         message.stop()
-        self._selected_location = message.location
-        self.app.note_bulletin_country_used(message.location.country_code)
-        self.world_map.set_selected_location(message.location)
-        self._show_persistent_location()
-        self._ensure_persistent_forecast()
+        self._select_forecast_location(message.location)
+
+    def on_place_selected(self, message: PlaceSelected) -> None:
+        """Keep mini-map place selection inside the Dashboard forecast rail."""
+
+        message.stop()
+        location = message.location
+        if not location.country and location.country_code:
+            country = get_country_name_by_alpha2(location.country_code)
+            if country:
+                location = replace(location, country=country)
+        self._select_forecast_location(location)
 
     def on_dashboard_tropical_activated(
         self,
@@ -1340,22 +1380,20 @@ class DashboardScreen(Screen[None]):
         self,
         event: CountryAlertSettlementSelected,
     ) -> None:
-        """Keep the focused-alert map's city click as a full-weather action."""
+        """Show the focused-alert map's city in the Dashboard forecast rail."""
 
         event.stop()
         self._cancel_alert_place_weather()
         row = self.alerts_panel.selected_row
         country_code = event.place.country_code or (row.country_code if row else '')
-        self.post_message(
-            PlaceSelected(
-                location=LocationMetadata(
-                    latitude=event.place.latitude,
-                    longitude=event.place.longitude,
-                    name=event.place.name,
-                    admin=event.place.region_name,
-                    country=get_country_name_by_alpha2(country_code) or country_code,
-                    country_code=country_code,
-                )
+        self._select_forecast_location(
+            LocationMetadata(
+                latitude=event.place.latitude,
+                longitude=event.place.longitude,
+                name=event.place.name,
+                admin=event.place.region_name,
+                country=get_country_name_by_alpha2(country_code) or country_code,
+                country_code=country_code,
             )
         )
 
@@ -1565,6 +1603,15 @@ class DashboardScreen(Screen[None]):
             self.forecast_panel.show_loading(location)
             return
         self.forecast_panel.show_location(location)
+
+    def _select_forecast_location(self, location: LocationMetadata) -> None:
+        """Commit one place to the rail without adopting it as Weather state."""
+
+        self._selected_location = location
+        self.app.note_bulletin_country_used(location.country_code)
+        self.world_map.set_selected_location(location)
+        self._show_persistent_location()
+        self._ensure_persistent_forecast()
 
     def _ensure_persistent_forecast(self) -> None:
         """Start at most one selected-place preview wait for the current state."""

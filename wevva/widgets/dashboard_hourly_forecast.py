@@ -42,6 +42,10 @@ class DashboardHourlyForecast(Container):
         scrollbar-size-vertical: 1;
         background: $background;
     }
+
+    DashboardHourlyForecast DataTable > .datatable--even-row {
+        background: $background-lighten-1;
+    }
     """
 
     def __init__(self, *, id: str | None = None) -> None:

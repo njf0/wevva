@@ -566,9 +566,9 @@ class Wevva(App, inherit_bindings=False):
         return locations
 
     def locations_for_dashboard(self) -> list[LocationMetadata]:
-        """Return active and saved places for the persistent dashboard."""
+        """Return only saved places for the persistent dashboard map."""
 
-        return self._locations_for_saved_surfaces()
+        return list(self.saved_locations)
 
     def saved_location_weather_summary(
         self,

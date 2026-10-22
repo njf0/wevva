@@ -127,6 +127,9 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
 
 ### World-map interaction and presentation
 
+- Show saved-location labels only. A distinct active Weather location can
+  remain the default forecast-rail subject, but must not be added to the world
+  map merely because it is current or selected.
 - Remove underlining from active, selected, focused, and hovered Dashboard map
   labels. Persistent selection and pointer/keyboard focus use reverse styling;
   the active unselected location may remain bold.
@@ -171,6 +174,9 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   late result cannot replace a newer selection.
 - Keep one selected source observation; do not merge tracks, cones, products,
   or meteorology from competing issuers.
+- When a storm is selected, use its name and the theme accent for the lower
+  pane's border title and border. Selecting a relevant city inside its track
+  map updates the Dashboard forecast rail without opening Weather.
 
 ### Selected alert detail
 
@@ -190,6 +196,9 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
 - Alert selection itself requires no new provider request because bulletin
   rows carry the complete cached `Alert`. Settlement current weather remains
   user-triggered and uses `app.load_alert_place_weather()`.
+- Use the selected alert's condition and severity colour for the lower pane's
+  border title and border. Selecting a relevant city inside its map updates
+  the Dashboard forecast rail without opening Weather.
 - Escape may clear the selected alert and lower alert pane. Opening Alerts
   Centre remains available through the application's existing explicit
   navigation, not through a duplicate per-row button.
@@ -510,13 +519,16 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
   no resize or tab switch starts a network request.
 - Location hover/focus changes emphasis only. Committed selection updates the
   forecast rail, and repeated selection does not open Weather.
+- World-map place callouts are saved locations only; lower tropical/alert map
+  city selections also update the rail in place.
 - The forecast heading shows centred name and country without admin regions.
 - Current conditions use the standard three digit-style instruments without
   borders; hourly, daily, astronomy, location, and AQI sections are borderless
   and separated by untitled lines in one colour.
 - Hourly and daily content and styling match the formats specified in Scope,
   including full hourly times, coloured units, spaced wind arrows, and the
-  expanded daily table's separate value columns.
+  expanded daily table's separate value columns. Zebra rows retain a clear,
+  opaque background step.
 - The location context and AQI belong to the Dashboard-selected place, not
   accidentally to `app.location`; AQI follows the highlighted hour.
 - No tropical status/context prose is painted over the world map. Storm

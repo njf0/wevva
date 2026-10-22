@@ -53,6 +53,10 @@ class DashboardDailyForecast(Container):
         scrollbar-size-vertical: 1;
         background: $background;
     }
+
+    DashboardDailyForecast DailySummaryTable > .datatable--even-row {
+        background: $background-lighten-1;
+    }
     """
 
     def __init__(self, *, id: str | None = None) -> None:

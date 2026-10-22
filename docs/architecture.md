@@ -253,12 +253,15 @@ the 120×30 baseline the pure budget assigns 14 rows to the map, one gutter, and
 map, tropical-detail, selected-alert-detail, and recent-alert panels through
 tabs. Its dashboard map subclasses the saved-locations map at narrow
 creation, ordering, and interaction hooks, retaining the shared projection,
-callout placement, temperature rendering, and resize behavior. Focus and hover
-are visual-only. Enter, Space, and click share one primary-action path which
-commits the place to the Dashboard forecast rail; repeating it leaves the
-selection in place. `w` remains the explicit route back to Weather, and a
-Dashboard selection never adopts `Wevva.location`. Resize and tab changes are
-presentation-only. Mount, resume, and selection consult one application-owned
+callout placement, temperature rendering, and resize behavior. Only saved
+locations receive world-map callouts; the active Weather location may still
+seed the forecast rail without being retained as an extra map label. Focus and
+hover are visual-only. Enter, Space, and click share one primary-action path
+which commits the place to the Dashboard forecast rail; repeating it leaves the
+selection in place. City selection in the lower tropical-track and alert maps
+uses that same rail-only path. `w` remains the explicit route back to Weather,
+and a Dashboard selection never adopts `Wevva.location`. Resize and tab changes
+are presentation-only. Mount, resume, and selection consult one application-owned
 forecast loader, which serves a valid snapshot immediately and coalesces a
 missing coordinate/unit key through the same fifteen-minute complete-forecast
 cache used by Weather.
@@ -281,7 +284,11 @@ groups without horizontal scrolling. The borderless `ContextBar` stack receives 
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on
 taller terminals, and omit the cards in compact/medium modes. Dashboard inner
-sections share untitled top separators in one muted colour. The pure layout
+sections share untitled top separators in one muted colour, and Dashboard
+hourly/daily zebra rows use a fully visible background step rather than the
+framework's translucent stripe. The selected tropical and alert detail frames
+identify their contents with an accent storm-name title or severity-coloured
+alert-condition title. The pure layout
 budget reduces daily rows and current-instrument density at short sizes while
 keeping the same mounted widget tree; hourly scrolling remains internal, so it
 does not move the current, daily, or context sections.

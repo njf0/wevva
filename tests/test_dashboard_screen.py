@@ -25,6 +25,7 @@ from wevva.app import Wevva
 from wevva.conditions import get_condition
 from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
+from wevva.messages import PlaceSelected
 from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.services.alert_bulletin import BulletinAlert
 from wevva.screens.weather_screen import WeatherScreen
@@ -38,6 +39,7 @@ from wevva.widgets.dashboard_hourly_forecast import DashboardHourlyForecast
 from wevva.widgets.country_alerts_map import (
     CountryAlertCityLabel,
     CountryAlertSettlementPreviewRequested,
+    CountryAlertSettlementSelected,
     CountryAlertsMap,
 )
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
@@ -168,7 +170,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 screen.query_one('#dashboard-alerts-empty', Static).display
             )
-            self.assertEqual(len(list(screen.world_map.query(DashboardLocationLabel))), 3)
+            map_locations = list(screen.world_map.query(DashboardLocationLabel))
+            self.assertEqual(
+                {label.location.name for label in map_locations},
+                {'London', 'Tokyo'},
+            )
             self.assertEqual(
                 screen.query_one(
                     '#dashboard-forecast-place',
@@ -219,6 +225,16 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 ['date', 'condition', 'temperature', 'rain', 'wind'],
             )
             self.assertEqual(daily.table.max_scroll_x, 0)
+            self.assertIsNotNone(
+                hourly.table.get_component_rich_style(
+                    'datatable--even-row'
+                ).bgcolor
+            )
+            self.assertIsNotNone(
+                daily.table.get_component_rich_style(
+                    'datatable--even-row'
+                ).bgcolor
+            )
 
             first_feature = app.focused
             self.assertIsInstance(first_feature, DashboardLocationLabel)
@@ -361,15 +377,19 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(marker.display)
             self.assertIs(marker.row, row)
             alert_cell = tuple(marker.offset)
-            berlin_candidate = next(
+            saved_candidate = next(
                 candidate
                 for candidate in screen.world_map._callout_candidates(
                     screen.world_map._current_frame
                 )
-                if candidate.key == location_key(BERLIN)
+                if candidate.key == location_key(LONDON)
             )
-            self.assertIn(alert_cell, berlin_candidate.preferred_avoidance)
+            self.assertIn(alert_cell, saved_candidate.preferred_avoidance)
             detail = screen.alert_detail_panel
+            self.assertEqual(
+                detail.border_title,
+                'Extremely Long River Flood Warning Across Multiple Districts',
+            )
             alert_map = detail.query_one('#dashboard-alert-map', CountryAlertsMap)
             self.assertTrue(alert_map.display)
             self.assertEqual(len(alert_map.alert_layers), 1)
@@ -405,6 +425,23 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             labels = list(alert_map.query(CountryAlertCityLabel))
             self.assertTrue(labels)
+            selected_place = labels[0].place
+            app.controller.fetch = AsyncMock(
+                return_value=weather_update(with_warnings=False)
+            )
+            screen.on_country_alert_settlement_selected(
+                CountryAlertSettlementSelected(place=selected_place)
+            )
+            await _settle(pilot, cycles=8)
+            self.assertIs(app.screen, screen)
+            self.assertEqual(app.location, BERLIN)
+            self.assertIn(
+                selected_place.name,
+                screen.query_one(
+                    '#dashboard-forecast-place',
+                    Static,
+                ).render().plain,
+            )
             screen.on_country_alert_settlement_preview_requested(
                 CountryAlertSettlementPreviewRequested(label=labels[0])
             )
@@ -416,7 +453,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(marker.has_class('pulse'))
             app.refresh_dashboard_bulletin()
             app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
-                ['DE', None, 'DE']
+                ['DE', 'DE', 'DE']
             )
 
             marker.action_activate()
@@ -433,6 +470,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(panel.selected_row)
             self.assertFalse(marker.display)
             self.assertFalse(detail.tabs.display)
+            self.assertEqual(detail.border_title, 'Selected Alert')
             self.assertIn(
                 'Select an alert',
                 screen.query_one(
@@ -794,6 +832,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 dashboard.world_map.selected_tropical_key,
                 label.tropical_key,
             )
+            self.assertEqual(dashboard.tropical_panel.border_title, 'NANGKA')
             self.assertIs(app.focused, label)
             app.load_tropical_products.assert_awaited_once_with(jma)
             detail_tabs = dashboard.tropical_panel.tabs
@@ -816,6 +855,34 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             label.action_activate()
             await _settle(pilot)
             app.load_tropical_products.assert_awaited_once_with(jma)
+
+            storm_place = LocationMetadata(
+                name='Storm City',
+                country_code='JP',
+                latitude=27.5,
+                longitude=134.5,
+            )
+            app.controller.fetch = AsyncMock(
+                return_value=weather_update(with_warnings=False)
+            )
+            dashboard.post_message(PlaceSelected(location=storm_place))
+            await _settle(pilot, cycles=8)
+            self.assertIs(app.screen, dashboard)
+            self.assertEqual(app.location, BERLIN)
+            self.assertEqual(
+                dashboard.query_one(
+                    '#dashboard-forecast-place',
+                    Static,
+                ).render().plain,
+                'Storm City\nJapan',
+            )
+            self.assertNotIn(
+                'Storm City',
+                {
+                    place.location.name
+                    for place in dashboard.world_map.query(DashboardLocationLabel)
+                },
+            )
 
     async def test_selected_place_loads_preview_without_becoming_active(self) -> None:
         app = self._app()
