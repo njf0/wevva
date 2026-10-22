@@ -248,6 +248,7 @@ class DashboardForecastPanel(Container):
 
         if not self.is_mounted:
             return
+        self.loading = False
         self.query_one('#dashboard-forecast-place', Static).update(
             _dashboard_place_heading(location)
         )
@@ -261,6 +262,7 @@ class DashboardForecastPanel(Container):
 
         self.show_location(location)
         self._show_status('Loading forecast…')
+        self.loading = True
 
     def show_error(
         self,
@@ -282,6 +284,7 @@ class DashboardForecastPanel(Container):
 
         if not self.is_mounted:
             return
+        self.loading = False
         self.query_one('#dashboard-forecast-place', Static).update(
             _dashboard_place_heading(location)
         )
@@ -668,9 +671,16 @@ class DashboardTropicalPanel(Container):
         else:
             message = 'No active tropical systems.'
         self._show_state(message)
+        self.loading = systems is None
 
     def show_error(self) -> None:
         self._show_state('Tropical systems are temporarily unavailable.')
+        self.loading = False
+
+    def set_loading(self, loading: bool) -> None:
+        """Toggle native loading UI without replacing visible storm detail."""
+
+        self.loading = loading
 
     def show_system(
         self,
@@ -682,6 +692,7 @@ class DashboardTropicalPanel(Container):
         if system is None or observation is None:
             self.show_overview(())
             return
+        self.loading = False
         classification = (observation.classification or '').strip()
         name = (system.name or observation.name or '').strip()
         self._set_frame(
@@ -731,6 +742,7 @@ class DashboardTropicalPanel(Container):
         )
         await self._replace_tabs(specs)
         self._show_track()
+        self.loading = False
 
     async def _replace_tabs(self, specs: list[tuple[str, str]] | tuple) -> None:
         self._updating_tabs = True
@@ -1588,6 +1600,7 @@ class DashboardScreen(Screen[None]):
         self._cancel_tropical_product_wait()
         self._tropical_detail_key = key
         self.tropical_panel.show_system(system, observation)
+        self.tropical_panel.set_loading(True)
         generation = self._tropical_detail_generation
         self._tropical_product_task = asyncio.create_task(
             self._load_tropical_detail_products(
@@ -1612,6 +1625,7 @@ class DashboardScreen(Screen[None]):
             observation.source,
             observation.id,
         )
+        self.tropical_panel.set_loading(True)
         self._tropical_selection_refresh_task = asyncio.create_task(
             self._load_refreshed_tropical_selection(
                 *self._tropical_selection_refresh_target,
@@ -1645,6 +1659,11 @@ class DashboardScreen(Screen[None]):
         except asyncio.CancelledError:
             raise
         except Exception:
+            if (
+                self.is_mounted
+                and generation == self._tropical_detail_generation
+            ):
+                self.tropical_panel.set_loading(False)
             return
         finally:
             if self._tropical_selection_refresh_task is task:
@@ -1673,6 +1692,10 @@ class DashboardScreen(Screen[None]):
         await self.tropical_panel.show_products(observation, products)
 
     def _cancel_tropical_selection_refresh(self) -> None:
+        was_loading = (
+            self._tropical_selection_refresh_task is not None
+            and not self._tropical_selection_refresh_task.done()
+        )
         if (
             self._tropical_selection_refresh_task is not None
             and not self._tropical_selection_refresh_task.done()
@@ -1680,6 +1703,8 @@ class DashboardScreen(Screen[None]):
             self._tropical_selection_refresh_task.cancel()
         self._tropical_selection_refresh_task = None
         self._tropical_selection_refresh_target = None
+        if was_loading and self.is_mounted:
+            self.tropical_panel.set_loading(False)
 
     async def _load_tropical_detail_products(
         self,
@@ -1695,6 +1720,7 @@ class DashboardScreen(Screen[None]):
         except Exception:
             if generation == self._tropical_detail_generation:
                 self._tropical_detail_key = None
+                self.tropical_panel.set_loading(False)
             return
         finally:
             if (
@@ -1720,6 +1746,10 @@ class DashboardScreen(Screen[None]):
 
     def _cancel_tropical_product_wait(self) -> None:
         self._tropical_detail_generation += 1
+        was_loading = (
+            self._tropical_product_task is not None
+            and not self._tropical_product_task.done()
+        )
         if (
             self._tropical_product_task is not None
             and not self._tropical_product_task.done()
@@ -1727,6 +1757,8 @@ class DashboardScreen(Screen[None]):
             self._tropical_product_task.cancel()
         self._tropical_product_task = None
         self._tropical_detail_key = None
+        if was_loading and self.is_mounted:
+            self.tropical_panel.set_loading(False)
 
     def _show_persistent_location(self) -> None:
         location = self._selected_location or self.app.location

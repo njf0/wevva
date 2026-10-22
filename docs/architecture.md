@@ -273,8 +273,10 @@ and a Dashboard selection never adopts `Wevva.location`. Resize and tab changes
 are presentation-only. Mount, resume, and selection consult one application-owned
 forecast loader, which serves a valid snapshot immediately and coalesces a
 missing coordinate/unit key through the same fifteen-minute complete-forecast
-cache used by Weather. A successful complete Dashboard forecast promotes its
-current temperature through the existing app-owned saved-summary update path,
+cache used by Weather. A missing forecast uses the forecast rail's native
+loading cover until the selected request succeeds or fails. A successful
+complete Dashboard forecast promotes its current temperature through the
+existing app-owned saved-summary update path,
 so a `--` map label is repaired in place. The lightweight startup summary
 request makes one short retry when it fails or omits temperature; it does not
 enter an open-ended retry loop.
@@ -331,9 +333,12 @@ classification and leaves the name plain.
 Storm activation records the exact Dashboard canonical/source observation and
 renders that source's `LargeTropicalStormTrackScope` immediately in the lower
 tropical pane. It then joins `Wevva.load_tropical_products()`, retaining the
-application's per-issued-observation cache and in-flight coalescing. Track and
-Cone remains the first tab; only fetched, content-backed product choices such
-as Forecast, Public Advisory, and Forecast Discussion are added. The Dashboard
+application's per-issued-observation cache and in-flight coalescing. Canonical
+discovery and product loading use the pane's native loading cover; a stale
+selection refresh keeps its existing track and tabs mounted beneath that cover
+until their replacements are complete. Track and Cone remains the first tab;
+only fetched, content-backed product choices such as Forecast, Public Advisory,
+and Forecast Discussion are added. The Dashboard
 owns only a cancellable waiter and selection generation, so a late response
 cannot replace a newer storm. `wevva/widgets/tropical_products.py` contains the
 small shared product-tab and provider-product presentation helpers consumed by

@@ -1047,7 +1047,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             SavedLocationWeatherSummary(error=True)
         )
         event = weather_update(with_warnings=False)
-        app.controller.fetch = AsyncMock(return_value=event)
+        forecast_started = asyncio.Event()
+        release_forecast = asyncio.Event()
+
+        async def fetch_forecast(**_kwargs):
+            forecast_started.set()
+            await release_forecast.wait()
+            return event
+
+        app.controller.fetch = AsyncMock(side_effect=fetch_forecast)
 
         async with app.run_test(size=(120, 30)) as pilot:
             await _settle(pilot)
@@ -1062,9 +1070,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('--', london.label_text)
 
             london.action_select_location()
+            await forecast_started.wait()
+            self.assertTrue(dashboard.forecast_panel.loading)
+
+            release_forecast.set()
             await _settle(pilot, cycles=8)
 
             self.assertEqual(app.location, BERLIN)
+            self.assertFalse(dashboard.forecast_panel.loading)
             app.controller.fetch.assert_awaited_once_with(
                 lat=LONDON.latitude,
                 lon=LONDON.longitude,
@@ -1291,6 +1304,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 now[0] += app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
                 label.action_activate()
                 await fresh_products_started.wait()
+                self.assertTrue(dashboard.tropical_panel.loading)
                 refresh_task = dashboard._tropical_selection_refresh_task
                 label.action_activate()
                 await pilot.pause()
@@ -1310,6 +1324,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 release_fresh_products.set()
                 await _settle(pilot, cycles=8)
                 self.assertIs(app.screen, dashboard)
+                self.assertFalse(dashboard.tropical_panel.loading)
                 self.assertIs(dashboard.tropical_panel._observation, fresh)
                 self.assertEqual(
                     [
