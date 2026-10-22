@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from rich.console import Console
 from rich.text import Text
-from textual.containers import VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.widgets import OptionList, Static, Tab, Tabs
 from wevva_warnings import (
     Alert,
@@ -171,8 +171,32 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     Static,
                 ).render().plain,
             )
+            screen.tropical_panel.show_overview(None)
+            tropical_content = screen.query_one(
+                '#dashboard-tropical-content',
+                Container,
+            )
+            self.assertFalse(screen.tropical_panel.loading)
+            self.assertTrue(tropical_content.loading)
+            self.assertEqual(
+                screen.tropical_panel.border_title,
+                'Tropical System',
+            )
+            screen.tropical_panel.show_overview(())
+            self.assertFalse(tropical_content.loading)
             self.assertTrue(
                 screen.query_one('#dashboard-alerts-empty', Static).display
+            )
+            self.assertEqual(
+                screen.alerts_panel.border_title,
+                'Severe Weather Alert Bulletin',
+            )
+            self.assertEqual(
+                screen.query_one(
+                    '#dashboard-alerts-empty',
+                    Static,
+                ).render().plain,
+                'New weather alerts will display here.',
             )
             map_locations = list(screen.world_map.query(DashboardLocationLabel))
             self.assertEqual(
@@ -1071,13 +1095,23 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
             london.action_select_location()
             await forecast_started.wait()
-            self.assertTrue(dashboard.forecast_panel.loading)
+            forecast_status = dashboard.query_one(
+                '#dashboard-forecast-status',
+                Static,
+            )
+            self.assertFalse(dashboard.forecast_panel.loading)
+            self.assertTrue(forecast_status.loading)
+            self.assertEqual(
+                dashboard.forecast_panel.border_title,
+                'Location Forecast',
+            )
 
             release_forecast.set()
             await _settle(pilot, cycles=8)
 
             self.assertEqual(app.location, BERLIN)
             self.assertFalse(dashboard.forecast_panel.loading)
+            self.assertFalse(forecast_status.loading)
             app.controller.fetch.assert_awaited_once_with(
                 lat=LONDON.latitude,
                 lon=LONDON.longitude,
@@ -1304,7 +1338,16 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 now[0] += app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
                 label.action_activate()
                 await fresh_products_started.wait()
-                self.assertTrue(dashboard.tropical_panel.loading)
+                tropical_content = dashboard.query_one(
+                    '#dashboard-tropical-content',
+                    Container,
+                )
+                self.assertFalse(dashboard.tropical_panel.loading)
+                self.assertTrue(tropical_content.loading)
+                self.assertEqual(
+                    dashboard.tropical_panel.border_title,
+                    'Typhoon NANGKA',
+                )
                 refresh_task = dashboard._tropical_selection_refresh_task
                 label.action_activate()
                 await pilot.pause()
@@ -1325,6 +1368,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 await _settle(pilot, cycles=8)
                 self.assertIs(app.screen, dashboard)
                 self.assertFalse(dashboard.tropical_panel.loading)
+                self.assertFalse(tropical_content.loading)
                 self.assertIs(dashboard.tropical_panel._observation, fresh)
                 self.assertEqual(
                     [

@@ -249,6 +249,7 @@ class DashboardForecastPanel(Container):
         if not self.is_mounted:
             return
         self.loading = False
+        self.query_one('#dashboard-forecast-status', Static).loading = False
         self.query_one('#dashboard-forecast-place', Static).update(
             _dashboard_place_heading(location)
         )
@@ -262,7 +263,7 @@ class DashboardForecastPanel(Container):
 
         self.show_location(location)
         self._show_status('Loading forecast…')
-        self.loading = True
+        self.query_one('#dashboard-forecast-status', Static).loading = True
 
     def show_error(
         self,
@@ -285,6 +286,7 @@ class DashboardForecastPanel(Container):
         if not self.is_mounted:
             return
         self.loading = False
+        self.query_one('#dashboard-forecast-status', Static).loading = False
         self.query_one('#dashboard-forecast-place', Static).update(
             _dashboard_place_heading(location)
         )
@@ -431,10 +433,10 @@ class DashboardAlertsPanel(Container):
         self._last_text_width = 0
 
     def compose(self) -> ComposeResult:
-        self.border_title = 'Recent Alerts'
+        self.border_title = 'Severe Weather Alert Bulletin'
         yield DashboardAlertList(id='dashboard-alerts-list')
         yield Static(
-            'No bulletin alerts yet.\n\nThe session continues checking countries.',
+            'New weather alerts will display here.',
             id='dashboard-alerts-empty',
         )
 
@@ -569,6 +571,10 @@ class DashboardAlertsPanel(Container):
 class DashboardTropicalPanel(Container):
     """Track and official products for one committed source observation."""
 
+    _SELECTION_PROMPT = (
+        'Select a tropical system on the map to view its track and official products.'
+    )
+
     DEFAULT_CSS = """
     DashboardTropicalPanel {
         width: 1fr;
@@ -636,7 +642,7 @@ class DashboardTropicalPanel(Container):
             body.display = False
             yield body
             yield Static(
-                'Select a tropical system on the map.',
+                self._SELECTION_PROMPT,
                 id='dashboard-tropical-detail-state',
             )
 
@@ -667,20 +673,21 @@ class DashboardTropicalPanel(Container):
         if systems is None:
             message = 'Loading tropical systems…'
         elif systems:
-            message = 'Select a tropical system on the map.'
+            message = self._SELECTION_PROMPT
         else:
             message = 'No active tropical systems.'
         self._show_state(message)
-        self.loading = systems is None
+        self.set_loading(systems is None)
 
     def show_error(self) -> None:
         self._show_state('Tropical systems are temporarily unavailable.')
-        self.loading = False
+        self.set_loading(False)
 
     def set_loading(self, loading: bool) -> None:
-        """Toggle native loading UI without replacing visible storm detail."""
+        """Load inside the pane while retaining its titled outer frame."""
 
-        self.loading = loading
+        self.loading = False
+        self.query_one('#dashboard-tropical-content', Container).loading = loading
 
     def show_system(
         self,
@@ -692,7 +699,7 @@ class DashboardTropicalPanel(Container):
         if system is None or observation is None:
             self.show_overview(())
             return
-        self.loading = False
+        self.set_loading(False)
         classification = (observation.classification or '').strip()
         name = (system.name or observation.name or '').strip()
         self._set_frame(
@@ -742,7 +749,7 @@ class DashboardTropicalPanel(Container):
         )
         await self._replace_tabs(specs)
         self._show_track()
-        self.loading = False
+        self.set_loading(False)
 
     async def _replace_tabs(self, specs: list[tuple[str, str]] | tuple) -> None:
         self._updating_tabs = True
@@ -842,6 +849,10 @@ class DashboardTropicalPanel(Container):
 class DashboardAlertDetailPanel(Container):
     """Provider-neutral map and document reader for one bulletin alert."""
 
+    _SELECTION_PROMPT = (
+        'Select an alert from the bulletin to view its map and full details.'
+    )
+
     DEFAULT_CSS = """
     DashboardAlertDetailPanel {
         width: 1fr;
@@ -914,7 +925,7 @@ class DashboardAlertDetailPanel(Container):
             with document:
                 yield Static(id='dashboard-alert-document-body')
             yield Static(
-                'Select an alert from the bulletin.',
+                self._SELECTION_PROMPT,
                 id='dashboard-alert-detail-state',
             )
 
@@ -946,7 +957,7 @@ class DashboardAlertDetailPanel(Container):
                 'Selected Alert',
                 self.app.theme_variables.get('primary'),
             )
-            state.update('Select an alert from the bulletin.')
+            state.update(self._SELECTION_PROMPT)
             state.display = True
             self.tabs.display = False
             self.alert_map.display = False
