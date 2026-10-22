@@ -426,6 +426,11 @@ both Dashboard and Tropical Systems. The world map no longer paints storm
 status or focused-tooltip copies over geography, and its native tooltip is
 limited to title, movement, and wind. Map labels remain fully accent-coloured,
 while Tropical Systems tabs again colour only the classification.
+Re-clicking a storm after the thirty-minute canonical cache expires now
+refreshes that same source in Dashboard. Its existing track and tabs remain
+visible and usable during canonical and product loading, then the complete
+fresh observation replaces them in place; failed refreshes leave the existing
+detail untouched.
 
 ### Slice D — selected-alert reader and rail simplification
 
@@ -566,6 +571,8 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
 - A committed storm selection titles its frame with classification and name,
   shows a modestly padded track/cone immediately when available, and lazily
   reuses cached official products without stale-selection replacement.
+- Re-clicking a storm after canonical expiry refreshes it in Dashboard without
+  blanking the visible track or tabs while fresh products are pending.
 - Alert rows have no fixed preview, open button, chevron, or extra selection
   padding. Selection populates Map and one complete Alerts Centre-style Alert
   document tab.

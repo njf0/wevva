@@ -6,7 +6,7 @@ import asyncio
 import unittest
 from datetime import UTC, datetime
 from io import StringIO
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from rich.console import Console
 from rich.text import Text
@@ -1211,6 +1211,112 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 [tab.label.plain for tab in dashboard.tropical_panel.tabs.query('Tab')],
                 ['Track and Cone', 'Forecast', 'New Advisory'],
             )
+
+    async def test_stale_storm_click_keeps_detail_until_refresh_is_complete(self) -> None:
+        app = self._app()
+        old = _tropical_observation(
+            'nangka-jma',
+            'jma_tropical',
+            'NANGKA',
+            classification='Typhoon',
+            latitude=20.0,
+            longitude=130.0,
+        )
+        fresh = _tropical_observation(
+            'nangka-jma',
+            'jma_tropical',
+            'NANGKA',
+            classification='Super Typhoon',
+            latitude=24.0,
+            longitude=134.0,
+        )
+        old_system = CanonicalTropicalSystem('NANGKA', [old])
+        fresh_system = CanonicalTropicalSystem('NANGKA', [fresh])
+        now = [1_000.0]
+        app._tropical_system_cache_clock = lambda: now[0]
+        app._tropical_system_cache = (now[0], (old_system,))
+        fresh_products_started = asyncio.Event()
+        release_fresh_products = asyncio.Event()
+
+        async def load_products(observation: TropicalSystem):
+            if observation is old:
+                return [
+                    TropicalProduct(
+                        kind='advisory',
+                        label='Old Advisory',
+                        content='Old product',
+                    )
+                ]
+            fresh_products_started.set()
+            await release_fresh_products.wait()
+            return [
+                TropicalProduct(
+                    kind='advisory',
+                    label='Fresh Advisory',
+                    content='Fresh product',
+                )
+            ]
+
+        app.load_tropical_products = AsyncMock(side_effect=load_products)
+        tropical_lookup = AsyncMock(return_value=([fresh_system], True))
+
+        with patch(
+            'wevva.app.get_tropical_system_candidates_async',
+            new=tropical_lookup,
+        ):
+            async with app.run_test(size=(180, 45)) as pilot:
+                await _settle(pilot)
+                await pilot.press('b')
+                await _settle(pilot)
+                dashboard = app.screen
+                label = dashboard.world_map.query_one(DashboardTropicalLabel)
+
+                label.action_activate()
+                await _settle(pilot, cycles=8)
+                self.assertIs(dashboard.tropical_panel._observation, old)
+                self.assertEqual(
+                    [
+                        tab.label.plain
+                        for tab in dashboard.tropical_panel.tabs.query('Tab')
+                    ],
+                    ['Track and Cone', 'Old Advisory'],
+                )
+
+                now[0] += app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
+                label.action_activate()
+                await fresh_products_started.wait()
+                refresh_task = dashboard._tropical_selection_refresh_task
+                label.action_activate()
+                await pilot.pause()
+                self.assertIs(
+                    dashboard._tropical_selection_refresh_task,
+                    refresh_task,
+                )
+                self.assertIs(dashboard.tropical_panel._observation, old)
+                self.assertEqual(
+                    [
+                        tab.label.plain
+                        for tab in dashboard.tropical_panel.tabs.query('Tab')
+                    ],
+                    ['Track and Cone', 'Old Advisory'],
+                )
+
+                release_fresh_products.set()
+                await _settle(pilot, cycles=8)
+                self.assertIs(app.screen, dashboard)
+                self.assertIs(dashboard.tropical_panel._observation, fresh)
+                self.assertEqual(
+                    [
+                        tab.label.plain
+                        for tab in dashboard.tropical_panel.tabs.query('Tab')
+                    ],
+                    ['Track and Cone', 'Fresh Advisory'],
+                )
+                refreshed_label = dashboard.world_map.query_one(
+                    DashboardTropicalLabel
+                )
+                self.assertIs(refreshed_label.observation, fresh)
+                tropical_lookup.assert_awaited_once_with()
 
     async def test_weather_key_returns_without_refresh_and_preserves_selection(self) -> None:
         app = self._app()

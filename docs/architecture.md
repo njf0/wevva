@@ -332,6 +332,11 @@ cannot replace a newer storm. `wevva/widgets/tropical_products.py` contains the
 small shared product-tab and provider-product presentation helpers consumed by
 both Dashboard and the full Tropical Systems screen; provider loading and
 caching remain outside it.
+Reactivating a Dashboard storm also consults the thirty-minute canonical cache.
+When it has expired, the current track and product tabs remain mounted while a
+coalesced canonical refresh re-identifies the same source and loads its fresh
+products. The pane and world-map anchor are replaced only after that complete
+fresh selection is available; failure leaves the visible stale detail intact.
 
 The application owns one session alert-bulletin coordinator independently of
 Dashboard lifecycle. It starts after the first active-location warning request

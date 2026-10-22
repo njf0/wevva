@@ -59,6 +59,7 @@ from wevva.widgets.tropical_products import (
     tropical_product_tab_specs,
     tropical_product_widgets,
 )
+from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
 from wevva.widgets.weather_alerts import (
     alert_condition_name,
@@ -1108,6 +1109,8 @@ class DashboardScreen(Screen[None]):
         self._tropical_product_task: asyncio.Task[None] | None = None
         self._tropical_detail_generation = 0
         self._tropical_detail_key: tuple[str, str, str] | None = None
+        self._tropical_selection_refresh_task: asyncio.Task[None] | None = None
+        self._tropical_selection_refresh_target: tuple[str, str, str] | None = None
         self._alert_place_weather_generation = 0
         self._alert_place_weather_task: asyncio.Task[None] | None = None
         self._alert_place_weather_label: CountryAlertCityLabel | None = None
@@ -1216,6 +1219,7 @@ class DashboardScreen(Screen[None]):
         if self._tropical_wait_task is not None:
             self._tropical_wait_task.cancel()
             self._tropical_wait_task = None
+        self._cancel_tropical_selection_refresh()
         self._cancel_tropical_product_wait()
         self._cancel_alert_place_weather()
 
@@ -1337,6 +1341,28 @@ class DashboardScreen(Screen[None]):
         """Commit the exact storm/source anchor to the Dashboard detail pane."""
 
         message.stop()
+        refresh_target = (
+            canonical_storm_key(message.system),
+            message.observation.source,
+            message.observation.id,
+        )
+        if (
+            self._tropical_selection_refresh_task is not None
+            and not self._tropical_selection_refresh_task.done()
+        ):
+            if refresh_target == self._tropical_selection_refresh_target:
+                return
+            refresh_required = True
+        else:
+            refresh_required = self.app.tropical_systems_snapshot() is None
+        if refresh_required:
+            self.world_map.set_selected_tropical(message.system)
+            self._refresh_tropical_selection(
+                message.system,
+                message.observation,
+            )
+            return
+        self._cancel_tropical_selection_refresh()
         self._selected_tropical_system = message.system
         self._selected_tropical_observation = message.observation
         self.world_map.set_selected_tropical(message.system)
@@ -1559,6 +1585,90 @@ class DashboardScreen(Screen[None]):
                 generation,
             )
         )
+
+    def _refresh_tropical_selection(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+    ) -> None:
+        """Refresh one stale selection without disturbing its visible pane."""
+
+        self._cancel_tropical_selection_refresh()
+        self._cancel_tropical_product_wait()
+        generation = self._tropical_detail_generation
+        self._tropical_selection_refresh_target = (
+            canonical_storm_key(system),
+            observation.source,
+            observation.id,
+        )
+        self._tropical_selection_refresh_task = asyncio.create_task(
+            self._load_refreshed_tropical_selection(
+                *self._tropical_selection_refresh_target,
+                generation,
+            )
+        )
+
+    async def _load_refreshed_tropical_selection(
+        self,
+        system_key: str,
+        source: str,
+        observation_id: str,
+        generation: int,
+    ) -> None:
+        """Replace a stale pane only after its fresh products are available."""
+
+        task = asyncio.current_task()
+        try:
+            systems = await self.app.load_tropical_systems()
+            refreshed = _matching_tropical_selection(
+                systems,
+                system_key,
+                source,
+                observation_id,
+            )
+            if refreshed is None:
+                products = None
+            else:
+                _system, observation = refreshed
+                products = await self.app.load_tropical_products(observation)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        finally:
+            if self._tropical_selection_refresh_task is task:
+                self._tropical_selection_refresh_task = None
+                self._tropical_selection_refresh_target = None
+
+        if (
+            not self.is_mounted
+            or generation != self._tropical_detail_generation
+        ):
+            return
+        self.world_map.set_tropical_systems(systems)
+        if refreshed is None or products is None:
+            self._selected_tropical_system = None
+            self._selected_tropical_observation = None
+            self.world_map.set_selected_tropical(None)
+            self.tropical_panel.show_overview(tuple(systems))
+            return
+
+        system, observation = refreshed
+        self._selected_tropical_system = system
+        self._selected_tropical_observation = observation
+        self.world_map.set_selected_tropical(system)
+        self._tropical_detail_key = _tropical_observation_key(observation)
+        self.tropical_panel.show_system(system, observation)
+        await self.tropical_panel.show_products(observation, products)
+
+    def _cancel_tropical_selection_refresh(self) -> None:
+        if (
+            self._tropical_selection_refresh_task is not None
+            and not self._tropical_selection_refresh_task.done()
+        ):
+            self._tropical_selection_refresh_task.cancel()
+        self._tropical_selection_refresh_task = None
+        self._tropical_selection_refresh_target = None
 
     async def _load_tropical_detail_products(
         self,
@@ -1900,6 +2010,28 @@ def _tropical_observation_key(
 ) -> tuple[str, str, str]:
     issued = observation.issued_at.isoformat() if observation.issued_at else ''
     return observation.source, observation.id, issued
+
+
+def _matching_tropical_selection(
+    systems: list[CanonicalTropicalSystem],
+    system_key: str,
+    source: str,
+    observation_id: str,
+) -> tuple[CanonicalTropicalSystem, TropicalSystem] | None:
+    """Find the refreshed form of one exact Dashboard source selection."""
+
+    for system in systems:
+        if canonical_storm_key(system) != system_key:
+            continue
+        source_match = None
+        for observation in system.observations:
+            if observation.source != source:
+                continue
+            source_match = source_match or observation
+            if observation.id == observation_id:
+                return system, observation
+        return None if source_match is None else (system, source_match)
+    return None
 
 
 __all__ = [
