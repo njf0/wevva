@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+from tests.weather_fixtures import weather_update
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import SearchQueryReady
+from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.screens.search_screen import SearchScreen
 
 
@@ -72,14 +75,23 @@ class SearchScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.location, BERLIN)
             app.action_refresh.assert_awaited_once_with()
 
-    async def test_cli_location_starts_in_weather_and_refreshes_once(self) -> None:
-        app = Wevva(initial_location=BERLIN)
-        app.action_refresh = AsyncMock()
+    async def test_cli_location_starts_in_dashboard_and_refreshes_once(self) -> None:
+        app = Wevva(initial_location=replace(BERLIN))
+        app.controller.fetch = AsyncMock(return_value=weather_update())
+        app._schedule_saved_weather_refresh = Mock()
+        app._schedule_alert_refresh = Mock()
+        app._tropical_system_cache = (app._tropical_system_cache_clock(), ())
 
         async with app.run_test() as pilot:
             await pilot.pause(0)
-            self.assertIs(app.screen, app.weather_screen)
-            app.action_refresh.assert_awaited_once_with()
+            self.assertIsInstance(app.screen, DashboardScreen)
+            self.assertIs(app.screen, app._dashboard_screen)
+            self.assertIn(app.weather_screen, app.screen_stack)
+            app.controller.fetch.assert_awaited_once_with(
+                lat=BERLIN.latitude,
+                lon=BERLIN.longitude,
+                country_code=BERLIN.country_code,
+            )
 
     async def test_new_query_cancels_obsolete_request_and_owns_results(self) -> None:
         first_started = asyncio.Event()

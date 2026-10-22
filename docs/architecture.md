@@ -9,7 +9,8 @@ uses plain modules and Textual messages rather than a separate domain layer.
 wevva command / python -m wevva
   -> wevva.cli:app -> _launch_wevva() -> Wevva.run()
   -> Wevva.on_mount()
-     -> SearchScreen, or WeatherScreen + refresh when coordinates are known
+     -> SearchScreen when no coordinates are known
+     -> WeatherScreen under installed DashboardScreen + refresh otherwise
 
 place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places()
              -> PlaceSelected -> Wevva.action_refresh()
@@ -29,10 +30,11 @@ m key -> WorldLocationsScreen -> checked-in global map-unit geometry
                              -> cached saved-location summaries
                              -> SavedLocationSelected -> WeatherScreen + refresh
 
-b key -> installed DashboardScreen -> app-owned current/saved summaries
-                                   -> active/saved places on shared world geometry
-                                   -> committed place/storm/alert selections
-                                   -> in-dashboard forecast and detail regions
+b key / configured startup -> installed DashboardScreen
+                           -> app-owned current/saved summaries
+                           -> active/saved places on shared world geometry
+                           -> committed place/storm/alert selections
+                           -> in-dashboard forecast and detail regions
 ```
 
 `wevva/cli.py` applies CLI and saved-preference choices, resolves a startup
@@ -240,8 +242,13 @@ rounded frame inside `1 2` stage padding. Its fixed viewport ends at 78°S,
 retaining the Antarctic coast while assigning the southern polar cap's rows to
 the inhabited world.
 
-The Dashboard is a persistent installed workspace opened from Weather with
-`b`. `wevva/dashboard_layout.py` makes the pure presentation decision: a
+The Dashboard is the initial workspace when startup coordinates are available,
+with the ordinary Weather screen mounted beneath it so `w` and existing weather
+message handling retain their established paths. It remains a persistent
+installed workspace opened from Weather with `b`. The ordinary startup refresh
+joins the same application-owned forecast loader used by the Dashboard, avoiding
+a duplicate complete-forecast request while both screens initialize.
+`wevva/dashboard_layout.py` makes the pure presentation decision: a
 120×30-or-larger viewport shows the forecast rail, dominant world map, and
 alerts rail together; larger widths progressively grow both rails rather than
 assigning every surplus cell to the map. On very wide, tall terminals the
@@ -361,9 +368,12 @@ identity's own next successful refresh or as soon as a later non-empty
 discovery arrives from another catalogue, so only the latest discovered set is
 badged. Successful no-change work elsewhere does not erase that set. A fresh
 hydrated catalogue is already a baseline but publishes no startup rows. Later
-successful snapshots carry only refresh-scoped additions; failed or cancelled
-work does not advance the baseline, and persisted `NEW` presentation state is
-never hydrated.
+successful snapshots carry only refresh-scoped additions. Session-wide
+observed and published identity sets prevent a temporarily omitted alert, or a
+shared-feed copy discovered through another country, from becoming `NEW`
+again; an already-published identity may re-enter the visible bulletin without
+the badge. Failed or cancelled work does not advance the baseline, and
+persisted `NEW` presentation state is never hydrated.
 
 The Dashboard alert rail consumes those immutable snapshots without owning a
 loader. The coordinator combines complete country catalogues with the persisted
@@ -391,9 +401,10 @@ not pulse it. A separate temporary marker pool flashes a newly discovered
 bulletin batch for forty 0.25-second phases, then disappears. New alerts which
 project to the same world-map cell share one `!` using the most severe alert's
 colour, while distinct cells flash together. Only a generation received while
-Dashboard is current starts this pulse, so cached `NEW` rows do not replay it
-on entry or resume. The finite ten-second pulse is implemented by one task
-rather than a timer. The selected marker's cell is a preferred avoidance input
+Dashboard is current starts this pulse, and each identity is consumed once by
+the mounted Dashboard, so cached badges and unrelated later catalogue updates
+cannot replay it. The finite ten-second pulse is implemented by one task rather
+than a timer. The selected marker's cell is a preferred avoidance input
 for place callouts, so a valid opposite-side placement wins before ordinary
 overlap fallback. Screen suspension and unmount cancel temporary presentation,
 while a warm return restores the steady marker from the retained rail

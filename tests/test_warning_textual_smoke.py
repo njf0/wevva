@@ -33,7 +33,11 @@ def _location(
 class WarningTextualSmokeTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_individual_warning_work_shows_measured_progress(self) -> None:
         location = _location()
-        app = Wevva(initial_location=location, saved_locations=[location])
+        app = Wevva(
+            initial_location=location,
+            saved_locations=[location],
+            start_on_dashboard=False,
+        )
 
         with patch.object(Wevva, 'action_refresh', new=AsyncMock()):
             async with app.run_test(size=(160, 40)) as pilot:
@@ -61,7 +65,11 @@ class WarningTextualSmokeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_candidate_cache_hit_does_not_show_progress(self) -> None:
         location = _location()
-        app = Wevva(initial_location=location, saved_locations=[location])
+        app = Wevva(
+            initial_location=location,
+            saved_locations=[location],
+            start_on_dashboard=False,
+        )
         app.warning_cache = WarningCache(None)
         app.country_alerts_service.cache = app.warning_cache
         await app.warning_cache.store(
@@ -116,7 +124,11 @@ class WarningTextualSmokeTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return [stale_alert], True
 
-        app = Wevva(initial_location=old_location, saved_locations=[old_location])
+        app = Wevva(
+            initial_location=old_location,
+            saved_locations=[old_location],
+            start_on_dashboard=False,
+        )
         app.warning_cache = WarningCache(None)
         app.country_alerts_service.cache = app.warning_cache
         with (

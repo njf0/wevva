@@ -26,7 +26,7 @@ BERLIN = LocationMetadata(
 
 class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def _app(self) -> Wevva:
-        app = Wevva(initial_location=BERLIN)
+        app = Wevva(initial_location=BERLIN, start_on_dashboard=False)
         app.action_refresh = AsyncMock()
         app.country_alerts_service.get_alerts = AsyncMock(return_value=[])
         app.country_alerts_service.get_cached_alerts = AsyncMock(

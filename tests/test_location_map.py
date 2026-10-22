@@ -369,7 +369,7 @@ class LocationMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             country='Germany',
             country_code='DE',
         )
-        app = Wevva(initial_location=munich)
+        app = Wevva(initial_location=munich, start_on_dashboard=False)
         app.action_refresh = AsyncMock()
 
         async with app.run_test(size=(100, 30)) as pilot:

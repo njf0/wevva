@@ -275,6 +275,7 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
         app = Wevva(
             initial_location=LONDON,
             saved_locations=[LONDON, NEW_YORK, TOKYO],
+            start_on_dashboard=False,
         )
         app.action_refresh = AsyncMock()
 
@@ -335,6 +336,7 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
         app = Wevva(
             initial_location=LONDON,
             saved_locations=[LONDON, NEW_YORK],
+            start_on_dashboard=False,
         )
         app.action_refresh = AsyncMock()
 

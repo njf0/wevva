@@ -91,6 +91,8 @@ class AlertBulletinCoordinator:
         self._priority: tuple[str, ...] = ()
         self._recent: deque[str] = deque(maxlen=self.priority_cap)
         self._catalogues: dict[BulletinKey, BulletinCatalogue] = {}
+        self._observed_alert_identities: set[tuple[str, str]] = set()
+        self._published_alert_identities: set[tuple[str, str]] = set()
         self._last_success: dict[BulletinKey, float] = {}
         self._last_rolling_attempt: dict[BulletinKey, float] = {}
         self._failures: dict[BulletinKey, int] = {}
@@ -277,6 +279,9 @@ class AlertBulletinCoordinator:
                 cached.alerts,
                 cached.fetched_at,
             )
+            self._observed_alert_identities.update(
+                country_alert_identity(alert) for alert in cached.alerts
+            )
             age = max(
                 0.0,
                 (_as_utc(self._wall_clock()) - cached.fetched_at).total_seconds(),
@@ -416,15 +421,22 @@ class AlertBulletinCoordinator:
             country_alert_identity(alert) for alert in current_alerts
         )
         new_identities: frozenset[tuple[str, str]] = frozenset()
-        visible_identities: frozenset[tuple[str, str]] = frozenset()
+        visible_identities = current_identities & self._published_alert_identities
         if previous is not None:
             previous_identities = frozenset(
                 country_alert_identity(alert) for alert in previous.alerts
             )
-            new_identities = current_identities - previous_identities
+            added_identities = current_identities - previous_identities
+            new_identities = frozenset(
+                added_identities - self._observed_alert_identities
+            )
             visible_identities = (
                 previous.visible_alert_identities & current_identities
+            ) | (
+                added_identities & self._published_alert_identities
             ) | new_identities
+        self._observed_alert_identities.update(current_identities)
+        self._published_alert_identities.update(new_identities)
         if new_identities:
             self._clear_previous_new_alerts()
         self._catalogues[key] = BulletinCatalogue(

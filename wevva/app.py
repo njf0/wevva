@@ -159,9 +159,10 @@ class Wevva(App, inherit_bindings=False):
         wind_speed_unit: str = 'kmh',
         precipitation_unit: str = 'mm',
         saved_locations: list[LocationMetadata] | None = None,
+        start_on_dashboard: bool = True,
         **kwargs,
     ):
-        """Initialize application (no postcode required; starts with place search).
+        """Initialize application and its configured startup workspace.
 
         Sets up controller, location state, and a refresh guard.
         """
@@ -175,6 +176,7 @@ class Wevva(App, inherit_bindings=False):
         self.forecast_metadata = None  # LocationMetadata after first fetch
         # unified location context (holds geocoded place + last forecast metadata)
         self.location = initial_location or LocationMetadata()  # set from CLI or search
+        self.start_on_dashboard = start_on_dashboard
         # Track whether the app started with a CLI-provided location and any successful fetch yet
         self.started_with_cli_location = initial_location is not None
         self._has_successful_fetch = False
@@ -233,9 +235,11 @@ class Wevva(App, inherit_bindings=False):
             self.theme = theme_name
 
     async def on_mount(self):
-        """Start with search screen, or if location provided via CLI, fetch weather directly."""
+        """Start with search, or show the Dashboard while weather is fetched."""
         if self.location.latitude is not None and self.location.longitude is not None:
             self.push_screen(self.weather_screen)
+            if self.start_on_dashboard:
+                self.open_dashboard_screen()
             await self.action_refresh()
         else:
             self.push_screen(SearchScreen())
@@ -273,12 +277,15 @@ class Wevva(App, inherit_bindings=False):
             event = None if force_alert_refresh else self._cached_forecast(forecast_cache_key)
             if event is None:
                 self._set_forecast_loading(True)
-                event = await self.controller.fetch(
-                    lat=self.location.latitude,
-                    lon=self.location.longitude,
-                    country_code=self.location.country_code,
-                )
-                self._forecast_cache[forecast_cache_key] = self._forecast_cache_clock(), event
+                if force_alert_refresh:
+                    event = await self.controller.fetch(
+                        lat=self.location.latitude,
+                        lon=self.location.longitude,
+                        country_code=self.location.country_code,
+                    )
+                    self._forecast_cache[forecast_cache_key] = self._forecast_cache_clock(), event
+                else:
+                    event = await self.load_dashboard_forecast(self.location)
             # Forward fresh data to the weather screen
             self.weather_screen.post_message(event)
             self._schedule_alert_refresh(
@@ -418,12 +425,7 @@ class Wevva(App, inherit_bindings=False):
             country_code=location.country_code,
         )
         self._forecast_cache[cache_key] = self._forecast_cache_clock(), event
-        return WeatherUpdated(
-            metadata=event.metadata,
-            current=event.current,
-            hourly=event.hourly,
-            daily=event.daily,
-        )
+        return event
 
     def action_search(self):  # textual binding: 's'
         """Open place search screen (fresh instance)."""

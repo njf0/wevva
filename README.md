@@ -86,6 +86,10 @@ uvx wevva --set-default-location "New York"
 uvx wevva --clear-default-location
 ```
 
+When a startup location is available, wevva opens on the Dashboard; press `w`
+for the full Weather screen. With no configured location it opens place search
+first.
+
 > [!WARNING]
 > - Emoji rendering support varies depending on terminal support and is disabled by default. Enable it with `--emoji` (or via `wevva setup`).
 > - Colour support also varies. Try `export COLORTERM=truecolor` if colours display strangely.

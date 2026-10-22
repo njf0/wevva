@@ -123,6 +123,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             initial_location=BERLIN,
             saved_locations=[LONDON, TOKYO],
             emoji_enabled=False,
+            start_on_dashboard=False,
         )
         app.action_refresh = AsyncMock()
         app.alert_bulletin.schedule_hard_refresh = Mock()
@@ -637,6 +638,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(
                 screen.world_map._incoming_alert_pulse_task
             )
+            pulse_task = screen.world_map._incoming_alert_pulse_task
+
+            screen.update_bulletin(2, rows)
+            await _settle(pilot)
+            self.assertIs(screen.world_map._incoming_alert_pulse_task, pulse_task)
 
             screen.world_map.set_selected_alert(rows[0])
             await pilot.pause()

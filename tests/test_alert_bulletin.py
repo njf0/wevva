@@ -168,6 +168,44 @@ class AlertBulletinCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(coordinator.recent_alerts_snapshot()[0].is_new)
 
+    async def test_published_alert_reappears_without_becoming_new_again(self) -> None:
+        existing = Alert(
+            id='existing',
+            source='test',
+            event='Rain',
+            headline='Rain',
+        )
+        added = Alert(
+            id='added',
+            source='test',
+            event='Wind',
+            headline='Wind',
+        )
+        service = _Service()
+        service.refresh_alerts = AsyncMock(
+            side_effect=[
+                [existing],
+                [existing, added],
+                [existing],
+                [existing, added],
+            ]
+        )
+        coordinator = AlertBulletinCoordinator(
+            service,  # type: ignore[arg-type]
+            ['GB'],
+        )
+
+        await coordinator._refresh('GB', generation=0)
+        await coordinator._refresh('GB', generation=0)
+        self.assertTrue(coordinator.recent_alerts_snapshot()[0].is_new)
+
+        await coordinator._refresh('GB', generation=0)
+        await coordinator._refresh('GB', generation=0)
+
+        rows = coordinator.recent_alerts_snapshot()
+        self.assertEqual([row.alert.id for row in rows], ['added'])
+        self.assertFalse(rows[0].is_new)
+
     async def test_latest_discovery_replaces_previous_country_new_badges(
         self,
     ) -> None:

@@ -1115,6 +1115,7 @@ class DashboardScreen(Screen[None]):
         self._alert_place_weather_task: asyncio.Task[None] | None = None
         self._alert_place_weather_label: CountryAlertCityLabel | None = None
         self._bulletin_generation = -1
+        self._flashed_new_alert_identities: set[tuple[str, str]] = set()
         self._alert_return_focus: str | None = None
         self._time_refresh_timer = None
 
@@ -1385,13 +1386,23 @@ class DashboardScreen(Screen[None]):
             and generation > self._bulletin_generation
             and self.app.screen is self
         )
+        unflashed_rows = tuple(
+            row
+            for row in rows
+            if row.is_new
+            and country_alert_identity(row.alert)
+            not in self._flashed_new_alert_identities
+        )
+        self._flashed_new_alert_identities.update(
+            country_alert_identity(row.alert) for row in rows if row.is_new
+        )
         self._bulletin_generation = generation
         self.alerts_panel.update_alerts(rows)
         self.world_map.set_selected_alert(
             self.alerts_panel.selected_row,
         )
-        if arrived_while_open and any(row.is_new for row in rows):
-            self.world_map.flash_new_alerts(rows)
+        if arrived_while_open and unflashed_rows:
+            self.world_map.flash_new_alerts(unflashed_rows)
         self.alert_detail_panel.show_alert(self.alerts_panel.selected_row)
 
     def on_dashboard_alerts_panel_selected(

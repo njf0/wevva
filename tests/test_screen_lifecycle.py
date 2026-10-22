@@ -79,6 +79,7 @@ class ScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             initial_location=BERLIN,
             saved_locations=[LONDON, NEW_YORK],
             emoji_enabled=False,
+            start_on_dashboard=False,
         )
         app.action_refresh = AsyncMock()
         app.country_alerts_service = service  # type: ignore[assignment]
