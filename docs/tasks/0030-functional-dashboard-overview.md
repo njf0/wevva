@@ -210,9 +210,11 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   Store its identities with empty visible and new sets. Only alerts first seen
   on a later successful refresh of that same catalogue enter the bulletin and
   qualify as `NEW`. Once admitted, they remain visible while present in later
-  successful catalogues, although their `NEW` state clears on the next
-  successful refresh. This prevents an initially discovered provider feed
-  from dumping all of its existing warnings into the bulletin.
+  successful catalogues, although their `NEW` state clears on their next
+  successful refresh or when a newer non-empty discovery arrives elsewhere.
+  Only that latest discovered set retains badges. This prevents an initially
+  discovered provider feed from dumping all of its existing warnings into the
+  bulletin.
 - Distinguish “no successful baseline yet” from “the successful baseline was
   empty.” If the first successful fetch legitimately contains no alerts, a
   warning appearing on the next successful lap is new. Failed or cancelled
@@ -230,9 +232,11 @@ The Dashboard is a fully functional overview at suitable terminal sizes:
   successful live refresh establishes a hidden baseline, and only later
   additions enter the bulletin.
 - Add an immutable `is_new` value to each derived `BulletinAlert`. It reflects
-  the latest successful catalogue refresh for the attributed country and is
-  replaced/cleared by that country's next successful refresh. It is not a
-  durable unread system and does not add acknowledgement persistence.
+  the latest non-empty bulletin discovery and is replaced globally when a
+  newer set arrives, or cleared by that country's next successful refresh. A
+  no-change refresh elsewhere does not make the badge disappear immediately.
+  It is not a durable unread system and does not add acknowledgement
+  persistence.
 - Prefix newly fetched feed rows with the Alerts Centre's dark-background-text
   on primary-colour `NEW` badge, without applying that background to the
   remaining condition, country, or time text.
@@ -448,7 +452,9 @@ deriving immutable `BulletinAlert.is_new` rows after country attribution. An
 uncached first success always establishes a hidden baseline with empty visible
 and new sets; a successfully empty catalogue still establishes that baseline,
 failed refreshes retain the prior successful snapshot, and the next unchanged
-success clears former `NEW` state without removing still-active admitted rows.
+success clears that country's former `NEW` state without removing still-active
+admitted rows. A non-empty discovery also clears older badges from every other
+catalogue before marking only its newly arrived identities.
 Cross-country duplicates now
 prefer an explicitly named additional territory, then the warning source's
 primary country, before the existing observation-time/code fallback. Dashboard
@@ -545,7 +551,8 @@ not justify another breakpoint, tab abstraction, or provider-specific branch.
 - Ordinary US shared-feed alerts are labelled United States, while explicitly
   territory-matched alerts retain the correct territory.
 - Only identities introduced between a catalogue's last two successful
-  snapshots show the primary-colour `NEW` badge. An uncached first successful
+  snapshots show the primary-colour `NEW` badge, and a later non-empty
+  discovery replaces all earlier badges. An uncached first successful
   fetch establishes a hidden baseline and contributes no rows. Only
   still-fresh startup catalogues may act as comparison baselines, and they too
   remain hidden. Older retained catalogues remain hidden, their first live
@@ -590,8 +597,9 @@ and pulse cadence must not be claimed from deterministic tests alone.
 - `NEW` means found by comparison with the previous successful country
   snapshot, not unread by the user and not necessarily newly issued by the
   provider. More precisely, it means absent from that catalogue's last
-  successful baseline and present in its latest successful refresh. Initial
-  uncached population is neither `NEW` nor visible bulletin content.
+  successful baseline, present in its latest successful refresh, and part of
+  the bulletin's most recent non-empty discovery set. Initial uncached
+  population is neither `NEW` nor visible bulletin content.
 - Separator lines and stage hatch replace nested rounded boxes. Major outer
   regions may retain their existing frame titles where they aid orientation.
 - The implementation target is the useful 95 percent with direct reuse and

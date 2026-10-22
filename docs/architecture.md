@@ -342,11 +342,14 @@ present in its latest country snapshots. An uncached or stale-startup
 catalogue's first successful result establishes its bulletin baseline and marks
 no identities new, including when that result is empty. It also publishes no
 rows: only identities added by a later successful refresh enter the bulletin.
-Published identities remain visible while still present, while `NEW` clears on
-their country's next successful refresh. A fresh hydrated catalogue is already
-a baseline but publishes no startup rows. Later successful snapshots carry
-only refresh-scoped additions; failed or cancelled work does not advance the
-baseline, and persisted `NEW` presentation state is never hydrated.
+Published identities remain visible while still present. `NEW` clears on an
+identity's own next successful refresh or as soon as a later non-empty
+discovery arrives from another catalogue, so only the latest discovered set is
+badged. Successful no-change work elsewhere does not erase that set. A fresh
+hydrated catalogue is already a baseline but publishes no startup rows. Later
+successful snapshots carry only refresh-scoped additions; failed or cancelled
+work does not advance the baseline, and persisted `NEW` presentation state is
+never hydrated.
 
 The Dashboard alert rail consumes those immutable snapshots without owning a
 loader. The coordinator combines complete country catalogues with the persisted

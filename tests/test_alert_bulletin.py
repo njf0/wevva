@@ -168,6 +168,79 @@ class AlertBulletinCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(coordinator.recent_alerts_snapshot()[0].is_new)
 
+    async def test_latest_discovery_replaces_previous_country_new_badges(
+        self,
+    ) -> None:
+        gb_existing = Alert(
+            id='gb-existing',
+            source='test',
+            event='Rain',
+            headline='Rain',
+        )
+        gb_new = Alert(
+            id='gb-new',
+            source='test',
+            event='Wind',
+            headline='Wind',
+        )
+        fr_existing = Alert(
+            id='fr-existing',
+            source='test',
+            event='Snow',
+            headline='Snow',
+        )
+        fr_new = Alert(
+            id='fr-new',
+            source='test',
+            event='Flood',
+            headline='Flood',
+        )
+        service = _Service()
+        service.refresh_alerts = AsyncMock(
+            side_effect=[
+                [gb_existing],
+                [gb_existing, gb_new],
+                [fr_existing],
+                [fr_existing, fr_new],
+            ]
+        )
+        coordinator = AlertBulletinCoordinator(
+            service,  # type: ignore[arg-type]
+            ['GB', 'FR'],
+        )
+
+        await coordinator._refresh('GB', generation=0)
+        await coordinator._refresh('GB', generation=0)
+        self.assertEqual(
+            {
+                row.alert.id
+                for row in coordinator.recent_alerts_snapshot()
+                if row.is_new
+            },
+            {'gb-new'},
+        )
+
+        await coordinator._refresh('FR', generation=0)
+        self.assertEqual(
+            {
+                row.alert.id
+                for row in coordinator.recent_alerts_snapshot()
+                if row.is_new
+            },
+            {'gb-new'},
+        )
+
+        await coordinator._refresh('FR', generation=0)
+        rows = coordinator.recent_alerts_snapshot()
+        self.assertEqual(
+            {row.alert.id for row in rows if row.is_new},
+            {'fr-new'},
+        )
+        self.assertEqual(
+            {row.alert.id for row in rows},
+            {'gb-new', 'fr-new'},
+        )
+
     async def test_recent_rows_deduplicate_and_use_earliest_country_observation(self) -> None:
         now = datetime(2030, 1, 1, 12, tzinfo=UTC)
         shared_gb = Alert(

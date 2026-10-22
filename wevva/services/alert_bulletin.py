@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import random
 import time
@@ -425,6 +425,8 @@ class AlertBulletinCoordinator:
             visible_identities = (
                 previous.visible_alert_identities & current_identities
             ) | new_identities
+        if new_identities:
+            self._clear_previous_new_alerts()
         self._catalogues[key] = BulletinCatalogue(
             country_code,
             key[1],
@@ -435,6 +437,16 @@ class AlertBulletinCoordinator:
         )
         self._generation += 1
         self._notify_update()
+
+    def _clear_previous_new_alerts(self) -> None:
+        """Keep `NEW` attached only to the latest non-empty discovery."""
+
+        for key, catalogue in tuple(self._catalogues.items()):
+            if catalogue.new_alert_identities:
+                self._catalogues[key] = replace(
+                    catalogue,
+                    new_alert_identities=frozenset(),
+                )
 
     def _notify_update(self) -> None:
         if self._on_update is not None:
