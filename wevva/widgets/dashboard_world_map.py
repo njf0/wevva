@@ -369,13 +369,12 @@ class DashboardWorldMap(WorldLocationsMap):
         self._schedule_reflow()
 
     def set_selected_location(self, location: LocationMetadata | None) -> None:
-        """Apply persistent dashboard selection and placement priority."""
+        """Apply persistent dashboard selection without moving callouts."""
 
         self._selected_location_key = (
             location_key(location) if location is not None else None
         )
         self._apply_label_state()
-        self._schedule_reflow()
 
     def set_tropical_loading(self) -> None:
         """Retain current geography while the lower detail pane owns status."""
@@ -599,11 +598,9 @@ class DashboardWorldMap(WorldLocationsMap):
         def priority(item: tuple[int, LocationMetadata]) -> tuple[int, int]:
             index, location = item
             key = location_key(location)
-            if key == self._selected_location_key:
-                return 0, index
             if key == self._active_location_key:
-                return 1, index
-            return 2, index
+                return 0, index
+            return 1, index
 
         return [location for _, location in sorted(indexed, key=priority)]
 
@@ -624,7 +621,6 @@ class DashboardWorldMap(WorldLocationsMap):
                 for candidate in location_candidates
             ]
         by_key = {candidate.key: candidate for candidate in location_candidates}
-        selected_location = by_key.pop(self._selected_location_key, None)
         active_location = by_key.pop(self._active_location_key, None)
 
         tropical_candidates: list[DirectionalCalloutCandidate[str]] = []
@@ -660,11 +656,9 @@ class DashboardWorldMap(WorldLocationsMap):
         ordered: list[DirectionalCalloutCandidate[str]] = []
         if selected_tropical is not None:
             ordered.append(selected_tropical)
-        if selected_location is not None:
-            ordered.append(selected_location)
-        ordered.extend(tropical_candidates)
         if active_location is not None:
             ordered.append(active_location)
+        ordered.extend(tropical_candidates)
         ordered.extend(by_key.values())
         return ordered
 

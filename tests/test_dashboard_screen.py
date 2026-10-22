@@ -723,6 +723,36 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(app.screen, weather)
             self.assertEqual(app.location, BERLIN)
 
+    async def test_place_selection_preserves_callout_direction_and_layout(self) -> None:
+        app = self._app()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+
+            dashboard = app.screen
+            self.assertIsInstance(dashboard, DashboardScreen)
+            tokyo = next(
+                label
+                for label in dashboard.world_map.query(DashboardLocationLabel)
+                if label.location.name == 'Tokyo'
+            )
+            self.assertTrue(tokyo.label_text.endswith(' •'))
+            placements_before = dashboard.world_map.placements
+
+            tokyo.action_select_location()
+            await _settle(pilot)
+
+            self.assertTrue(tokyo.has_class('selected-place'))
+            self.assertTrue(tokyo.label_text.endswith(' •'))
+            self.assertEqual(dashboard.world_map.placements, placements_before)
+            self.assertTrue(
+                all(
+                    label.display
+                    for label in dashboard.world_map.query(DashboardLocationLabel)
+                )
+            )
+
     async def test_saved_weather_location_is_selected_when_dashboard_opens(self) -> None:
         app = self._app()
         app.location = LONDON
