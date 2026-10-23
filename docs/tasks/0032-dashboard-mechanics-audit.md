@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-E complete
+Complete — Slices A-F complete
 
 ## Context
 
@@ -848,3 +848,120 @@ cross-screen lifecycle test, and the final one-warm-up/three-sample Dashboard
 matrix pass. `compileall` and `git diff --check` also pass. No live provider,
 interactive terminal, colour, font, emoji, Braille-glyph, or manual mouse check
 was performed.
+
+### Slice F — cross-screen lifecycle and consolidation
+
+Slice F exercised the Dashboard as the installed overview rather than another
+transient screen. A mounted lifecycle regression now starts on Dashboard,
+selects a location whose fifteen-minute forecast entry is expired, suspends the
+Dashboard while both forecast and point-warning requests are pending, completes
+them while Weather is current, and resumes the same Dashboard. It then expires
+the point-warning result, verifies one replacement request, repeats Tropical
+Systems and Alerts Centre round trips, and checks final ownership.
+
+The resulting lifecycle is intentional and bounded:
+
+- there is one installed Dashboard and one installed Alerts Centre, while each
+  Tropical Systems screen is transient and collectible;
+- Dashboard resume retains the same timer and restores the committed London
+  map label as focus;
+- pending forecast and point-warning work may complete into the still-mounted,
+  suspended Dashboard, and its valid application forecast snapshot is reused
+  on return;
+- expired point-warning state starts one new request rather than accumulating
+  waiters;
+- completed cycles leave no forecast, point-warning, canonical-system,
+  tropical-product, stale-selection, or settlement-preview waiter; and
+- the incoming-alert marker pool and current-`NEW` identity snapshot remain
+  bounded by their current presentation, as established in Slice E.
+
+The final-teardown exercise found one real lifecycle omission. The application
+owns several coalesced tasks precisely so they can outlive a suspended or
+transient caller, but final `Wevva.on_unmount()` stopped only the bulletin.
+Final unmount now also cancels and clears saved-summary, active-warning,
+Dashboard forecast, canonical-system, tropical-product, and settlement-preview
+task handles. A deterministic regression holds the latter four provider calls
+open simultaneously and verifies that all waiters are cancelled and all
+application handles are empty after the Textual application exits. This does
+not shorten screen suspension semantics, clear valid result caches, or add a
+new task manager.
+
+#### Final structural comparison
+
+The final one-warm-up/three-sample Dashboard matrix used the same CPython
+3.13.0, Textual 8.0.0, macOS x86_64 fixture as Slice A. The repeatable work
+counts, rather than elapsed times, are the audit result:
+
+| Scenario | Slice A | Final |
+|---|---|---|
+| cold entry | two snapshot applications, four hourly rebuilds | one snapshot application, one hourly rebuild |
+| cached resume | snapshot/hourly, bulletin list/detail, label sync and world reflow | snapshot reconciliation only; no table, bulletin, label, geometry, document, or reflow work |
+| uncached forecast completion | two snapshots, three hourly rebuilds, one world reflow | one snapshot, one hourly rebuild, no world reflow |
+| three summary deliveries | one forecast/hourly reapply and one world reflow | no counted expensive boundary |
+| unchanged selected bulletin | list, detail, and alert-geometry rebuild | no counted work |
+| five Weather/Dashboard cycles | five snapshot/hourly applications, label syncs and world reflows | five identity-reconciled snapshot calls only; no table or map work |
+| four-size resize burst | six daily and two hourly rebuilds, four world reflows | four daily and two hourly rebuilds, four required world reflows |
+
+The added scenarios also finish with zero work for fresh storm reselection and
+cached settlement preview. A real product-tab change performs one product
+render; a selected alert content change performs one list, detail, document,
+and geometry update; and relative-time or `NEW`-badge changes update only the
+list. Those are the intended invalidation boundaries.
+
+Indicative final medians were 2,607 ms for cold entry, 505 ms for cached
+resume, 176 ms for uncached completion, 54 ms for three summary deliveries,
+71 ms for an unchanged bulletin, 4,352 ms for the resize burst, and 3,599 ms
+for five Dashboard/Weather cycles. Several are slower and considerably noisier
+than the Slice A observations despite the lower work counts, so the audit makes
+no broad latency claim from them.
+
+#### Slice F negative findings and deferred decisions
+
+1. Reviewing all six slices found no pair of remaining screen coordinators
+   with the same lifecycle ownership. A generic request manager, pane
+   controller, cache framework, or screen superclass would add machinery
+   without deleting the forecast, warning, storm, and bulletin invalidation
+   rules.
+2. Continuing application-owned work while Dashboard or Alerts Centre is
+   suspended is useful coalescing, not a leak. Cancellation belongs at obsolete
+   selection, transient-screen teardown where applicable, and final app
+   teardown—not every workspace transition.
+3. No timer, focus, installed-screen, cache, marker-pool, or current-identity
+   growth was found after the bounded fixes in Slices B-E. The one-second clock
+   timer still crosses no forecast, map, or provider boundary.
+4. Dashboard and specialist screens already share data caches, maps, weather
+   widgets, track widgets, and pure renderers at the useful boundaries. Their
+   remaining orchestration is different enough that further extraction would
+   obscure rather than reduce ownership.
+5. Tropical viewport/context-floor behavior remains solely Task 0031's scope.
+   The complete suite reproducibly retains four pre-existing failures there:
+   three scopes use a 13.2° minimum where their pending tests expect at least
+   14.39°, and the current JMA frame omits Tokyo. No framing code was changed.
+
+#### Slice F accounting and verification
+
+- Production: `+23/-1` lines in `wevva/app.py` for final session-task teardown.
+- Tests: `+195/-2` lines in `tests/test_screen_lifecycle.py` for the pending,
+  expired, repeated-navigation, focus, collection, and final-teardown matrix.
+- Audit tooling: `+0/-0` lines; the Slice A harness already contained the final
+  Dashboard/Weather, Dashboard/Tropical, and Dashboard/Alerts scenarios.
+- Architecture: `+3/-1` lines clarifying suspension versus final-unmount task
+  ownership.
+- Dependencies, public API, cache keys and TTLs, provider behavior, responsive
+  budgets, visual interaction, and Task 0031 framing: unchanged.
+
+The focused 108-test Dashboard/alert/tropical/cache/lifecycle set passes, as do
+all four lifecycle tests, the final one-warm-up/three-sample Dashboard matrix,
+`compileall`, and `git diff --check`. The required complete discovery run
+executed 403 tests: 398 passed and five initially failed. The search debounce
+failure passed alone and is consistent with the heavily loaded asyncio debug
+run; the four deterministic failures reproduce alone and belong to planned,
+deferred Task 0031 as described above. No live provider, interactive terminal,
+colour, font, emoji, Braille-glyph, or manual mouse check was performed.
+
+Across Slices B-F, the production paths changed by `+368/-120` lines; focused
+regressions changed by `+634/-38`; the checkout-only benchmark changed by
+`+668/-12`; and architecture changed by `+21/-8`, measured against the Slice A
+starting commit. The larger test and audit-tool additions are deterministic
+evidence around the existing feature, not runtime framework. Task 0032 is
+complete; the remaining known map-framing work stays isolated in Task 0031.

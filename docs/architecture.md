@@ -45,7 +45,9 @@ equivalent.
 `Wevva` owns session state: the selected `LocationMetadata`, unit/theme
 settings, saved locations, refresh generations, short-lived forecast/warning
 caches, the reusable Alerts Centre/service, the installed Dashboard, and
-background task handles.
+background task handles. Screen suspension may leave application-owned,
+coalesced work running so another surface can join it, but final application
+unmount cancels all remaining session tasks and clears their handles.
 Complete forecast results, including air
 quality, are cached for fifteen minutes by requested coordinates and display
 units; the explicit `r` refresh bypasses that cache.

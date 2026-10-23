@@ -277,9 +277,31 @@ class Wevva(App, inherit_bindings=False):
             self.push_screen(SearchScreen())
 
     def on_unmount(self) -> None:
-        """Stop session-only bulletin work with the Textual application."""
+        """Stop session-only background work with the Textual application."""
 
         self.alert_bulletin.stop()
+        self._cancel_alerts_task()
+        self._saved_weather_generation += 1
+        for task in self._saved_weather_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._saved_weather_tasks.clear()
+        for task in self._dashboard_forecast_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._dashboard_forecast_tasks.clear()
+        if self._tropical_system_fetch_task is not None:
+            if not self._tropical_system_fetch_task.done():
+                self._tropical_system_fetch_task.cancel()
+            self._tropical_system_fetch_task = None
+        for task in self._tropical_product_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._tropical_product_tasks.clear()
+        for task in self._alert_place_weather_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._alert_place_weather_tasks.clear()
 
     # ------------------------------------------------------------
     # Actions / key bindings
