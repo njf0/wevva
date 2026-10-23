@@ -382,12 +382,6 @@ class DashboardWorldMap(WorldLocationsMap):
         self._selected_location_key = key
         self._apply_label_state()
 
-    def set_tropical_loading(self) -> None:
-        """Retain current geography while the lower detail pane owns status."""
-
-    def set_tropical_error(self) -> None:
-        """Retain current geography while the lower detail pane owns status."""
-
     def set_tropical_systems(
         self,
         systems: Sequence[CanonicalTropicalSystem],

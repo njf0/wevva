@@ -798,6 +798,7 @@ class DashboardTropicalPanel(Container):
         self._products: tuple[TropicalProduct, ...] = ()
         self._product_indices: dict[str, int] = {}
         self._updating_tabs = False
+        self._overview_state: tuple[str, bool] | None = None
 
     @property
     def track(self) -> LargeTropicalStormTrackScope:
@@ -822,11 +823,20 @@ class DashboardTropicalPanel(Container):
             message = self._SELECTION_PROMPT
         else:
             message = 'No active tropical systems.'
+        state = message, systems is None
+        if state == self._overview_state:
+            return
+        self._overview_state = state
         self._show_state(message)
         self.set_loading(systems is None)
 
     def show_error(self) -> None:
-        self._show_state('Tropical systems are temporarily unavailable.')
+        message = 'Tropical systems are temporarily unavailable.'
+        state = message, False
+        if state == self._overview_state:
+            return
+        self._overview_state = state
+        self._show_state(message)
         self.set_loading(False)
 
     def set_loading(self, loading: bool) -> None:
@@ -845,6 +855,7 @@ class DashboardTropicalPanel(Container):
         if system is None or observation is None:
             self.show_overview(())
             return
+        self._overview_state = None
         self.set_loading(False)
         classification = (observation.classification or '').strip()
         name = (system.name or observation.name or '').strip()
@@ -1738,7 +1749,6 @@ class DashboardScreen(Screen[None]):
             if self._selected_tropical_observation is None:
                 self.tropical_panel.show_overview(snapshot)
             return
-        self.world_map.set_tropical_loading()
         if self._selected_tropical_observation is None:
             self.tropical_panel.show_overview(None)
         if self._tropical_wait_task is None or self._tropical_wait_task.done():
@@ -1753,7 +1763,6 @@ class DashboardScreen(Screen[None]):
             raise
         except Exception:
             if self.is_mounted:
-                self.world_map.set_tropical_error()
                 if self._selected_tropical_observation is None:
                     self.tropical_panel.show_error()
         else:

@@ -1260,6 +1260,63 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
+    async def test_uncached_tropical_discovery_uses_detail_panel_status(self) -> None:
+        app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma',
+            'jma_tropical',
+            'NANGKA',
+            classification='Typhoon',
+            latitude=28.0,
+            longitude=135.0,
+        )
+        system = CanonicalTropicalSystem('NANGKA', [observation])
+        app._tropical_system_cache = None
+        discovery_started = asyncio.Event()
+        release_discovery = asyncio.Event()
+
+        async def load_systems():
+            discovery_started.set()
+            await release_discovery.wait()
+            return [system]
+
+        app.load_tropical_systems = AsyncMock(side_effect=load_systems)
+
+        async with app.run_test(size=(180, 45)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await discovery_started.wait()
+            dashboard = app.screen
+            tropical_content = dashboard.query_one(
+                '#dashboard-tropical-content',
+                Container,
+            )
+            self.assertTrue(tropical_content.loading)
+            self.assertEqual(
+                list(dashboard.world_map.query(DashboardTropicalLabel)),
+                [],
+            )
+
+            release_discovery.set()
+            await _settle(pilot, cycles=6)
+
+            self.assertFalse(tropical_content.loading)
+            self.assertEqual(
+                [
+                    label.system.name
+                    for label in dashboard.world_map.query(DashboardTropicalLabel)
+                ],
+                ['NANGKA'],
+            )
+            self.assertIn(
+                'Select a tropical system',
+                dashboard.query_one(
+                    '#dashboard-tropical-detail-state',
+                    Static,
+                ).render().plain,
+            )
+            app.load_tropical_systems.assert_awaited_once_with()
+
     async def test_selected_place_loads_preview_without_becoming_active(self) -> None:
         app = self._app()
         app._forecast_cache.pop(app._forecast_cache_key_for(LONDON))
@@ -1600,6 +1657,73 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(refreshed_label.observation, fresh)
                 tropical_lookup.assert_awaited_once_with()
 
+    async def test_failed_stale_storm_refresh_keeps_existing_detail(self) -> None:
+        app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma',
+            'jma_tropical',
+            'NANGKA',
+            classification='Typhoon',
+            latitude=20.0,
+            longitude=130.0,
+        )
+        system = CanonicalTropicalSystem('NANGKA', [observation])
+        now = [1_000.0]
+        app._tropical_system_cache_clock = lambda: now[0]
+        app._tropical_system_cache = (now[0], (system,))
+        app.load_tropical_products = AsyncMock(
+            return_value=[
+                TropicalProduct(
+                    kind='advisory',
+                    label='Public Advisory',
+                    content='Existing product',
+                )
+            ]
+        )
+
+        async with app.run_test(size=(180, 45)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            label = dashboard.world_map.query_one(DashboardTropicalLabel)
+
+            label.action_activate()
+            await _settle(pilot, cycles=8)
+            self.assertIs(dashboard.tropical_panel._observation, observation)
+
+            now[0] += app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
+            app.load_tropical_systems = AsyncMock(
+                side_effect=RuntimeError('provider unavailable')
+            )
+            label.action_activate()
+            await _settle(pilot, cycles=8)
+
+            self.assertFalse(dashboard.tropical_panel.loading)
+            self.assertFalse(
+                dashboard.query_one(
+                    '#dashboard-tropical-content',
+                    Container,
+                ).loading
+            )
+            self.assertIs(dashboard.tropical_panel._observation, observation)
+            self.assertEqual(
+                dashboard.tropical_panel.border_title,
+                'Typhoon NANGKA',
+            )
+            self.assertEqual(
+                [
+                    tab.label.plain
+                    for tab in dashboard.tropical_panel.tabs.query('Tab')
+                ],
+                ['Track and Cone', 'Public Advisory'],
+            )
+            self.assertEqual(
+                dashboard.world_map.selected_tropical_key,
+                label.tropical_key,
+            )
+            app.load_tropical_systems.assert_awaited_once_with()
+
     async def test_weather_key_returns_without_refresh_and_preserves_selection(self) -> None:
         app = self._app()
         async with app.run_test(size=(100, 30)) as pilot:
@@ -1629,7 +1753,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 dashboard.world_map,
                 '_reflow',
                 wraps=dashboard.world_map._reflow,
-            ) as reflow:
+            ) as reflow, patch.object(
+                dashboard.tropical_panel,
+                '_show_state',
+                wraps=dashboard.tropical_panel._show_state,
+            ) as show_tropical_state:
                 await pilot.press('w')
                 await _settle(pilot)
                 self.assertIs(app.screen, weather)
@@ -1641,6 +1769,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(update_hourly.call_count, 0)
                 sync_labels.assert_not_called()
                 reflow.assert_not_called()
+                show_tropical_state.assert_not_called()
             self.assertIs(app.screen, dashboard)
             self.assertEqual(dashboard.world_map.selected_location_key, location_key(TOKYO))
 

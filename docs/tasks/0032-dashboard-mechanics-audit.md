@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-C complete
+In progress — Slices A-D complete
 
 ## Context
 
@@ -664,3 +664,82 @@ Five focused mounted regressions, all nine shared world-map tests, and the
 final three-sample Dashboard matrix pass. `compileall` and `git diff --check`
 also pass. No live provider, interactive terminal, colour, font, emoji, or
 manual mouse check was performed.
+
+### Slice D — tropical detail and workspace integration
+
+Slice D retained the intentionally different screen coordinators. `Wevva`
+continues to own the canonical-system and issued-observation product caches;
+the Dashboard and Tropical Systems workspace continue to share
+`LargeTropicalStormTrackScope`, product-tab specifications, forecast summary,
+and product widget construction. Their remaining selection and loading state
+has different ownership and refresh behavior, so moving it behind a common
+controller would add indirection without deleting either lifecycle.
+
+Two bounded production changes were supported by the audit:
+
+- The empty `DashboardWorldMap.set_tropical_loading()` and
+  `set_tropical_error()` hooks and their callers were deleted. Discovery and
+  errors are owned visibly by the lower tropical detail panel; the world map
+  retains its existing geography while work is pending.
+- `DashboardTropicalPanel` now remembers its last overview/error state and
+  skips an identical state application. Warm Dashboard resume no longer
+  rebuilds the unchanged prompt. Entering a selected system explicitly leaves
+  that overview state, so real selection and later empty/error states still
+  render normally.
+
+The audit harness now distinguishes application-cache hits from calls through
+the application loader and counts overview-state and product-body rendering.
+It adds fresh reselection, product-tab change, and Dashboard/Tropical workspace
+round-trip scenarios. The comparable pass used the same CPython 3.13.0,
+Textual 8.0.0, macOS x86_64 environment as the earlier slices, with one
+discarded warm-up and three samples:
+
+| Tropical scenario | Local time | Structural result |
+|---|---:|---|
+| initial storm/product selection | 420 [381–460] ms | one provider product request, one system application, two track updates, one selection-state application and one world reflow |
+| fresh cached reselection | 26 [26–57] ms | no counted work |
+| product-tab change | 131 [112–160] ms | exactly one product render |
+| Dashboard/Tropical round trip | 959 [926–1,178] ms | no provider product request; two track updates plus ordinary Dashboard resume reconciliation |
+
+The two initial and round-trip track updates are required source-first and
+cached-product-enriched presentations, not duplicate provider or geometry
+work. The round trip reuses the exact app-owned issued-observation product
+entry. The existing resize matrix likewise retains its stable widget tree,
+active source/product tabs, and cached responses across compact and split
+topologies without new provider calls.
+
+Mounted regressions now cover cold discovery status, exact source/product
+selection, fresh reselection, rapid replacement, successful stale refresh,
+failed stale refresh, and warm Dashboard return. A failed stale refresh leaves
+the prior reader, title, tabs, map selection, and products visible and clears
+both loading indicators. Focused specialist checks cover lazy application
+product caching, retained source/product selection, native discovery/product
+loading states, responsive topology changes, and in-place refresh.
+
+#### Slice D negative findings and accounting
+
+1. No additional obsolete tropical path was found after removing the two
+   empty overlay hooks.
+2. Fresh reselection already uses zero new tasks, cache reads that reach a
+   provider, tab rebuilds, or map work; its existing identity guard should be
+   retained.
+3. Source-first then product-enriched track rendering is useful feedback while
+   lazy products load and does not issue duplicate provider work.
+4. Sharing screen-level selection, loading, or task state would combine unlike
+   lifecycles. The existing shared track widget and pure product helpers remain
+   the smaller integration boundary.
+
+- Production: `+12/-9` lines across the Dashboard panel/coordinator and world
+  map. No application cache or specialist-screen production code changed.
+- Tests: `+130/-1` lines in mounted Dashboard regressions, including discovery
+  and failed stale-refresh coverage plus the unchanged-return assertion.
+- Audit tooling: `+68/-2` lines for cache-aware fixture loading, three focused
+  scenarios, and two presentation counters.
+- Dependencies, public API, cache TTL/key semantics, cancellation and stale-
+  result guards, visual interaction, and provider behavior: unchanged.
+- Task 0031 viewport projection and framing: untouched.
+
+Six focused Dashboard regressions, seven specialist workspace/cache/layout
+checks, the one-warm-up/three-sample Dashboard matrix, `compileall`, and
+`git diff --check` pass. No live provider, interactive terminal, colour, font,
+emoji, Braille-glyph, or manual mouse check was performed.

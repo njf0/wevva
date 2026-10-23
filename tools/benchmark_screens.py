@@ -1058,6 +1058,10 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
     update = weather_update(with_warnings=False)
     forecast_gate: asyncio.Event | None = None
     forecast_started = asyncio.Event()
+    product_cache: dict[
+        tuple[str, str, str],
+        tuple[TropicalProduct, ...],
+    ] = {}
 
     async def fetch_forecast(**_kwargs: Any):
         nonlocal forecast_gate
@@ -1074,8 +1078,14 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
         return []
 
     async def load_products(system: TropicalSystem) -> list[TropicalProduct]:
-        counters['provider.tropical_products'] += 1
-        return _tropical_products(system)
+        issued = system.issued_at.isoformat() if system.issued_at else ''
+        key = system.source, system.id, issued
+        products = product_cache.get(key)
+        if products is None:
+            counters['provider.tropical_products'] += 1
+            products = tuple(_tropical_products(system))
+            product_cache[key] = products
+        return list(products)
 
     app = Wevva(
         initial_location=BERLIN,
@@ -1087,6 +1097,9 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
     app.controller.fetch = AsyncMock(side_effect=fetch_forecast)
     app.load_dashboard_alerts = AsyncMock(side_effect=load_location_alerts)
     app.load_tropical_products = AsyncMock(side_effect=load_products)
+    app.load_tropical_centre_weather = AsyncMock(
+        side_effect=_tropical_centre_weather,
+    )
     app._tropical_system_cache = (time.monotonic(), tuple(systems))
     for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
         app._saved_location_weather_summaries[location_key(location)] = (
@@ -1121,6 +1134,16 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
             'bulletin.alert_map_rebuild',
         ),
         (DashboardTropicalPanel, 'show_system', 'tropical.system_apply'),
+        (
+            DashboardTropicalPanel,
+            '_show_state',
+            'tropical.overview_state_apply',
+        ),
+        (
+            DashboardTropicalPanel,
+            '_show_product',
+            'tropical.product_render',
+        ),
         (
             tropical_track.LargeTropicalStormTrackScope,
             'update_system',
@@ -1275,6 +1298,49 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
                 tropical_selection,
                 counters=counters,
             )
+
+            async def tropical_cached_reselection() -> None:
+                tropical_label.action_activate()
+                await _settle(pilot, 3)
+
+            await recorder.measure(
+                'dashboard.tropical_cached_reselection',
+                tropical_cached_reselection,
+                counters=counters,
+            )
+
+            product_tab = next(
+                tab
+                for tab in dashboard.tropical_panel.tabs.query('Tab')
+                if tab.id != 'dashboard-tropical-track-tab'
+            )
+
+            async def tropical_product_tab() -> None:
+                dashboard.tropical_panel.tabs.active = product_tab.id
+                await _settle(pilot, 3)
+
+            await recorder.measure(
+                'dashboard.tropical_product_tab',
+                tropical_product_tab,
+                counters=counters,
+            )
+
+            async def tropical_workspace_roundtrip() -> None:
+                await app.open_tropical_systems_screen(
+                    system=tropical_label.system,
+                    observation=tropical_label.observation,
+                )
+                await _settle(pilot, 6)
+                assert isinstance(app.screen, TropicalSystemsScreen)
+                await app.pop_screen()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.tropical_workspace_roundtrip',
+                tropical_workspace_roundtrip,
+                counters=counters,
+            )
+            assert app.screen is dashboard
 
             bulletin_alert = _alert(
                 'dashboard-flood',
