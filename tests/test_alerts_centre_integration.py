@@ -11,6 +11,7 @@ from textual.widgets import Input, Select
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
 from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
+from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.country_alerts_map import CountryAlertCityLabel
 
@@ -26,7 +27,7 @@ BERLIN = LocationMetadata(
 
 class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def _app(self) -> Wevva:
-        app = Wevva(initial_location=BERLIN, start_on_dashboard=False)
+        app = Wevva(initial_location=BERLIN, start_on_dashboard=True)
         app.action_refresh = AsyncMock()
         app.country_alerts_service.get_alerts = AsyncMock(return_value=[])
         app.country_alerts_service.get_cached_alerts = AsyncMock(
@@ -40,15 +41,17 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 'current_units': {'temperature_2m': '°C'},
             }
         )
+        app.load_dashboard_forecast = AsyncMock(return_value=None)
+        app.load_dashboard_alerts = AsyncMock(return_value=[])
         return app
 
-    async def test_g_resumes_installed_workspace_and_w_returns_to_weather(self) -> None:
+    async def test_g_resumes_installed_workspace_and_b_returns_to_dashboard(self) -> None:
         app = self._app()
 
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
-            weather_screen = app.screen
-            self.assertIsInstance(weather_screen, WeatherScreen)
+            dashboard_screen = app.screen
+            self.assertIsInstance(dashboard_screen, DashboardScreen)
 
             await pilot.press('g')
             for _ in range(3):
@@ -65,9 +68,9 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(refresh_call.args, ('DE',))
             self.assertEqual(refresh_call.kwargs['warning_language'], 'auto')
 
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
-            self.assertIs(app.screen, weather_screen)
+            self.assertIs(app.screen, dashboard_screen)
             self.assertTrue(alerts_screen.is_mounted)
             filter_button = alerts_screen.alert_filter_button
 
@@ -156,6 +159,8 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.location.longitude, label.place.longitude)
             self.assertEqual(app.action_refresh.await_count, refresh_count + 1)
 
+            await pilot.press('b')
+            await pilot.pause()
             await pilot.press('g')
             for _ in range(2):
                 await pilot.pause()
@@ -165,6 +170,7 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_late_provider_progress_does_not_block_reopening_workspace(self) -> None:
         class LingeringProgressService:
             last_country_code: str | None = None
+            ttl_seconds = 15 * 60
 
             def __init__(self) -> None:
                 self.calls = 0
@@ -203,9 +209,9 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             alerts_screen = app.screen
             self.assertIsInstance(alerts_screen, AlertsCentreScreen)
 
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
-            self.assertIsInstance(app.screen, WeatherScreen)
+            self.assertIsInstance(app.screen, DashboardScreen)
             self.assertIsNotNone(service.progress)
 
             with patch.object(
@@ -311,7 +317,7 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             alerts_screen._start_place_weather_preview(label)
             await pilot.pause()
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
 
             await app._on_settings_result(
@@ -348,10 +354,11 @@ class AlertsCentreApplicationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
 
 class AlertsCentreBindingTests(unittest.TestCase):
-    def test_launcher_does_not_displace_local_warning_details(self) -> None:
+    def test_weather_keeps_local_warning_details_and_only_links_dashboard(self) -> None:
         bindings = {key: (action, label) for key, action, label in WeatherScreen.BINDINGS}
 
-        self.assertEqual(bindings['g'], ('alerts_centre', 'Alerts Centre'))
+        self.assertNotIn('g', bindings)
+        self.assertEqual(bindings['b'], ('app.dashboard', 'Dashboard'))
         self.assertEqual(bindings['i'], ('alert_details', 'Warning details'))
 
 

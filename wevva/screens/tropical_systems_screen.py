@@ -52,11 +52,8 @@ class TropicalSystemsScreen(Screen[None]):
     """Persistent three-level storm, source, and official-product browser."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('w', 'back', 'Weather'),
+        Binding('b', 'app.dashboard', 'Dashboard'),
         Binding('r', 'refresh_systems', 'Refresh'),
-        Binding('s', 'block_app_binding', '', show=False),
-        Binding('a', 'block_app_binding', '', show=False),
-        Binding('d', 'block_app_binding', '', show=False),
     ]
     DEFAULT_CSS = """
     TropicalSystemsScreen {
@@ -506,9 +503,6 @@ class TropicalSystemsScreen(Screen[None]):
             await self._select_storm(selected_index)
         self.call_after_refresh(self._apply_layout)
 
-    def action_back(self) -> None:
-        self.app.pop_screen()
-
     def action_refresh_systems(self) -> None:
         """Start a canonical refresh without blocking Textual's message pump."""
         if self._refresh_loader is None or self._refreshing_systems:
@@ -544,9 +538,6 @@ class TropicalSystemsScreen(Screen[None]):
             self._refreshing_systems = False
             if information.is_attached:
                 information.loading = False
-
-    def action_block_app_binding(self) -> None:
-        """Keep location-mutating app shortcuts inactive in this workspace."""
 
     async def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         if self._updating_tabs or event.tab.id is None:

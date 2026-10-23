@@ -38,7 +38,6 @@ from wevva.messages import (
     WeatherUpdated,
 )
 from wevva.screens.air_quality_help import AirQualityHelp
-from wevva.screens.author_screen import AuthorScreen
 from wevva.screens.help import HelpScreen
 from wevva.widgets.air_quality import AirQualityWidget
 from wevva.widgets.context_bar import ContextBar
@@ -96,18 +95,17 @@ class WeatherScreen(Screen[None]):
     - Composes the header, footer, and all weather widgets.
     - Handles `WeatherUpdated` and related messages locally.
     - Keeps IDs stable to preserve existing CSS selectors.
-    - App bindings (q/s/r/h) work automatically via inherit_bindings=False on App.
+    - Weather owns its location actions; app bindings provide shared utilities.
     """
 
     BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
-        ('t', 'tropical_systems', 'Tropical Systems'),
-        ('c', 'open_author', 'Credits'),
-        ('?', 'help', 'Help'),  # Context-aware help (AQ or general)
+        ('b', 'app.dashboard', 'Dashboard'),
+        ('s', 'app.search', 'Search'),
+        ('r', 'app.force_refresh', 'Refresh'),
+        ('a', 'app.save_current_location', 'Save Location'),
+        ('d', 'app.delete_saved_location', 'Delete Location'),
         ('l', 'locations', 'Locations'),
         ('i', 'alert_details', 'Warning details'),
-        ('g', 'alerts_centre', 'Alerts Centre'),
-        ('m', 'world_map', 'World Map'),
-        ('b', 'dashboard', 'Dashboard'),
     ]
     def __init__(
         self,
@@ -652,29 +650,6 @@ class WeatherScreen(Screen[None]):
         return self.saved_locations_sidebar.selected_location()
 
     # --- Actions ---
-    def action_open_author(self) -> None:
-        """Open the Author/Credits screen."""
-        self.app.push_screen(AuthorScreen())
-
-    def action_world_map(self) -> None:
-        """Open the spatial overview of sidebar locations."""
-
-        self.app.open_world_locations_screen()
-
-    def action_dashboard(self) -> None:
-        """Open the persistent unified dashboard."""
-
-        self.app.open_dashboard_screen()
-
-    async def action_tropical_systems(self) -> None:
-        """Open the dedicated active tropical-system workspace."""
-        await self.app.open_tropical_systems_screen()
-
-    def action_alerts_centre(self) -> None:
-        """Open the country-level alert discovery workspace."""
-
-        self.app.open_alerts_centre_screen()
-
     def action_help(self) -> None:
         """Show help screen - air quality help if AQ widget is focused, else general help."""
         # Check if the Air Quality widget is focused

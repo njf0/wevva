@@ -52,18 +52,29 @@ You can launch it directly with `uvx wevva`.
 
 ## Key Bindings
 
+Dashboard is the navigation hub:
+
+- `w` Open the full Weather screen
+- `m` Open the interactive saved-locations world map
+- `t` Investigate active tropical systems
+- `g` Open the country Alerts Centre
+- `r` Refresh the severe-weather bulletin
+
+On the Weather screen:
+
 - `s` Search for a place
 - `r` Refresh weather for current location
 - `a` Save the current location
 - `d` Delete the highlighted saved location
 - `l` Focus saved locations or open their modal
-- `m` Open the interactive saved-locations world map
 - `i` Focus warning details or open their modal
-- `g` Open the country Alerts Centre
-- `t` Investigate active tropical systems
-- `w` Return from Alerts Centre or Tropical Systems to weather
+- `b` Return to the Dashboard
+
+Shared throughout the application:
+
 - `u` Open settings
-- `h` Open this help screen
+- `h` or `?` Open this help screen
+- `c` Open credits
 - `q` Quit
 - `Esc` Close modal screens
 
@@ -71,6 +82,7 @@ You can launch it directly with `uvx wevva`.
 
 - Use arrow keys/tab to move focus across tables and widgets.
 - On the World Map, use left/right to move between locations and Enter to open one.
+- On the World Map, Tropical Systems, and Alerts Centre, press `b` for Dashboard.
 - Country-map city labels can be clicked or focused and activated with Enter.
 - On Tropical Systems, `r` refreshes active systems and their source products.
 - Highlighting rows/columns updates linked weather context.

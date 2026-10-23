@@ -9,6 +9,7 @@ from typing import ClassVar
 
 import httpx
 from textual.app import App
+from textual.binding import Binding
 from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from wevva.alerts import Alert
@@ -36,6 +37,7 @@ from wevva.messages import (
     WeatherUpdated,
 )
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens.author_screen import AuthorScreen
 from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.screens.help import HelpScreen
 from wevva.screens.search_screen import SearchScreen
@@ -155,14 +157,12 @@ class Wevva(App, inherit_bindings=False):
 
     CSS_PATH = 'wevva.tcss'  # single theme stylesheet
     TOOLTIP_DELAY = 0.15
-    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
-        ('q', 'quit', 'Quit'),  # exit the app
-        ('s', 'search', 'Search'),  # open place search screen
-        ('r', 'force_refresh', 'Refresh'),  # fetch latest forecast and warnings
-        ('a', 'save_current_location', 'Save Location'),
-        ('d', 'delete_saved_location', 'Delete Location'),
-        ('h', 'help', 'Help'),  # show quick help
-        ('u', 'settings', 'Settings'),  # open settings
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding('u', 'settings', 'Settings'),
+        Binding('h', 'help', 'Help'),
+        Binding('?', 'help', 'Help', show=False),
+        Binding('c', 'credits', 'Credits'),
+        Binding('q', 'quit', 'Quit'),
     ]
 
     ALERT_CACHE_TTL_SECONDS = 30 * 60
@@ -532,7 +532,15 @@ class Wevva(App, inherit_bindings=False):
 
     def action_help(self):  # textual binding: 'h'
         """Open help screen."""
-        self.push_screen(HelpScreen())
+        if self.screen is self.weather_screen:
+            self.weather_screen.action_help()
+        else:
+            self.push_screen(HelpScreen())
+
+    def action_credits(self) -> None:
+        """Open project credits from any workspace."""
+
+        self.push_screen(AuthorScreen())
 
     def open_alerts_centre_screen(
         self,
@@ -568,13 +576,36 @@ class Wevva(App, inherit_bindings=False):
         self.push_screen('alerts-centre')
 
     def open_dashboard_screen(self) -> None:
-        """Open the one installed dashboard without starting provider work."""
+        """Open or return to the one installed Dashboard workspace."""
 
         if self._dashboard_screen is None:
             self._dashboard_screen = DashboardScreen()
             self.install_screen(self._dashboard_screen, 'dashboard')
-        if self.screen is not self._dashboard_screen:
+        if self.screen is self._dashboard_screen:
+            return
+        if (
+            len(self.screen_stack) > 1
+            and self.screen_stack[-2] is self._dashboard_screen
+        ):
+            self.pop_screen()
+        elif self.screen is self.weather_screen:
             self.push_screen('dashboard')
+        else:
+            self.switch_screen('dashboard')
+
+    def action_dashboard(self) -> None:
+        """Open Dashboard or reveal its existing suspended instance."""
+
+        self.open_dashboard_screen()
+
+    async def _show_weather_screen(self) -> None:
+        """Reveal the existing Weather screen without stacking another copy."""
+
+        if self.weather_screen in self.screen_stack:
+            while self.screen is not self.weather_screen:
+                await self.pop_screen()
+        elif self.screen is not self.weather_screen:
+            await self.push_screen(self.weather_screen)
 
     def note_bulletin_country_used(self, country_code: str | None) -> None:
         """Promote one recently inspected country without restarting the queue."""
@@ -1147,8 +1178,7 @@ class Wevva(App, inherit_bindings=False):
             self._alerts_centre_screen.preserve_country_on_next_resume(
                 message.preserve_alerts_context
             )
-        if self.screen is not self.weather_screen:
-            self.push_screen(self.weather_screen)
+        await self._show_weather_screen()
         await self.action_refresh()
 
     async def on_saved_location_selected(self, message: SavedLocationSelected) -> None:
@@ -1156,10 +1186,7 @@ class Wevva(App, inherit_bindings=False):
         self.location = message.location
         if self._alerts_centre_screen is not None:
             self._alerts_centre_screen.preserve_country_on_next_resume(False)
-        if isinstance(self.screen, WorldLocationsScreen):
-            await self.pop_screen()
-        else:
-            self.push_screen(self.weather_screen)
+        await self._show_weather_screen()
         await self.action_refresh()
 
     async def on_weather_updated(self, event: WeatherUpdated) -> None:

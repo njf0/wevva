@@ -19,16 +19,16 @@ place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places
              -> background alerts
              -> WeatherAlertsUpdated
 
-t key -> TropicalSystemsScreen -> global canonical tropical systems + products
+Dashboard t key -> TropicalSystemsScreen -> global canonical tropical systems + products
 
-g key -> AlertsCentreScreen -> country-alert service/cache
-                            -> complete map unit + provider warning polygons
-                            -> app-cached hovered-settlement weather tooltip
-                            -> activated settlement -> WeatherScreen
+Dashboard g key -> AlertsCentreScreen -> country-alert service/cache
+                                      -> complete map unit + provider warning polygons
+                                      -> app-cached hovered-settlement weather tooltip
+                                      -> activated settlement -> WeatherScreen
 
-m key -> WorldLocationsScreen -> checked-in global map-unit geometry
-                             -> cached saved-location summaries
-                             -> SavedLocationSelected -> WeatherScreen + refresh
+Dashboard m key -> WorldLocationsScreen -> checked-in global map-unit geometry
+                                       -> cached saved-location summaries
+                                       -> SavedLocationSelected -> WeatherScreen + refresh
 
 b key / configured startup -> installed DashboardScreen
                            -> app-owned current/saved summaries
@@ -236,8 +236,8 @@ or left (`City temperature •`) according to available space, keeping the marke
 on the projected city cell.
 
 The saved-locations world map is a separate global navigation surface opened
-with `m`. It layers native, focusable `WorldLocationLabel` widgets over one
-fixed Braille world raster. Absolute offsets express geographic placement, but
+from Dashboard with `m`. It layers native, focusable `WorldLocationLabel`
+widgets over one fixed Braille world raster. Absolute offsets express geographic placement, but
 Textual still owns focus, hover, click handling, and activation. Collision
 placement is recomputed on resize without replacing the labels, preserving
 focus. Left/right moves between labels; Enter, Space, or click emits the same
@@ -253,6 +253,13 @@ message handling retain their established paths. It remains a persistent
 installed workspace opened from Weather with `b`. The ordinary startup refresh
 joins the same application-owned forecast loader used by the Dashboard, avoiding
 a duplicate complete-forecast request while both screens initialize.
+Visible navigation bindings follow the same hub model: Dashboard exposes
+Weather, World Map, Tropical Systems, and Alerts Centre; each specialist and
+Weather screen exposes only `b` back to Dashboard. Search, refresh, save, and
+delete are Weather-local actions. Settings, help, credits, and quit are
+application bindings shared by every workspace. A specialist `b` action pops
+to the suspended Dashboard when it is immediately below, so the installed
+Dashboard is not pushed onto the stack twice.
 `wevva/dashboard_layout.py` makes the pure presentation decision: a
 120×30-or-larger viewport shows the forecast rail, dominant world map, and
 alerts rail together; larger widths progressively grow both rails rather than
@@ -577,12 +584,13 @@ Navigation/Map/Details one pane at a time. These modes only toggle and rearrange
 the same mounted widgets, preserving selection and document scroll state. The
 allocator also owns the broad settlement-label cap so resize changes
 presentation without fetching data.
-`Wevva` installs this reusable workspace with Textual and opens it with `g`,
+`Wevva` installs this reusable workspace with Textual and opens it from
+Dashboard with `g`,
 owns its independent `CountryAlertsService`, and supplies the current-weather
 preview loader. Pop/reopen cycles suspend and resume the live widget
 tree rather than remounting a previously removed screen.
 Its `r` refresh bypasses only Alerts Centre caches;
-`w` returns to weather. Settings update its language, units, and theme-derived
+`b` returns to Dashboard. Settings update its language, units, and theme-derived
 presentation in place without merging this path into local warning refresh.
 
 While the workspace is suspended, provider threads discard progress before
@@ -591,8 +599,8 @@ may still populate the persistent screen and cache. Final unmount invalidates
 the request generation before cancellation.
 
 `wevva/screens/tropical_systems_screen.py` is the global storm workspace opened
-with `t`. Its severity-ordered, full-classification storm selector is followed
-by a source selector only for multi-observation systems. The top-level label
+from Dashboard with `t`. Its severity-ordered, full-classification storm
+selector is followed by a source selector only for multi-observation systems. The top-level label
 uses the canonical storm's strongest declared classification and semantic
 severity colour, so changing sources does not restyle the storm. A pure
 `wevva/tropical_layout.py` budget accounts for terminal chrome, stage padding,

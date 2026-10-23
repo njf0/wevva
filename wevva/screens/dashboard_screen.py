@@ -1220,13 +1220,13 @@ class DashboardScreen(Screen[None]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('w', 'back', 'Weather'),
+        Binding('m', 'world_map', 'World Map'),
+        Binding('t', 'tropical_systems', 'Tropical Systems'),
+        Binding('g', 'alerts_centre', 'Alerts Centre'),
+        Binding('r', 'refresh_bulletin', 'Refresh alerts'),
         Binding('left', 'previous_feature', 'Previous feature', show=False),
         Binding('right', 'next_feature', 'Next feature', show=False),
-        Binding('r', 'refresh_bulletin', 'Refresh alerts'),
         Binding('escape', 'clear_alert_selection', 'Clear alert', show=False),
-        Binding('s', 'block_app_binding', '', show=False),
-        Binding('a', 'block_app_binding', '', show=False),
-        Binding('d', 'block_app_binding', '', show=False),
     ]
 
     DEFAULT_CSS = """
@@ -2309,6 +2309,15 @@ class DashboardScreen(Screen[None]):
         self._cancel_alert_place_weather()
         self.app.pop_screen()
 
+    def action_world_map(self) -> None:
+        self.app.open_world_locations_screen()
+
+    async def action_tropical_systems(self) -> None:
+        await self.app.open_tropical_systems_screen()
+
+    def action_alerts_centre(self) -> None:
+        self.app.open_alerts_centre_screen()
+
     def action_previous_feature(self) -> None:
         if (
             self._layout_budget is not None
@@ -2331,10 +2340,6 @@ class DashboardScreen(Screen[None]):
 
     def action_clear_alert_selection(self) -> None:
         self.alerts_panel.clear_selection()
-
-    def action_block_app_binding(self) -> None:
-        """Prevent deletion based on Weather's hidden saved-list focus."""
-
 
 def _bulletin_option_id(row: BulletinAlert) -> str:
     source, alert_id = country_alert_identity(row.alert)

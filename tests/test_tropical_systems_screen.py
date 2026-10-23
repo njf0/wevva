@@ -16,6 +16,7 @@ from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSys
 from wevva_warnings.registry import get_source
 
 from wevva.app import Wevva
+from wevva.screens.dashboard_screen import DashboardScreen
 from wevva.screens.tropical_systems_screen import (
     TropicalSystemsScreen,
     _observation_key,
@@ -90,6 +91,9 @@ class _ScreenApp(App):
 
     async def on_mount(self) -> None:
         await self.push_screen(self.test_screen)
+
+    def action_dashboard(self) -> None:
+        self.pop_screen()
 
 
 class _BindingApp(_ScreenApp):
@@ -246,7 +250,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('Classification', screenshot)
             self.assertIn('Typhoon', screenshot)
 
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
             self.assertIsNot(app.screen, screen)
 
@@ -1062,7 +1066,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             weather_layout.assert_not_called()
             track_layout.assert_not_called()
 
-    async def test_weather_binding_replaces_escape_and_location_bindings_are_hidden(self) -> None:
+    async def test_dashboard_is_the_only_workspace_binding(self) -> None:
         async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
             return []
 
@@ -1071,23 +1075,16 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
             keys = {binding.key for binding in screen.BINDINGS}
-            self.assertIn('w', keys)
+            self.assertIn('b', keys)
+            self.assertIn('r', keys)
+            self.assertNotIn('w', keys)
             self.assertNotIn('t', keys)
             self.assertNotIn('c', keys)
             self.assertNotIn('escape', keys)
             self.assertNotIn('left_square_bracket', keys)
             self.assertNotIn('right_square_bracket', keys)
-            for key in ('s', 'a', 'd'):
-                active = screen.active_bindings[key]
-                self.assertIs(active.node, screen)
-                self.assertFalse(active.binding.show)
 
-            await pilot.press('s', 'a', 'd', 'escape')
-            await pilot.pause()
-            self.assertEqual(app.app_actions, [])
-            self.assertIs(app.screen, screen)
-
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
             self.assertIsNot(app.screen, screen)
 
@@ -1159,11 +1156,15 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                 ['Hurricane LALA'],
             )
 
-    def test_weather_screen_exposes_tropical_workspace_binding(self) -> None:
+    def test_dashboard_exposes_tropical_workspace_binding(self) -> None:
         self.assertIn(
             ('t', 'tropical_systems', 'Tropical Systems'),
-            WeatherScreen.BINDINGS,
+            [
+                (binding.key, binding.action, binding.description)
+                for binding in DashboardScreen.BINDINGS
+            ],
         )
+        self.assertNotIn('t', {binding[0] for binding in WeatherScreen.BINDINGS})
 
 
 class TropicalProductApplicationCacheTests(unittest.IsolatedAsyncioTestCase):

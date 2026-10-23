@@ -108,7 +108,7 @@ first.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
 
-Press `g` from the weather screen to open the country Alerts Centre. It keeps
+Press `g` from the Dashboard to open the country Alerts Centre. It keeps
 country discovery separate from alerts applicable to the current forecast
 point, and combines a searchable active-alert list, complete provider
 documents, issued warning polygons, and locally selectable settlement labels.
@@ -116,22 +116,21 @@ Hovering or keyboard-highlighting a warning row previews its polygon at full
 severity without selecting or zooming it. Activate a selected warning again to
 return to the full-country overview.
 Hovering a settlement shows compact current conditions; clicking it opens that
-place's complete forecast on the main Weather screen. Returning with `g`
-restores the previous Alerts Centre context. Use `r` to refresh its independent
-alert data and `w` to return to weather.
+place's complete forecast on the main Weather screen. Returning through the
+Dashboard restores the previous Alerts Centre context. Use `r` to refresh its
+independent alert data and `b` to return to the Dashboard.
 
 ## Tropical Systems
 
-Press `t` from the weather screen to open the global Active Tropical Systems
+Press `t` from the Dashboard to open the global Active Tropical Systems
 workspace. Canonical storm names are shown once, while each issuing centre's
 meteorology, track, and lazily retrieved official products remain separate.
 The main weather screen retains only nearby-storm awareness and
 location-specific alert detail.
 
 The track uses a fitted global Natural Earth backdrop, centred position dots,
-and a provider cone when available. On this screen, `t` toggles the position
-dots, `c` toggles the cone, `r` refreshes the tropical data and `w` returns to
-weather.
+and a provider cone when available. On this screen, `r` refreshes the tropical
+data and `b` returns to the Dashboard.
 
 ## Library Usage
 
@@ -187,24 +186,35 @@ for alert in alerts:
     print(alert.event, alert.severity, alert.expires)
 ```
 
-## Weather-Screen Keys
+## Keys
+
+Dashboard is the navigation hub:
+
+- `w` open the full Weather screen
+- `m` open the interactive saved-locations world map
+- `t` investigate active tropical systems
+- `g` open the country Alerts Centre
+- `r` refresh the severe-weather bulletin
+
+On the Weather screen:
 
 - `s` search for place
 - `r` refresh weather
 - `a` save current location
 - `d` delete highlighted saved location
 - `l` focus saved locations when its automatic rail is visible; otherwise open it
-- `m` open the interactive saved-locations world map
 - `i` focus warning details when its automatic rail is visible; otherwise open them
-- `g` open the country Alerts Centre
-- `t` investigate active tropical systems
+- `b` return to the Dashboard
+
+Shared throughout the application:
+
 - `u` open settings
 - `h` or `?` open help
 - `c` credits
 - `q` quit
 
-The Tropical Systems screen has its own contextual `t`/`c` track controls;
-press `h` in the application for the complete shortcut guide.
+The World Map, Tropical Systems, and Alerts Centre screens use `b` to return
+to the Dashboard. Press `h` in the application for the complete shortcut guide.
 On the saved-locations world map, use left/right to move between city labels,
 then Enter or Space to open the focused forecast; mouse selection works too.
 Location-map city labels can likewise be clicked or focused and activated to

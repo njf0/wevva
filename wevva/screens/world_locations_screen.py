@@ -20,11 +20,10 @@ class WorldLocationsScreen(Screen[None]):
     """Full-content world overview of the locations shown by the sidebar."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('w', 'back', 'Weather'),
-        Binding('escape', 'back', 'Weather', show=False),
+        Binding('b', 'app.dashboard', 'Dashboard'),
+        Binding('escape', 'app.dashboard', 'Dashboard', show=False),
         Binding('left', 'previous_location', 'Previous location', show=False),
         Binding('right', 'next_location', 'Next location', show=False),
-        Binding('d', 'block_app_binding', '', show=False),
     ]
 
     DEFAULT_CSS = """
@@ -100,12 +99,5 @@ class WorldLocationsScreen(Screen[None]):
 
     def action_next_location(self) -> None:
         self.world_map.focus_relative(1)
-
-    def action_back(self) -> None:
-        self.app.pop_screen()
-
-    def action_block_app_binding(self) -> None:
-        """Prevent deletion based on a hidden sidebar selection."""
-
 
 __all__ = ['WorldLocationsScreen']

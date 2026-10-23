@@ -327,18 +327,19 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
-    async def test_weather_binding_opens_padded_world_screen_and_selection_returns(self) -> None:
+    async def test_dashboard_binding_opens_padded_world_screen_and_selection_returns(self) -> None:
         app = Wevva(
             initial_location=LONDON,
             saved_locations=[LONDON, NEW_YORK, TOKYO],
-            start_on_dashboard=False,
+            start_on_dashboard=True,
         )
         app.action_refresh = AsyncMock()
+        app.load_dashboard_forecast = AsyncMock(return_value=None)
+        app.load_dashboard_alerts = AsyncMock(return_value=[])
 
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
-            weather_screen = app.screen
-            self.assertIsInstance(weather_screen, WeatherScreen)
+            weather_screen = app.weather_screen
             for location, temperature in (
                 (LONDON, 16),
                 (NEW_YORK, 23),
@@ -388,24 +389,26 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.location, TOKYO)
             self.assertEqual(app.action_refresh.await_count, 2)
 
-    async def test_world_screen_weather_binding_returns_without_selecting(self) -> None:
+    async def test_world_screen_dashboard_binding_returns_without_selecting(self) -> None:
         app = Wevva(
             initial_location=LONDON,
             saved_locations=[LONDON, NEW_YORK],
-            start_on_dashboard=False,
+            start_on_dashboard=True,
         )
         app.action_refresh = AsyncMock()
+        app.load_dashboard_forecast = AsyncMock(return_value=None)
+        app.load_dashboard_alerts = AsyncMock(return_value=[])
 
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
-            weather_screen = app.screen
+            dashboard_screen = app.screen
             await pilot.press('m')
             await pilot.pause()
             self.assertIsInstance(app.screen, WorldLocationsScreen)
 
-            await pilot.press('w')
+            await pilot.press('b')
             await pilot.pause()
-            self.assertIs(app.screen, weather_screen)
+            self.assertIs(app.screen, dashboard_screen)
             self.assertEqual(app.action_refresh.await_count, 1)
 
 

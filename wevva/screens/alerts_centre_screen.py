@@ -271,12 +271,9 @@ class AlertsCentreScreen(Screen[None]):
     """Typeable country browser and full provider-document reader."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('w', 'back', 'Weather'),
-        Binding('escape', 'back', 'Weather', show=False),
+        Binding('b', 'dashboard', 'Dashboard'),
+        Binding('escape', 'dashboard', 'Dashboard', show=False),
         Binding('r', 'refresh_alerts', 'Refresh'),
-        Binding('s', 'block_app_binding', '', show=False),
-        Binding('a', 'block_app_binding', '', show=False),
-        Binding('d', 'block_app_binding', '', show=False),
     ]
 
     DEFAULT_CSS = """
@@ -1406,12 +1403,9 @@ class AlertsCentreScreen(Screen[None]):
         if language_changed:
             self._start_country_load(refresh=False, preserve_existing=True)
 
-    def action_back(self) -> None:
+    def action_dashboard(self) -> None:
         self._cancel_place_weather_preview()
-        self.app.pop_screen()
-
-    def action_block_app_binding(self) -> None:
-        """Prevent hidden weather-screen location actions in this workspace."""
+        self.app.open_dashboard_screen()
 
     def _start_place_weather_preview(
         self,
