@@ -577,6 +577,7 @@ class DashboardAlertsPanel(Container):
         self._by_option_id: dict[str, BulletinAlert] = {}
         self._selected_identity: tuple[str, str] | None = None
         self._last_text_width = 0
+        self._presentation_key: tuple[tuple[BulletinAlert, str], ...] = ()
 
     def compose(self) -> ComposeResult:
         self.border_title = 'Severe Weather Alert Bulletin'
@@ -604,7 +605,10 @@ class DashboardAlertsPanel(Container):
     def update_alerts(self, rows: tuple[BulletinAlert, ...]) -> None:
         """Replace bulletin data while retaining a still-current selection."""
 
-        selected_identity = self._selected_identity
+        presentation_key = self.presentation_key(rows)
+        if presentation_key == self._presentation_key:
+            return
+        self._presentation_key = presentation_key
         self.alert_list.clear_preview()
         self._rows = rows
         self._by_option_id.clear()
@@ -623,8 +627,25 @@ class DashboardAlertsPanel(Container):
         self.alert_list.display = bool(rows)
         if self.selected_row is None:
             self._selected_identity = None
-        if selected_identity is not None and self._selected_identity is None:
-            self.post_message(self.Selected(None))
+
+    def needs_update(self, rows: tuple[BulletinAlert, ...]) -> bool:
+        """Return whether row content or its relative-time label changed."""
+
+        return self.presentation_key(rows) != self._presentation_key
+
+    @staticmethod
+    def presentation_key(
+        rows: tuple[BulletinAlert, ...],
+    ) -> tuple[tuple[BulletinAlert, str], ...]:
+        return tuple(
+            (row, _relative_observation(row.first_observed))
+            for row in rows
+        )
+
+    def refresh_appearance(self) -> None:
+        """Rebuild only the theme-derived option labels."""
+
+        self._refresh_option_labels()
 
     def clear_selection(self) -> None:
         self._selected_identity = None
@@ -1097,6 +1118,8 @@ class DashboardAlertDetailPanel(Container):
     def show_alert(self, row: BulletinAlert | None) -> None:
         """Present only tabs backed by the committed bulletin alert."""
 
+        if row == self._row:
+            return
         previous_identity = (
             country_alert_identity(self._row.alert)
             if self._row is not None
@@ -1165,6 +1188,25 @@ class DashboardAlertDetailPanel(Container):
         body = self.query_one('#dashboard-alert-document-body', Static)
         if tab_id == self._DOCUMENT_TAB_ID:
             body.update(alert_renderable(row.alert, include_timing=True))
+
+    def refresh_appearance(self) -> None:
+        """Refresh theme-derived detail styling without rebuilding geometry."""
+
+        row = self._row
+        if row is None:
+            self._set_frame(
+                'Selected Alert',
+                self.app.theme_variables.get('primary'),
+            )
+        else:
+            self._set_frame(
+                alert_condition_name(row.alert),
+                alert_severity_color(self.app.theme_variables, row.alert),
+            )
+            if self.tabs.active == self._DOCUMENT_TAB_ID:
+                self._show_tab(self._DOCUMENT_TAB_ID)
+        self.alert_map.refresh_theme()
+        self.alert_map.reset_city_tooltips()
 
     def _set_frame(self, title: str, colour: str | None) -> None:
         self.border_title = title or 'Selected Alert'
@@ -1298,7 +1340,7 @@ class DashboardScreen(Screen[None]):
         self._alert_place_weather_task: asyncio.Task[None] | None = None
         self._alert_place_weather_label: CountryAlertCityLabel | None = None
         self._bulletin_generation = -1
-        self._flashed_new_alert_identities: set[tuple[str, str]] = set()
+        self._present_new_alert_identities: frozenset[tuple[str, str]] = frozenset()
         self._alert_return_focus: str | None = None
         self._time_refresh_timer = None
 
@@ -1498,8 +1540,10 @@ class DashboardScreen(Screen[None]):
             self.app.alert_bulletin.generation,
             self.app.alert_bulletin.recent_alerts_snapshot(),
         )
+        self.alerts_panel.refresh_appearance()
+        self.world_map.refresh_alert_appearance()
+        self.alert_detail_panel.refresh_appearance()
         self._cancel_alert_place_weather()
-        self.alert_detail_panel.alert_map.reset_city_tooltips()
         self._show_persistent_location(force=True)
         for panel in self.query(DashboardWeatherAlertsPanel):
             panel.refresh_appearance()
@@ -1589,24 +1633,29 @@ class DashboardScreen(Screen[None]):
             and generation > self._bulletin_generation
             and self.app.screen is self
         )
+        new_alert_identities = frozenset(
+            country_alert_identity(row.alert) for row in rows if row.is_new
+        )
         unflashed_rows = tuple(
             row
             for row in rows
             if row.is_new
             and country_alert_identity(row.alert)
-            not in self._flashed_new_alert_identities
+            not in self._present_new_alert_identities
         )
-        self._flashed_new_alert_identities.update(
-            country_alert_identity(row.alert) for row in rows if row.is_new
-        )
+        self._present_new_alert_identities = new_alert_identities
         self._bulletin_generation = generation
-        alerts_panel.update_alerts(rows)
-        world_map.set_selected_alert(
-            alerts_panel.selected_row,
-        )
+        previous_selection = alerts_panel.selected_row
+        if alerts_panel.needs_update(rows):
+            alerts_panel.update_alerts(rows)
+        selected_row = alerts_panel.selected_row
+        if _bulletin_detail_key(previous_selection) != _bulletin_detail_key(
+            selected_row
+        ):
+            world_map.set_selected_alert(selected_row)
+            detail_panel.show_alert(selected_row)
         if arrived_while_open and unflashed_rows:
             world_map.flash_new_alerts(unflashed_rows)
-        detail_panel.show_alert(alerts_panel.selected_row)
         self._ensure_persistent_alerts()
 
     def on_dashboard_alerts_panel_selected(
@@ -2291,6 +2340,14 @@ def _bulletin_option_id(row: BulletinAlert) -> str:
     source, alert_id = country_alert_identity(row.alert)
     digest = hashlib.sha1(f'{source}\0{alert_id}'.encode()).hexdigest()[:16]
     return f'bulletin-{digest}'
+
+
+def _bulletin_detail_key(
+    row: BulletinAlert | None,
+) -> tuple[str, Alert] | None:
+    """Identify map/document content independently of badge and row age."""
+
+    return None if row is None else (row.country_code, row.alert)
 
 
 def _relative_observation(value: datetime) -> str:

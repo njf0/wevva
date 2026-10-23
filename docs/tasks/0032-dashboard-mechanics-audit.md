@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-D complete
+In progress — Slices A-E complete
 
 ## Context
 
@@ -743,3 +743,108 @@ Six focused Dashboard regressions, seven specialist workspace/cache/layout
 checks, the one-warm-up/three-sample Dashboard matrix, `compileall`, and
 `git diff --check` pass. No live provider, interactive terminal, colour, font,
 emoji, Braille-glyph, or manual mouse check was performed.
+
+### Slice E — bulletin, selected alert, and Alerts Centre integration
+
+Slice E retained the bulletin coordinator as the sole owner of background
+country scheduling, first-baseline suppression, `NEW` classification, and
+published rows. The Dashboard still owns only mounted presentation and
+selection state, while Alerts Centre remains the complete country workspace.
+No screen, list controller, or alert-map abstraction was merged.
+
+The measured repeated presentation work was removed at the existing local
+boundaries:
+
+- `DashboardAlertsPanel` records the row content and displayed relative-time
+  strings it rendered. A newer coordinator generation with identical rows no
+  longer clears and rebuilds its `OptionList`; crossing a relative-time label
+  boundary still refreshes the list.
+- `DashboardScreen.update_bulletin()` compares the selected alert's country
+  and provider content separately from bulletin-only `NEW` and observation-age
+  fields. Badge and relative-time changes therefore leave selected geometry
+  and the document reader intact, while changed alert content still replaces
+  both exactly once. Selection removal now has one synchronous clear path
+  rather than a second queued `Selected(None)` message.
+- The detail pane and world marker reject identical selected data. Appearance
+  refresh has explicit list-label, marker-colour, detail-frame, document, and
+  map-theme paths, so it no longer reconstructs alert geometry merely to
+  recolour it.
+
+The lifetime-long set of every alert identity ever flashed was replaced by the
+bounded current-`NEW` snapshot. An unchanged `NEW` row cannot replay its pulse;
+once its badge clears it leaves the snapshot, so a genuinely absent or later
+rediscovered alert can attract attention again. The initial mounted snapshot
+still seeds this state without flashing, preserving bulletin baseline
+semantics. Incoming marker widgets now shrink to the current grouped-cell
+count and are removed after the pulse instead of retaining the session's
+largest batch.
+
+Settlement preview caching moved from `AlertsCentreScreen` to
+`Wevva.load_alert_place_weather()`. This is the one case where shared ownership
+deleted a parallel path: both Dashboard and Alerts Centre request the same
+coordinate/unit response through that application method. The cache retains
+the existing 15-minute lifetime, keys by rounded coordinates and all three
+units, coalesces in-flight requests, shields provider work from a cancelled
+hover, does not cache failures, and is capped at 64 entries. Alerts Centre
+retains only hover delay, current-label generation, unit-change, and detached
+result guards.
+
+The harness adds document-tab, badge-clear, relative-time-only, selected
+content-change, selection-removal, first/cached settlement preview, and
+Alerts Centre deep-link/return scenarios. It also counts document rendering
+and the compact-weather provider boundary. The comparable run used CPython
+3.13.0, Textual 8.0.0, macOS x86_64, one discarded warm-up, and three samples:
+
+| Alert scenario | Local time | Structural result |
+|---|---:|---|
+| initial one-row delivery | 125 [113–132] ms | one list update; no unselected detail or geometry work |
+| selected alert | 428 [420–493] ms | one detail and geometry update plus one world reflow |
+| document tab | 104 [90–135] ms | exactly one document render |
+| identical newer generation | 69 [55–94] ms | no counted work, down from one list/detail/geometry update in Slice A |
+| `NEW` badge clearing | 70 [69–93] ms | one list update only |
+| relative-time-only change | 88 [80–95] ms | one list update only |
+| selected provider-content change | 110 [106–122] ms | one list, detail, document, and geometry update |
+| selected alert removal | 95 [91–110] ms | one list/detail clear and world reflow; no geometry rebuild |
+| first settlement preview | 240 [239–243] ms | one compact-weather provider request |
+| cached settlement preview | 254 [241–254] ms | no provider request |
+| Alerts Centre deep-link/return | 1,458 [1,237–1,663] ms | no compact-weather provider request and no Dashboard bulletin rebuild |
+
+The round trip's three counted alert-map builds belong to the specialist
+workspace's country load and deep-link selection; the persistent Dashboard
+selection, list, geometry, and document are retained on return. The cached
+preview timing remains dominated by the intentional 150 ms hover delay and
+mounted settling, so only its zero-provider structural result is claimed.
+
+#### Slice E negative findings and accounting
+
+1. No obsolete bulletin service or first-baseline path was found; those
+   semantics remain independent of presentation deduplication.
+2. The list, detail, geometry, document, pulse, and preview paths now each
+   update only for their own effective input. No generic presentation manager
+   or alert-screen controller is indicated.
+3. The ten-second incoming pulse is not disproportionate once its identity set
+   and widgets are bounded; its cadence and visible behavior remain unchanged.
+4. Sharing `CountryAlertsMap`, alert rendering, identities, and the app-owned
+   settlement response is useful. Sharing Dashboard and Alerts Centre
+   selection/filter/loading lifecycles would still combine different jobs.
+
+- Production: `+198/-82` lines across the app-owned preview cache, Dashboard
+  bulletin/detail coordination, incoming map markers, and deletion of the
+  Alerts Centre cache. No provider, bulletin-service, or warning-cache code
+  changed.
+- Tests: `+177/-13` lines across Dashboard, application-cache, and Alerts
+  Centre preview coverage.
+- Audit tooling: `+185/-2` lines for the focused alert scenarios, deterministic
+  country/preview loaders, and document/provider counters.
+- Documentation: `+124/-8` lines across the architecture boundary and this
+  Slice E outcome record.
+- Dependencies, public Python API, bulletin fetch cadence, initial baselines,
+  hard-refresh scope, country cache, alert identities, map projection, visual
+  interaction, and Task 0031 framing: unchanged.
+
+All 20 mounted Dashboard tests, all 16 forecast/application-cache tests, four
+focused Alerts Centre preview tests, two settings integration tests, one
+cross-screen lifecycle test, and the final one-warm-up/three-sample Dashboard
+matrix pass. `compileall` and `git diff --check` also pass. No live provider,
+interactive terminal, colour, font, emoji, Braille-glyph, or manual mouse check
+was performed.

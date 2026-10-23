@@ -316,6 +316,8 @@ class DashboardWorldMap(WorldLocationsMap):
     ) -> None:
         """Replace the one persistent, steady alert marker."""
 
+        if row == self._selected_alert and self._preview_alert is None:
+            return
         changed = _bulletin_identity(row) != _bulletin_identity(self._selected_alert)
         self._selected_alert = row
         self._preview_alert = None
@@ -358,6 +360,12 @@ class DashboardWorldMap(WorldLocationsMap):
         self._cancel_incoming_alert_pulse()
         if self.is_mounted:
             self._update_alert_marker()
+
+    def refresh_alert_appearance(self) -> None:
+        """Reapply theme colours without changing alert state or geometry."""
+
+        self._update_alert_marker()
+        self._sync_incoming_alert_markers()
 
     def set_active_location(self, location: LocationMetadata | None) -> None:
         """Update the active-place emphasis without changing selection."""
@@ -527,6 +535,8 @@ class DashboardWorldMap(WorldLocationsMap):
             marker.display = False
             self._incoming_alert_markers.append(marker)
             self.mount(marker)
+        while len(self._incoming_alert_markers) > len(grouped):
+            self._incoming_alert_markers.pop().remove()
         for marker in self._incoming_alert_markers:
             marker.display = False
         for marker, (cell, rows) in zip(
@@ -550,9 +560,7 @@ class DashboardWorldMap(WorldLocationsMap):
         finally:
             if generation == self._incoming_alert_pulse_generation:
                 self._incoming_alerts = ()
-                for marker in self._incoming_alert_markers:
-                    marker.remove_class('pulse')
-                    marker.display = False
+                self._sync_incoming_alert_markers()
                 if self._incoming_alert_pulse_task is asyncio.current_task():
                     self._incoming_alert_pulse_task = None
 

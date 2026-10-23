@@ -268,7 +268,14 @@ class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
         loader = AsyncMock(return_value=weather)
 
         with patch('wevva.app.fetch_current_weather', new=loader):
-            result = await app.load_alert_place_weather(
+            first = await app.load_alert_place_weather(
+                34.42,
+                -106.83,
+                'fahrenheit',
+                'mph',
+                'inch',
+            )
+            second = await app.load_alert_place_weather(
                 34.42,
                 -106.83,
                 'fahrenheit',
@@ -276,7 +283,8 @@ class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
                 'inch',
             )
 
-        self.assertIs(result, weather)
+        self.assertIs(first, weather)
+        self.assertIs(second, weather)
         loader.assert_awaited_once_with(
             lat=34.42,
             lon=-106.83,
@@ -284,6 +292,57 @@ class TropicalCentreWeatherRequestTests(unittest.IsolatedAsyncioTestCase):
             wind_speed_unit='mph',
             precipitation_unit='inch',
         )
+
+    async def test_alert_place_preview_cache_expires_and_separates_units(self) -> None:
+        app = Wevva()
+        now = [100.0]
+        app._alert_place_weather_cache_clock = lambda: now[0]
+        loader = AsyncMock(
+            side_effect=[
+                {'current': {'temperature_2m': 12}},
+                {'current': {'temperature_2m': 13}},
+                {'current': {'temperature_2m': 55}},
+            ]
+        )
+
+        with patch('wevva.app.fetch_current_weather', new=loader):
+            await app.load_alert_place_weather(52.5, 13.4, 'celsius', 'kmh', 'mm')
+            now[0] += app.ALERT_PLACE_WEATHER_CACHE_TTL_SECONDS
+            await app.load_alert_place_weather(52.5, 13.4, 'celsius', 'kmh', 'mm')
+            await app.load_alert_place_weather(52.5, 13.4, 'fahrenheit', 'mph', 'inch')
+
+        self.assertEqual(loader.await_count, 3)
+
+    async def test_cancelled_preview_caller_does_not_cancel_shared_request(self) -> None:
+        app = Wevva()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        weather = {'current': {'temperature_2m': 12}}
+        calls = 0
+
+        async def load_weather(**_kwargs):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return weather
+
+        with patch('wevva.app.fetch_current_weather', new=load_weather):
+            first = asyncio.create_task(
+                app.load_alert_place_weather(52.5, 13.4, 'celsius', 'kmh', 'mm')
+            )
+            await started.wait()
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            second = asyncio.create_task(
+                app.load_alert_place_weather(52.5, 13.4, 'celsius', 'kmh', 'mm')
+            )
+            release.set()
+            self.assertIs(await second, weather)
+
+        self.assertEqual(len(app._alert_place_weather_tasks), 0)
+        self.assertEqual(calls, 1)
 
 
 class CityTemperatureRequestTests(unittest.IsolatedAsyncioTestCase):

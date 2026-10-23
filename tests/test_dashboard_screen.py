@@ -828,12 +828,124 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await _settle(pilot)
             self.assertIs(screen.world_map._incoming_alert_pulse_task, pulse_task)
 
+            established_rows = tuple(
+                BulletinAlert(
+                    row.country_code,
+                    row.alert,
+                    row.first_observed,
+                    False,
+                )
+                for row in rows
+            )
+            screen.update_bulletin(3, established_rows)
+            await _settle(pilot)
+            self.assertEqual(screen._present_new_alert_identities, frozenset())
+            self.assertIs(screen.world_map._incoming_alert_pulse_task, pulse_task)
+
+            screen.update_bulletin(4, rows)
+            await _settle(pilot)
+            self.assertIsNot(screen.world_map._incoming_alert_pulse_task, pulse_task)
+            self.assertEqual(
+                screen._present_new_alert_identities,
+                {
+                    ('fixture', 'rain'),
+                    ('fixture', 'wind'),
+                    ('fixture', 'snow'),
+                },
+            )
+
             screen.world_map.set_selected_alert(rows[0])
             await pilot.pause()
             self.assertFalse(screen.world_map.alert_marker.has_class('pulse'))
             self.assertIsNotNone(
                 screen.world_map._incoming_alert_pulse_task
             )
+            screen.world_map._cancel_incoming_alert_pulse()
+            screen.world_map._sync_incoming_alert_markers()
+            await _settle(pilot)
+            self.assertEqual(screen.world_map._incoming_alert_markers, [])
+            self.assertEqual(
+                list(screen.world_map.query(DashboardIncomingAlertMarker)),
+                [],
+            )
+
+    async def test_unchanged_bulletin_skips_list_map_and_detail_work(self) -> None:
+        app = self._app()
+        alert = Alert(
+            id='flood-unchanged',
+            source='fixture',
+            event='Flood Warning',
+            headline='Flooding remains possible.',
+            severity='Severe',
+            geometry={
+                'type': 'Polygon',
+                'coordinates': [
+                    [[6, 49], [10, 49], [10, 52], [6, 52], [6, 49]]
+                ],
+            },
+        )
+        row = BulletinAlert(
+            'DE',
+            alert,
+            datetime.now(UTC),
+            False,
+        )
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            screen = app.screen
+            screen.update_bulletin(1, (row,))
+            option = screen.alerts_panel.alert_list.options[0]
+            screen.alerts_panel.on_option_list_option_selected(
+                OptionList.OptionSelected(
+                    screen.alerts_panel.alert_list,
+                    option,
+                    0,
+                )
+            )
+            await _settle(pilot)
+
+            with patch.object(
+                screen.alerts_panel,
+                'update_alerts',
+                wraps=screen.alerts_panel.update_alerts,
+            ) as update_alerts, patch.object(
+                screen.alert_detail_panel,
+                'show_alert',
+                wraps=screen.alert_detail_panel.show_alert,
+            ) as show_alert, patch.object(
+                screen.alert_detail_panel.alert_map,
+                '_rebuild_view',
+                wraps=screen.alert_detail_panel.alert_map._rebuild_view,
+            ) as rebuild_view:
+                screen.update_bulletin(2, (row,))
+                await _settle(pilot)
+
+                update_alerts.assert_not_called()
+                show_alert.assert_not_called()
+                rebuild_view.assert_not_called()
+
+                with patch(
+                    'wevva.screens.dashboard_screen._relative_observation',
+                    return_value='1m ago',
+                ):
+                    screen.update_bulletin(3, (row,))
+                    await _settle(pilot)
+
+                update_alerts.assert_called_once_with((row,))
+                show_alert.assert_not_called()
+                rebuild_view.assert_not_called()
+
+                screen.update_bulletin(4, ())
+                await _settle(pilot)
+
+                self.assertEqual(update_alerts.call_count, 2)
+                show_alert.assert_called_once_with(None)
+                rebuild_view.assert_not_called()
+                self.assertIsNone(screen.alerts_panel.selected_row)
+                self.assertFalse(screen.world_map.alert_marker.display)
 
     async def test_place_hover_is_visual_and_repeated_selection_stays_dashboard(self) -> None:
         app = self._app()

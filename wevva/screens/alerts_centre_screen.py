@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Awaitable, Callable
-from time import monotonic
 from typing import Any, ClassVar
 
 from rich.text import Text
@@ -67,7 +66,6 @@ PlaceWeatherLoader = Callable[
     [float, float, str, str, str],
     Awaitable[dict[str, Any]],
 ]
-_PLACE_WEATHER_CACHE_TTL_SECONDS = 15 * 60
 _PLACE_WEATHER_HOVER_DELAY_SECONDS = 0.15
 _ALERT_AREA_LABEL_MAX_LENGTH = 24
 
@@ -526,9 +524,7 @@ class AlertsCentreScreen(Screen[None]):
         initial_country_code: str | None = None,
         warning_language: str = 'auto',
         place_weather_loader: PlaceWeatherLoader | None = None,
-        place_weather_cache_ttl_seconds: float = _PLACE_WEATHER_CACHE_TTL_SECONDS,
         place_weather_hover_delay_seconds: float = _PLACE_WEATHER_HOVER_DELAY_SECONDS,
-        clock: Callable[[], float] = monotonic,
     ) -> None:
         super().__init__()
         self.service = service or CountryAlertsService()
@@ -536,19 +532,10 @@ class AlertsCentreScreen(Screen[None]):
         self.initial_country_code = normalize_country_code(initial_country_code)
         self.warning_language = warning_language
         self._place_weather_loader = place_weather_loader
-        self._place_weather_cache_ttl_seconds = max(
-            0.0,
-            float(place_weather_cache_ttl_seconds),
-        )
         self._place_weather_hover_delay_seconds = max(
             0.0,
             float(place_weather_hover_delay_seconds),
         )
-        self._clock = clock
-        self._place_weather_cache: dict[
-            tuple[float, float, str, str, str],
-            tuple[float, dict[str, Any]],
-        ] = {}
         self.alert_filter_value = ''
         self.alert_severity_filter = ''
         self.alert_sort_value = 'severity'
@@ -1434,21 +1421,6 @@ class AlertsCentreScreen(Screen[None]):
         temperature_unit = getattr(self.app, 'temperature_unit', 'celsius')
         wind_speed_unit = getattr(self.app, 'wind_speed_unit', 'kmh')
         precipitation_unit = getattr(self.app, 'precipitation_unit', 'mm')
-        cache_key = _place_weather_cache_key(
-            place,
-            temperature_unit=temperature_unit,
-            wind_speed_unit=wind_speed_unit,
-            precipitation_unit=precipitation_unit,
-        )
-        cached = self._place_weather_cache.get(cache_key)
-        if (
-            cached is not None
-            and self._clock() - cached[0] < self._place_weather_cache_ttl_seconds
-        ):
-            self._cancel_place_weather_preview()
-            label.tooltip = self._place_weather_tooltip(place, cached[1])
-            return
-
         if (
             label is self._place_weather_label
             and self._place_weather_task is not None
@@ -1467,7 +1439,6 @@ class AlertsCentreScreen(Screen[None]):
             self._load_place_weather_preview(
                 generation,
                 label,
-                cache_key,
                 temperature_unit,
                 wind_speed_unit,
                 precipitation_unit,
@@ -1478,7 +1449,6 @@ class AlertsCentreScreen(Screen[None]):
         self,
         generation: int,
         label: CountryAlertCityLabel,
-        cache_key: tuple[float, float, str, str, str],
         temperature_unit: str,
         wind_speed_unit: str,
         precipitation_unit: str,
@@ -1498,34 +1468,40 @@ class AlertsCentreScreen(Screen[None]):
         except asyncio.CancelledError:
             raise
         except Exception:
-            if self._place_weather_request_is_current(generation, label, cache_key):
+            if self._place_weather_request_is_current(
+                generation,
+                label,
+                (temperature_unit, wind_speed_unit, precipitation_unit),
+            ):
                 label.tooltip = self._place_weather_tooltip(label.place, None)
             return
         finally:
             if self._place_weather_task is task:
                 self._place_weather_task = None
 
-        if not self._place_weather_request_is_current(generation, label, cache_key):
+        if not self._place_weather_request_is_current(
+            generation,
+            label,
+            (temperature_unit, wind_speed_unit, precipitation_unit),
+        ):
             return
-        self._place_weather_cache[cache_key] = (self._clock(), response)
         label.tooltip = self._place_weather_tooltip(label.place, response)
 
     def _place_weather_request_is_current(
         self,
         generation: int,
         label: CountryAlertCityLabel,
-        cache_key: tuple[float, float, str, str, str],
+        requested_units: tuple[str, str, str],
     ) -> bool:
         if not self.is_attached or generation != self._place_weather_generation:
             return False
         if label is not self._place_weather_label or not label.is_attached:
             return False
-        return cache_key == _place_weather_cache_key(
-            label.place,
-            temperature_unit=getattr(self.app, 'temperature_unit', 'celsius'),
-            wind_speed_unit=getattr(self.app, 'wind_speed_unit', 'kmh'),
-            precipitation_unit=getattr(self.app, 'precipitation_unit', 'mm'),
-        )
+        return (
+            getattr(self.app, 'temperature_unit', 'celsius'),
+            getattr(self.app, 'wind_speed_unit', 'kmh'),
+            getattr(self.app, 'precipitation_unit', 'mm'),
+        ) == requested_units
 
     def _cancel_place_weather_preview(self) -> None:
         self._place_weather_generation += 1
@@ -1582,24 +1558,6 @@ def _ellipsize_area_label(label: str) -> str:
         return label
     shortened = label[: _ALERT_AREA_LABEL_MAX_LENGTH - 1].rstrip(' ,;:-')
     return f'{shortened}…'
-
-
-def _place_weather_cache_key(
-    place: PopulatedPlace,
-    *,
-    temperature_unit: str,
-    wind_speed_unit: str,
-    precipitation_unit: str,
-) -> tuple[float, float, str, str, str]:
-    """Bound cache cardinality while retaining neighbourhood-level precision."""
-
-    return (
-        round(place.latitude, 4),
-        round(place.longitude, 4),
-        temperature_unit,
-        wind_speed_unit,
-        precipitation_unit,
-    )
 
 
 def _alert_severity_options(

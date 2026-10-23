@@ -74,7 +74,27 @@ ForecastCacheKey = tuple[float, float, str, str, str]
 ForecastCacheEntry = tuple[float, WeatherUpdated]
 TropicalCacheEntry = tuple[float, tuple[CanonicalTropicalSystem, ...]]
 TropicalProductCacheKey = tuple[str, str, str]
+AlertPlaceWeatherCacheKey = tuple[float, float, str, str, str]
+AlertPlaceWeatherCacheEntry = tuple[float, dict]
 _SAVED_WEATHER_RETRY_DELAY_SECONDS = 0.75
+
+
+def _alert_place_weather_cache_key(
+    latitude: float,
+    longitude: float,
+    temperature_unit: str,
+    wind_speed_unit: str,
+    precipitation_unit: str,
+) -> AlertPlaceWeatherCacheKey:
+    """Retain neighbourhood precision while sharing identical previews."""
+
+    return (
+        round(latitude, 4),
+        round(longitude, 4),
+        temperature_unit,
+        wind_speed_unit,
+        precipitation_unit,
+    )
 
 
 def _saved_weather_summary(
@@ -149,6 +169,8 @@ class Wevva(App, inherit_bindings=False):
     ALERT_CACHE_STALE_GRACE_SECONDS = 6 * 60 * 60
     FORECAST_CACHE_TTL_SECONDS = 15 * 60
     TROPICAL_SYSTEM_CACHE_TTL_SECONDS = 30 * 60
+    ALERT_PLACE_WEATHER_CACHE_TTL_SECONDS = 15 * 60
+    ALERT_PLACE_WEATHER_CACHE_MAX_ENTRIES = 64
 
     def __init__(
         self,
@@ -212,6 +234,15 @@ class Wevva(App, inherit_bindings=False):
             TropicalProductCacheKey,
             asyncio.Task[list[TropicalProduct]],
         ] = {}
+        self._alert_place_weather_cache: dict[
+            AlertPlaceWeatherCacheKey,
+            AlertPlaceWeatherCacheEntry,
+        ] = {}
+        self._alert_place_weather_tasks: dict[
+            AlertPlaceWeatherCacheKey,
+            asyncio.Task[dict],
+        ] = {}
+        self._alert_place_weather_cache_clock = time.monotonic
         self._saved_weather_tasks: dict[str, asyncio.Task[None]] = {}
         self._saved_weather_generation = 0
         self._saved_location_weather_summaries: dict[
@@ -632,15 +663,77 @@ class Wevva(App, inherit_bindings=False):
         wind_speed_unit: str,
         precipitation_unit: str,
     ) -> dict:
-        """Fetch compact current weather for one Alerts Centre settlement."""
+        """Reuse compact settlement weather across alert surfaces."""
 
-        return await fetch_current_weather(
-            lat=latitude,
-            lon=longitude,
-            temperature_unit=temperature_unit,
-            wind_speed_unit=wind_speed_unit,
-            precipitation_unit=precipitation_unit,
+        key = _alert_place_weather_cache_key(
+            latitude,
+            longitude,
+            temperature_unit,
+            wind_speed_unit,
+            precipitation_unit,
         )
+        cached = self._alert_place_weather_cache.get(key)
+        if cached is not None:
+            age = self._alert_place_weather_cache_clock() - cached[0]
+            if age < self.ALERT_PLACE_WEATHER_CACHE_TTL_SECONDS:
+                return cached[1]
+            del self._alert_place_weather_cache[key]
+        task = self._alert_place_weather_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                fetch_current_weather(
+                    lat=latitude,
+                    lon=longitude,
+                    temperature_unit=temperature_unit,
+                    wind_speed_unit=wind_speed_unit,
+                    precipitation_unit=precipitation_unit,
+                )
+            )
+            self._alert_place_weather_tasks[key] = task
+            task.add_done_callback(
+                lambda completed_task, cache_key=key: (
+                    self._store_alert_place_weather(cache_key, completed_task)
+                )
+            )
+        response = await asyncio.shield(task)
+        self._cache_alert_place_weather(key, response)
+        return response
+
+    def _store_alert_place_weather(
+        self,
+        key: AlertPlaceWeatherCacheKey,
+        task: asyncio.Task[dict],
+    ) -> None:
+        """Retain a completed preview when its hovering caller went away."""
+
+        if self._alert_place_weather_tasks.get(key) is task:
+            del self._alert_place_weather_tasks[key]
+        if task.cancelled():
+            return
+        try:
+            response = task.result()
+        except Exception:
+            return
+        self._cache_alert_place_weather(key, response)
+
+    def _cache_alert_place_weather(
+        self,
+        key: AlertPlaceWeatherCacheKey,
+        response: dict,
+    ) -> None:
+        self._alert_place_weather_cache[key] = (
+            self._alert_place_weather_cache_clock(),
+            response,
+        )
+        if (
+            len(self._alert_place_weather_cache)
+            > self.ALERT_PLACE_WEATHER_CACHE_MAX_ENTRIES
+        ):
+            oldest = min(
+                self._alert_place_weather_cache,
+                key=lambda item: self._alert_place_weather_cache[item][0],
+            )
+            del self._alert_place_weather_cache[oldest]
 
     def open_world_locations_screen(self) -> None:
         """Open a world overview using application-owned location summaries."""

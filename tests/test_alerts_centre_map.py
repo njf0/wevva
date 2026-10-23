@@ -639,7 +639,7 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             if (label.place.latitude, label.place.longitude) in visible_keys
         ]
 
-    async def test_hover_loads_compact_weather_once_and_cache_survives_resize(self) -> None:
+    async def test_hover_loads_compact_weather_and_survives_resize(self) -> None:
         requests = []
 
         async def loader(latitude, longitude, temperature_unit, wind_speed_unit, precipitation_unit):
@@ -704,10 +704,10 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             await pilot.resize_terminal(80, 24)
             await pilot.pause()
             screen._start_place_weather_preview(label)
-            self.assertEqual(len(requests), 1)
+            await pilot.pause()
+            self.assertEqual(len(requests), 2)
 
-    async def test_expired_cache_and_unit_change_refetch(self) -> None:
-        now = [100.0]
+    async def test_unit_change_reissues_loader_with_new_units(self) -> None:
         requests = []
 
         async def loader(_latitude, _longitude, temperature_unit, wind_speed_unit, precipitation_unit):
@@ -718,9 +718,7 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             service=_FixtureCountryService({'DE': []}),  # type: ignore[arg-type]
             countries=[GERMANY],
             place_weather_loader=loader,
-            place_weather_cache_ttl_seconds=10,
             place_weather_hover_delay_seconds=0,
-            clock=lambda: now[0],
         )
         app = _ScreenApp(screen)
 
@@ -728,9 +726,6 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             for _ in range(3):
                 await pilot.pause()
             label = self._visible_labels(screen)[0]
-            screen._start_place_weather_preview(label)
-            await pilot.pause()
-            now[0] += 10
             screen._start_place_weather_preview(label)
             await pilot.pause()
             app.temperature_unit = 'fahrenheit'
@@ -748,7 +743,6 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 requests,
                 [
-                    ('celsius', 'kmh', 'mm'),
                     ('celsius', 'kmh', 'mm'),
                     ('fahrenheit', 'mph', 'inch'),
                 ],
@@ -835,7 +829,6 @@ class CountryAlertPlaceWeatherPreviewTests(unittest.IsolatedAsyncioTestCase):
             assert label.tooltip is not None
             self.assertIn('18°C', label.tooltip.plain)
 
-            screen._place_weather_cache.clear()
             screen._start_place_weather_preview(label)
             await pilot.pause()
             screen._select_alert(wind)

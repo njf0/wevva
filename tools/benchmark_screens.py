@@ -30,7 +30,7 @@ from tests.test_alerts_centre_map import EAST_GERMANY, WEST_GERMANY, _alert
 from tests.test_tropical_systems_screen import _observation
 from tests.test_world_locations_map import LONDON, NEW_YORK, TOKYO
 from tests.weather_fixtures import weather_update
-from wevva import geography
+from wevva import app as app_module, geography
 from wevva.app import Wevva
 from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
@@ -43,6 +43,7 @@ from wevva.messages import (
     WeatherAlertsUpdated,
 )
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens import dashboard_screen as dashboard_screen_module
 from wevva.screens.dashboard_screen import (
     DashboardAlertDetailPanel,
     DashboardAlertsPanel,
@@ -54,7 +55,10 @@ from wevva.screens.search_screen import SearchScreen
 from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
-from wevva.widgets.country_alerts_map import CountryAlertCityLabel
+from wevva.widgets.country_alerts_map import (
+    CountryAlertCityLabel,
+    CountryAlertSettlementPreviewRequested,
+)
 from wevva.services.alert_bulletin import BulletinAlert
 from wevva.widgets.context_bar import ContextBar
 from wevva.widgets.daily_summary import DailySummaryTable
@@ -84,6 +88,7 @@ class _CountryService:
     """Immediate deterministic substitute for country-warning retrieval."""
 
     last_country_code: str | None = None
+    ttl_seconds = 15 * 60
 
     def __init__(self) -> None:
         self.calls = 0
@@ -1087,6 +1092,10 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
             product_cache[key] = products
         return list(products)
 
+    async def load_alert_place_weather(**_kwargs: Any) -> dict:
+        counters['provider.alert_place_weather'] += 1
+        return _tropical_centre_weather(52.5, 13.4)
+
     app = Wevva(
         initial_location=BERLIN,
         saved_locations=[LONDON, NEW_YORK, TOKYO],
@@ -1100,6 +1109,8 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
     app.load_tropical_centre_weather = AsyncMock(
         side_effect=_tropical_centre_weather,
     )
+    dashboard_country_service = _CountryService()
+    app.country_alerts_service = dashboard_country_service  # type: ignore[assignment]
     app._tropical_system_cache = (time.monotonic(), tuple(systems))
     for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
         app._saved_location_weather_summaries[location_key(location)] = (
@@ -1162,6 +1173,26 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
                     _counted_method(counters, counter_name, original),
                 )
             )
+        original_alert_renderable = dashboard_screen_module.alert_renderable
+
+        def counted_alert_renderable(*args: Any, **kwargs: Any):
+            counters['bulletin.document_render'] += 1
+            return original_alert_renderable(*args, **kwargs)
+
+        patches.enter_context(
+            patch.object(
+                dashboard_screen_module,
+                'alert_renderable',
+                counted_alert_renderable,
+            )
+        )
+        patches.enter_context(
+            patch.object(
+                app_module,
+                'fetch_current_weather',
+                load_alert_place_weather,
+            )
+        )
 
         async def enter():
             pilot = await runner.__aenter__()
@@ -1382,6 +1413,47 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
                 counters=counters,
             )
 
+            alert_place_label = next(
+                iter(
+                    dashboard.alert_detail_panel.alert_map.query(
+                        CountryAlertCityLabel
+                    )
+                )
+            )
+
+            async def alert_settlement_preview() -> None:
+                dashboard.on_country_alert_settlement_preview_requested(
+                    CountryAlertSettlementPreviewRequested(
+                        label=alert_place_label
+                    )
+                )
+                await pilot.pause(0.2)
+                await _settle(pilot, 2)
+
+            await recorder.measure(
+                'dashboard.alert_settlement_preview',
+                alert_settlement_preview,
+                counters=counters,
+            )
+
+            await recorder.measure(
+                'dashboard.alert_settlement_preview_cached',
+                alert_settlement_preview,
+                counters=counters,
+            )
+
+            async def alert_document_tab() -> None:
+                dashboard.alert_detail_panel.tabs.active = (
+                    'dashboard-alert-document-tab'
+                )
+                await _settle(pilot, 3)
+
+            await recorder.measure(
+                'dashboard.alert_document_tab',
+                alert_document_tab,
+                counters=counters,
+            )
+
             async def unchanged_bulletin_delivery() -> None:
                 dashboard.update_bulletin(2, (bulletin_row,))
                 await _settle(pilot, 4)
@@ -1391,6 +1463,117 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
                 unchanged_bulletin_delivery,
                 counters=counters,
             )
+
+            established_row = BulletinAlert(
+                bulletin_row.country_code,
+                bulletin_row.alert,
+                bulletin_row.first_observed,
+                False,
+            )
+
+            async def bulletin_badge_clear() -> None:
+                dashboard.update_bulletin(3, (established_row,))
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_badge_clear',
+                bulletin_badge_clear,
+                counters=counters,
+            )
+
+            async def bulletin_relative_time_only() -> None:
+                with patch.object(
+                    dashboard_screen_module,
+                    '_relative_observation',
+                    return_value='1m ago',
+                ):
+                    dashboard.update_bulletin(4, (established_row,))
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_relative_time_only',
+                bulletin_relative_time_only,
+                counters=counters,
+            )
+
+            changed_alert = _alert(
+                'dashboard-flood',
+                severity='Extreme',
+                geometry=WEST_GERMANY,
+            )
+            changed_row = BulletinAlert(
+                'DE',
+                changed_alert,
+                bulletin_row.first_observed,
+                False,
+            )
+
+            async def bulletin_selected_content_change() -> None:
+                dashboard.update_bulletin(5, (changed_row,))
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_selected_content_change',
+                bulletin_selected_content_change,
+                counters=counters,
+            )
+
+            async def bulletin_selection_removal() -> None:
+                dashboard.update_bulletin(6, ())
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_selection_removal',
+                bulletin_selection_removal,
+                counters=counters,
+            )
+
+            dashboard.update_bulletin(7, (changed_row,))
+            option = dashboard.alerts_panel.alert_list.options[0]
+            dashboard.alerts_panel.on_option_list_option_selected(
+                OptionList.OptionSelected(
+                    dashboard.alerts_panel.alert_list,
+                    option,
+                    0,
+                )
+            )
+            await _settle(pilot, 4)
+            dashboard_country_service.results['DE'] = [changed_alert]
+
+            async def alerts_workspace_roundtrip() -> None:
+                dashboard.world_map.alert_marker.action_activate()
+                await _settle(pilot, 6)
+                assert isinstance(app.screen, AlertsCentreScreen)
+                alerts_screen = app.screen
+                alerts_screen._place_weather_hover_delay_seconds = 0
+                matching_place_label = next(
+                    label
+                    for label in alerts_screen.country_map.query(
+                        CountryAlertCityLabel
+                    )
+                    if (
+                        label.place.latitude,
+                        label.place.longitude,
+                    )
+                    == (
+                        alert_place_label.place.latitude,
+                        alert_place_label.place.longitude,
+                    )
+                )
+                alerts_screen._start_place_weather_preview(
+                    matching_place_label
+                )
+                await _settle(pilot, 3)
+                await app.pop_screen()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.alerts_workspace_roundtrip',
+                alerts_workspace_roundtrip,
+                counters=counters,
+            )
+            assert app.screen is dashboard
+            assert dashboard.alerts_panel.selected_row is changed_row
 
             async def time_updates() -> None:
                 for _ in range(40):

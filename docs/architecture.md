@@ -23,7 +23,7 @@ t key -> TropicalSystemsScreen -> global canonical tropical systems + products
 
 g key -> AlertsCentreScreen -> country-alert service/cache
                             -> complete map unit + provider warning polygons
-                            -> hovered-settlement current-weather tooltip/cache
+                            -> app-cached hovered-settlement weather tooltip
                             -> activated settlement -> WeatherScreen
 
 m key -> WorldLocationsScreen -> checked-in global map-unit geometry
@@ -49,6 +49,9 @@ background task handles.
 Complete forecast results, including air
 quality, are cached for fifteen minutes by requested coordinates and display
 units; the explicit `r` refresh bypasses that cache.
+Compact alert-map settlement weather is likewise cached for fifteen minutes by
+rounded coordinates and display units, coalesced while in flight, and capped at
+64 session entries so Dashboard and Alerts Centre reuse one response owner.
 It uses `WeatherController` for the main forecast refresh. `WeatherScreen`
 receives `WeatherUpdated` messages and explicitly forwards models to its
 widgets; `HourHighlighted` and `DaySelected` coordinate the selected hour/day
@@ -401,6 +404,9 @@ rail keeps stable identity-derived rows and one selection. Refresh-scoped
 only its `NEW` token as dark background-theme text on the primary colour,
 matching Alerts Centre, and is neither durable unread state nor an issuance-
 time claim.
+Identical generations do not rebuild rows or selected geometry; relative-time
+changes refresh only list labels, while changed provider content replaces the
+selected map and document.
 
 The Dashboard location rail keeps point warnings separate from the short-lived
 forecast cache. For its selected location it reuses the shared country-alert
@@ -426,9 +432,12 @@ bulletin batch for forty 0.25-second phases, then disappears. New alerts which
 project to the same world-map cell share one `!` using the most severe alert's
 colour, while distinct cells flash together. Only a generation received while
 Dashboard is current starts this pulse, and each identity is consumed once by
-the mounted Dashboard, so cached badges and unrelated later catalogue updates
-cannot replay it. The finite ten-second pulse is implemented by one task rather
-than a timer. The selected marker's cell is a preferred avoidance input
+the current `NEW` snapshot, so cached badges and unrelated later catalogue
+updates cannot replay it. Clearing a badge removes that identity from the
+snapshot, allowing a genuinely rediscovered alert to attract attention again.
+The finite ten-second pulse is implemented by one task rather than a timer, and
+its temporary marker widgets are removed when the pulse ends. The selected
+marker's cell is a preferred avoidance input
 for place callouts, so a valid opposite-side placement wins before ordinary
 overlap fallback. Screen suspension and unmount cancel temporary presentation,
 while a warm return restores the steady marker from the retained rail
@@ -526,9 +535,11 @@ label path.
 Settlement callouts contain names only and use ordinary theme text. They are
 native focusable controls. Hovering lazily requests compact current conditions
 and updates a non-interactive Rich tooltip with condition, temperature, rain,
-wind, and a full-forecast hint. Successful responses are cached briefly by
-rounded coordinates and all display units; hover changes use cancellation plus
-a request generation so stale results cannot update another label. Resize
+wind, and a full-forecast hint. Successful responses use the application's
+bounded settlement-weather cache shared with the Dashboard; hover changes use
+cancellation plus a request generation so stale results cannot update another
+label. Cancelling a hover does not cancel shared provider work, and failures
+remain retryable. Resize
 performs no weather work. Click, Enter, or Space converts the source-neutral
 place identity into ordinary location metadata and opens the complete Weather
 screen forecast. The persistent Alerts Centre retains its country, selected
