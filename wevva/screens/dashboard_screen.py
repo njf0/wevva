@@ -226,6 +226,7 @@ class DashboardForecastPanel(Container):
     def compose(self) -> ComposeResult:
         self.border_title = 'Location Forecast'
         yield Static('No location selected', id='dashboard-forecast-place')
+        yield Container(id='dashboard-location-alerts')
         yield Static(
             '──────────────────────────────────────────────────────────',
             classes='dashboard-forecast-separator',
@@ -241,7 +242,6 @@ class DashboardForecastPanel(Container):
             classes='dashboard-forecast-separator',
         )
         yield DashboardDailyForecast(id='dashboard-daily-forecast')
-        yield Container(id='dashboard-location-alerts')
         yield ContextBar(id='dashboard-forecast-context')
         yield Static(
             'Select a place to load its forecast.',
@@ -1329,7 +1329,8 @@ class DashboardScreen(Screen[None]):
         )
 
     def selected_alert_country_code(self) -> str | None:
-        row = self.alerts_panel.selected_row if self.is_mounted else None
+        panels = tuple(self.query(DashboardAlertsPanel)) if self.is_attached else ()
+        row = panels[0].selected_row if panels and panels[0].is_attached else None
         return row.country_code if row is not None else None
 
     def action_refresh_bulletin(self) -> None:
@@ -1535,8 +1536,26 @@ class DashboardScreen(Screen[None]):
     ) -> None:
         """Apply only the newest application-owned bulletin snapshot."""
 
-        if not self.is_mounted or generation < self._bulletin_generation:
+        if not self.is_attached or generation < self._bulletin_generation:
             return
+        alerts_panels = tuple(self.query(DashboardAlertsPanel))
+        world_maps = tuple(self.query(DashboardWorldMap))
+        detail_panels = tuple(self.query(DashboardAlertDetailPanel))
+        forecast_panels = tuple(self.query(DashboardForecastPanel))
+        widgets = (
+            *alerts_panels[:1],
+            *world_maps[:1],
+            *detail_panels[:1],
+            *forecast_panels[:1],
+        )
+        if (
+            len(widgets) != 4
+            or not all(widget.is_attached for widget in widgets)
+        ):
+            return
+        alerts_panel = alerts_panels[0]
+        world_map = world_maps[0]
+        detail_panel = detail_panels[0]
         arrived_while_open = (
             self._bulletin_generation >= 0
             and generation > self._bulletin_generation
@@ -1553,13 +1572,13 @@ class DashboardScreen(Screen[None]):
             country_alert_identity(row.alert) for row in rows if row.is_new
         )
         self._bulletin_generation = generation
-        self.alerts_panel.update_alerts(rows)
-        self.world_map.set_selected_alert(
-            self.alerts_panel.selected_row,
+        alerts_panel.update_alerts(rows)
+        world_map.set_selected_alert(
+            alerts_panel.selected_row,
         )
         if arrived_while_open and unflashed_rows:
-            self.world_map.flash_new_alerts(unflashed_rows)
-        self.alert_detail_panel.show_alert(self.alerts_panel.selected_row)
+            world_map.flash_new_alerts(unflashed_rows)
+        detail_panel.show_alert(alerts_panel.selected_row)
         self._ensure_persistent_alerts()
 
     def on_dashboard_alerts_panel_selected(

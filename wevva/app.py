@@ -555,7 +555,10 @@ class Wevva(App, inherit_bindings=False):
     def _on_bulletin_updated(self, generation: int) -> None:
         """Publish coordinator state without giving Dashboard fetch ownership."""
 
-        if self._dashboard_screen is None:
+        if (
+            self._dashboard_screen is None
+            or not self._dashboard_screen.is_attached
+        ):
             return
         self._dashboard_screen.update_bulletin(
             generation,

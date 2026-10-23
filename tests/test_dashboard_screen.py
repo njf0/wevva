@@ -169,6 +169,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(warning_panel.styles.border_right[0], '')
             self.assertEqual(warning_panel.styles.border_bottom[0], '')
             self.assertEqual(warning_panel.region.height, 5)
+            self.assertLess(
+                warning_panel.region.y,
+                screen.forecast_panel.current_conditions.region.y,
+            )
             self.assertLessEqual(
                 warning_panel.region.bottom,
                 screen.forecast_panel.content_region.bottom,
@@ -252,6 +256,22 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             BERLIN.latitude,
             BERLIN.longitude,
         )
+
+    async def test_bulletin_update_ignores_an_incomplete_dashboard_tree(self) -> None:
+        app = self._app()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+
+            screen = app.screen
+            self.assertIsInstance(screen, DashboardScreen)
+            generation = screen._bulletin_generation
+            await screen.alerts_panel.remove()
+            await _settle(pilot)
+
+            app._on_bulletin_updated(generation + 1)
+            self.assertEqual(screen._bulletin_generation, generation)
 
     async def test_wide_dashboard_uses_existing_state_without_fetching(self) -> None:
         app = self._app()

@@ -393,8 +393,11 @@ shared-feed duplicates, attribution first prefers an
 additional territory explicitly named in the provider-neutral alert text, then
 the source's declared primary country, and finally first-observed time plus
 country code. Application callbacks carry generation-numbered snapshots to the
-mounted Dashboard; mount and resume only read current state. The rail keeps
-stable identity-derived rows and one selection. Refresh-scoped `is_new` renders
+mounted Dashboard; mount and resume only read current state. Delivery skips a
+Dashboard whose child tree is incomplete during mounting or teardown, since
+the coordinator snapshot will be read on the next stable mount or resume. The
+rail keeps stable identity-derived rows and one selection. Refresh-scoped
+`is_new` renders
 only its `NEW` token as dark background-theme text on the primary colour,
 matching Alerts Centre, and is neither durable unread state nor an issuance-
 time claim.
@@ -404,8 +407,9 @@ forecast cache. For its selected location it reuses the shared country-alert
 catalogue, performs the same local geometry matching used by Weather, and
 refreshes native point-query sources for that location. A selection generation
 prevents a late warning result from replacing a newer place. Applicable alerts
-reuse Weather's compact tabs and preview, presented with only a severity-coloured
-top rule; activating one follows the Dashboard's existing Alerts Centre deep
+reuse Weather's compact tabs and preview immediately below the location heading,
+presented with only a severity-coloured top rule; activating one follows the
+Dashboard's existing Alerts Centre deep
 link rather than adopting the place as Weather state. At constrained heights an
 active warning preview takes the context tables' space; once the rail can fit
 both minimums, location, astronomy, and air-quality context returns beneath it.
