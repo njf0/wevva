@@ -417,6 +417,8 @@ class DashboardForecastPanel(Container):
         """Hide stale warning content while another location is selected."""
 
         self.location_alerts.display = False
+        for child in tuple(self.location_alerts.children):
+            child.remove()
         self._sync_context_visibility()
 
     def _sync_context_visibility(self) -> None:

@@ -151,7 +151,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_location_warnings_reuse_tabs_with_only_a_top_rule(self) -> None:
         app = self._app()
-        app.load_dashboard_alerts = AsyncMock(return_value=warning_alerts())
+        release_london_alerts = asyncio.Event()
+
+        async def load_dashboard_alerts(location):
+            if location.name == 'Berlin':
+                return warning_alerts()
+            await release_london_alerts.wait()
+            return []
+
+        app.load_dashboard_alerts = AsyncMock(side_effect=load_dashboard_alerts)
         app.open_alerts_centre_screen = Mock()
         async with app.run_test(size=(120, 30)) as pilot:
             await _settle(pilot, 8)
@@ -209,6 +217,19 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app.open_alerts_centre_screen.assert_called_once_with(
                 country_code='DE',
                 alert_identity=('nws', 'fixture-heat'),
+            )
+
+            london = next(
+                label
+                for label in screen.world_map.query(DashboardLocationLabel)
+                if label.location.name == 'London'
+            )
+            london.action_select_location()
+            await _settle(pilot)
+            self.assertFalse(screen.forecast_panel.location_alerts.display)
+            self.assertEqual(
+                len(screen.forecast_panel.location_alerts.children),
+                0,
             )
 
     async def test_dashboard_alert_loader_combines_catalogue_and_native_results(self) -> None:
