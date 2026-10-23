@@ -9,7 +9,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Awaitable, Callable
+from collections import defaultdict
+from contextlib import ExitStack
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import gc
 import json
 import platform
@@ -20,7 +23,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 import weakref
 
-from textual.widgets import Tabs
+from textual.widgets import OptionList, Tabs
 from wevva_warnings import CanonicalTropicalSystem, TropicalProduct, TropicalSystem
 
 from tests.test_alerts_centre_map import EAST_GERMANY, WEST_GERMANY, _alert
@@ -29,6 +32,7 @@ from tests.test_world_locations_map import LONDON, NEW_YORK, TOKYO
 from tests.weather_fixtures import weather_update
 from wevva import geography
 from wevva.app import Wevva
+from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
     DaySelected,
@@ -39,11 +43,27 @@ from wevva.messages import (
     WeatherAlertsUpdated,
 )
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
+from wevva.screens.dashboard_screen import (
+    DashboardAlertDetailPanel,
+    DashboardAlertsPanel,
+    DashboardForecastPanel,
+    DashboardScreen,
+    DashboardTropicalPanel,
+)
 from wevva.screens.search_screen import SearchScreen
 from wevva.screens.tropical_systems_screen import TropicalSystemsScreen
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.widgets.country_alerts_map import CountryAlertCityLabel
+from wevva.services.alert_bulletin import BulletinAlert
+from wevva.widgets.context_bar import ContextBar
+from wevva.widgets.daily_summary import DailySummaryTable
+from wevva.widgets.dashboard_hourly_forecast import DashboardHourlyForecast
+from wevva.widgets.dashboard_world_map import (
+    DashboardLocationLabel,
+    DashboardTropicalLabel,
+    DashboardWorldMap,
+)
 from wevva.widgets import country_alerts_map, tropical_track, world_locations_map
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 from wevva.widgets.world_locations_map import WorldLocationLabel
@@ -149,13 +169,17 @@ class _Recorder:
     def __init__(self, *, trace_memory: bool) -> None:
         self.trace_memory = trace_memory
         self.results: dict[str, _Observation] = {}
+        self.work_counts: dict[str, dict[str, int]] = {}
 
     async def measure(
         self,
         name: str,
         action: Callable[[], Awaitable[Any]],
+        *,
+        counters: dict[str, int] | None = None,
     ) -> Any:
         gc.collect()
+        before_counts = dict(counters or {})
         if self.trace_memory:
             before, _peak = tracemalloc.get_traced_memory()
             tracemalloc.reset_peak()
@@ -167,7 +191,28 @@ class _Recorder:
             _current, peak = tracemalloc.get_traced_memory()
             peak_kib = max(0, peak - before) / 1024
         self.results[name] = _Observation(elapsed_ms, peak_kib)
+        if counters is not None:
+            changed = {
+                key: value - before_counts.get(key, 0)
+                for key, value in sorted(counters.items())
+                if value != before_counts.get(key, 0)
+            }
+            self.work_counts[name] = changed
         return result
+
+
+def _counted_method(
+    counters: dict[str, int],
+    name: str,
+    method: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Wrap one production boundary for checkout-only structural counts."""
+
+    def counted(instance, *args: Any, **kwargs: Any) -> Any:
+        counters[name] += 1
+        return method(instance, *args, **kwargs)
+
+    return counted
 
 
 async def _settle(pilot, cycles: int = 2) -> None:
@@ -409,6 +454,7 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
             initial_location=BERLIN,
             saved_locations=[LONDON, NEW_YORK, TOKYO],
             emoji_enabled=False,
+            start_on_dashboard=False,
         )
 
     app = await recorder.measure('startup.construct_with_location', construct)
@@ -1004,17 +1050,318 @@ async def _workspace_scenarios(recorder: _Recorder) -> None:
         await runner.__aexit__(None, None, None)
 
 
-async def _run_once(*, trace_memory: bool) -> dict[str, _Observation]:
+async def _dashboard_scenarios(recorder: _Recorder) -> None:
+    """Exercise Dashboard-local work without live provider latency."""
+
+    counters: dict[str, int] = defaultdict(int)
+    systems = _tropical_systems()
+    update = weather_update(with_warnings=False)
+    forecast_gate: asyncio.Event | None = None
+    forecast_started = asyncio.Event()
+
+    async def fetch_forecast(**_kwargs: Any):
+        nonlocal forecast_gate
+        counters['provider.forecast'] += 1
+        gate = forecast_gate
+        if gate is not None:
+            forecast_started.set()
+            await gate.wait()
+            forecast_gate = None
+        return update
+
+    async def load_location_alerts(_location: LocationMetadata) -> list:
+        counters['provider.location_alerts'] += 1
+        return []
+
+    async def load_products(system: TropicalSystem) -> list[TropicalProduct]:
+        counters['provider.tropical_products'] += 1
+        return _tropical_products(system)
+
+    app = Wevva(
+        initial_location=BERLIN,
+        saved_locations=[LONDON, NEW_YORK, TOKYO],
+        emoji_enabled=False,
+        start_on_dashboard=True,
+    )
+    app.action_refresh = AsyncMock()
+    app.controller.fetch = AsyncMock(side_effect=fetch_forecast)
+    app.load_dashboard_alerts = AsyncMock(side_effect=load_location_alerts)
+    app.load_tropical_products = AsyncMock(side_effect=load_products)
+    app._tropical_system_cache = (time.monotonic(), tuple(systems))
+    for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
+        app._saved_location_weather_summaries[location_key(location)] = (
+            SavedLocationWeatherSummary(
+                temperature=11.0 + index,
+                temperature_unit='°C',
+            )
+        )
+
+    boundaries = (
+        (DashboardWorldMap, '_sync_label_widgets', 'world.labels_sync'),
+        (DashboardWorldMap, '_reflow', 'world.reflow'),
+        (DashboardHourlyForecast, '_rebuild', 'forecast.hourly_rebuild'),
+        (DailySummaryTable, '_update_display', 'forecast.daily_rebuild'),
+        (ContextBar, '_update_display', 'forecast.context_update'),
+        (DashboardForecastPanel, 'set_layout', 'forecast.layout_apply'),
+        (DashboardForecastPanel, 'show_forecast', 'forecast.snapshot_apply'),
+        (DashboardAlertsPanel, 'update_alerts', 'bulletin.list_update'),
+        (
+            DashboardAlertDetailPanel,
+            'show_alert',
+            'bulletin.detail_update',
+        ),
+        (
+            country_alerts_map.CountryAlertsMap,
+            '_rebuild_view',
+            'bulletin.alert_map_rebuild',
+        ),
+        (DashboardTropicalPanel, 'show_system', 'tropical.system_apply'),
+        (
+            tropical_track.LargeTropicalStormTrackScope,
+            'update_system',
+            'tropical.track_update',
+        ),
+    )
+
+    runner = app.run_test(size=(180, 55))
+    with ExitStack() as patches:
+        for owner, method_name, counter_name in boundaries:
+            original = getattr(owner, method_name)
+            patches.enter_context(
+                patch.object(
+                    owner,
+                    method_name,
+                    _counted_method(counters, counter_name, original),
+                )
+            )
+
+        async def enter():
+            pilot = await runner.__aenter__()
+            await _settle(pilot, 6)
+            return pilot
+
+        pilot = await recorder.measure(
+            'dashboard.cold_entry',
+            enter,
+            counters=counters,
+        )
+        try:
+            dashboard = app.screen
+            assert isinstance(dashboard, DashboardScreen)
+            assert dashboard.forecast_panel.hourly_forecast.display
+            dashboard_identity = id(dashboard)
+            timer = dashboard._time_refresh_timer
+
+            async def cached_resume() -> None:
+                await app.pop_screen()
+                await _settle(pilot, 2)
+                app.open_dashboard_screen()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.cached_resume',
+                cached_resume,
+                counters=counters,
+            )
+            assert id(app.screen) == dashboard_identity
+            assert dashboard._time_refresh_timer is timer
+
+            app._forecast_cache[app._forecast_cache_key_for(LONDON)] = (
+                app._forecast_cache_clock(),
+                update,
+            )
+            london_label = next(
+                label
+                for label in dashboard.world_map.query(DashboardLocationLabel)
+                if label.location.name == LONDON.name
+            )
+
+            async def cached_place_selection() -> None:
+                london_label.action_select_location()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.place_selection_cached',
+                cached_place_selection,
+                counters=counters,
+            )
+
+            app._forecast_cache.pop(app._forecast_cache_key_for(TOKYO), None)
+            tokyo_label = next(
+                label
+                for label in dashboard.world_map.query(DashboardLocationLabel)
+                if label.location.name == TOKYO.name
+            )
+            forecast_gate = asyncio.Event()
+            forecast_started = asyncio.Event()
+
+            async def start_uncached_place_selection() -> None:
+                tokyo_label.action_select_location()
+                await forecast_started.wait()
+                await _settle(pilot, 2)
+
+            await recorder.measure(
+                'dashboard.place_selection_uncached_start',
+                start_uncached_place_selection,
+                counters=counters,
+            )
+
+            async def complete_uncached_place_selection() -> None:
+                assert forecast_gate is not None
+                forecast_gate.set()
+                await _settle(pilot, 5)
+
+            await recorder.measure(
+                'dashboard.place_selection_uncached_completion',
+                complete_uncached_place_selection,
+                counters=counters,
+            )
+
+            async def summary_updates() -> None:
+                for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
+                    dashboard.update_weather_summary(
+                        location,
+                        SavedLocationWeatherSummary(
+                            temperature=18.0 + index,
+                            temperature_unit='°C',
+                        ),
+                        temperature_unit='celsius',
+                    )
+                await _settle(pilot, 3)
+
+            await recorder.measure(
+                'dashboard.summary_updates_3',
+                summary_updates,
+                counters=counters,
+            )
+
+            tropical_label = next(
+                iter(dashboard.world_map.query(DashboardTropicalLabel))
+            )
+
+            async def tropical_selection() -> None:
+                tropical_label.action_activate()
+                await _settle(pilot, 6)
+
+            await recorder.measure(
+                'dashboard.tropical_selection',
+                tropical_selection,
+                counters=counters,
+            )
+
+            bulletin_alert = _alert(
+                'dashboard-flood',
+                severity='Severe',
+                geometry=WEST_GERMANY,
+            )
+            bulletin_row = BulletinAlert(
+                'DE',
+                bulletin_alert,
+                datetime.now(UTC),
+                True,
+            )
+
+            async def bulletin_delivery() -> None:
+                dashboard.update_bulletin(1, (bulletin_row,))
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_delivery_1',
+                bulletin_delivery,
+                counters=counters,
+            )
+
+            option = dashboard.alerts_panel.alert_list.options[0]
+
+            async def alert_selection() -> None:
+                dashboard.alerts_panel.on_option_list_option_selected(
+                    OptionList.OptionSelected(
+                        dashboard.alerts_panel.alert_list,
+                        option,
+                        0,
+                    )
+                )
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.alert_selection',
+                alert_selection,
+                counters=counters,
+            )
+
+            async def unchanged_bulletin_delivery() -> None:
+                dashboard.update_bulletin(2, (bulletin_row,))
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.bulletin_delivery_unchanged',
+                unchanged_bulletin_delivery,
+                counters=counters,
+            )
+
+            async def time_updates() -> None:
+                for _ in range(40):
+                    dashboard.forecast_panel.context_bar.refresh_time_display()
+                await _settle(pilot)
+
+            await recorder.measure(
+                'dashboard.time_updates_40',
+                time_updates,
+                counters=counters,
+            )
+            await recorder.measure(
+                'dashboard.resize_burst',
+                lambda: _resize_burst(pilot),
+                counters=counters,
+            )
+
+            async def dashboard_cycles() -> None:
+                for _ in range(LIFECYCLE_CYCLES):
+                    await app.pop_screen()
+                    await _settle(pilot, 2)
+                    app.open_dashboard_screen()
+                    await _settle(pilot, 3)
+
+            await recorder.measure(
+                'dashboard.weather_dashboard_5_cycles',
+                dashboard_cycles,
+                counters=counters,
+            )
+            assert app.screen is dashboard
+            assert dashboard._time_refresh_timer is timer
+            assert dashboard._forecast_wait_task is None
+            assert dashboard._location_alert_task is None
+            assert dashboard._tropical_wait_task is None
+            assert dashboard._tropical_product_task is None
+            assert dashboard._tropical_selection_refresh_task is None
+            assert dashboard._alert_place_weather_task is None
+        finally:
+            await runner.__aexit__(None, None, None)
+
+
+async def _run_once(
+    *,
+    trace_memory: bool,
+    scope: str,
+) -> tuple[dict[str, _Observation], dict[str, dict[str, int]]]:
     _clear_geography_caches()
     recorder = _Recorder(trace_memory=trace_memory)
-    await _search_scenarios(recorder)
-    await _workspace_scenarios(recorder)
-    return recorder.results
+    if scope == 'all':
+        await _search_scenarios(recorder)
+        await _workspace_scenarios(recorder)
+    await _dashboard_scenarios(recorder)
+    return recorder.results, recorder.work_counts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repeat', type=int, default=3)
+    parser.add_argument(
+        '--scope',
+        choices=('all', 'dashboard'),
+        default='all',
+        help='Run the complete historical matrix or only Dashboard scenarios.',
+    )
     parser.add_argument(
         '--warmup',
         type=int,
@@ -1035,20 +1382,43 @@ def main() -> None:
         tracemalloc.start()
 
     for _ in range(args.warmup):
-        asyncio.run(_run_once(trace_memory=False))
+        asyncio.run(_run_once(trace_memory=False, scope=args.scope))
     runs = [
-        asyncio.run(_run_once(trace_memory=args.tracemalloc))
+        asyncio.run(
+            _run_once(
+                trace_memory=args.tracemalloc,
+                scope=args.scope,
+            )
+        )
         for _ in range(args.repeat)
     ]
     scenarios = {}
-    for name in runs[0]:
-        elapsed = [run[name].elapsed_ms for run in runs]
-        peaks = [run[name].peak_kib for run in runs if run[name].peak_kib is not None]
+    for name in runs[0][0]:
+        elapsed = [run[0][name].elapsed_ms for run in runs]
+        peaks = [
+            run[0][name].peak_kib
+            for run in runs
+            if run[0][name].peak_kib is not None
+        ]
         scenarios[name] = {
             'median_ms': round(median(elapsed), 3),
             'range_ms': [round(min(elapsed), 3), round(max(elapsed), 3)],
             'peak_kib': round(median(peaks), 1) if peaks else None,
         }
+    work_counts = {
+        name: {
+            key: int(median([run[1].get(name, {}).get(key, 0) for run in runs]))
+            for key in sorted(
+                {
+                    key
+                    for run in runs
+                    for key in run[1].get(name, {})
+                }
+            )
+        }
+        for name in scenarios
+        if any(name in run[1] for run in runs)
+    }
 
     print(
         json.dumps(
@@ -1067,6 +1437,7 @@ def main() -> None:
                     'warmup': args.warmup,
                     'repeat': args.repeat,
                     'tracemalloc': args.tracemalloc,
+                    'scope': args.scope,
                 },
                 'fixtures': {
                     'search_places': [10, 100, 10],
@@ -1080,10 +1451,19 @@ def main() -> None:
                     },
                     'tropical': {'systems': 2, 'source_observations': 3},
                     'world_locations': {'ordinary': 3, 'stress': 40},
+                    'dashboard': {
+                        'saved_locations': 3,
+                        'hourly_points': 72,
+                        'daily_points': 7,
+                        'tropical_systems': 2,
+                        'source_observations': 3,
+                        'bulletin_alerts': 1,
+                    },
                     'resize_events_per_burst': 4,
                     'lifecycle_cycles': LIFECYCLE_CYCLES,
                 },
                 'scenarios': scenarios,
+                'work_counts': work_counts,
             },
             indent=2,
             sort_keys=True,

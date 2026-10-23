@@ -62,6 +62,7 @@ class DashboardDailyForecast(Container):
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self._row_count = 3
+        self._layout_pending = False
 
     def compose(self) -> ComposeResult:
         yield DailySummaryTable(id='dashboard-daily-table')
@@ -71,11 +72,11 @@ class DashboardDailyForecast(Container):
         return self.query_one('#dashboard-daily-table', DailySummaryTable)
 
     def on_mount(self) -> None:
-        self._apply_layout()
+        self._schedule_layout()
 
     def on_resize(self, event: Resize) -> None:
         event.stop()
-        self._apply_layout()
+        self._schedule_layout()
 
     def set_row_count(self, row_count: int) -> None:
         """Set the number of standard future-day rows retained here."""
@@ -85,14 +86,23 @@ class DashboardDailyForecast(Container):
         self.display = row_count > 0
         if row_count != self._row_count:
             self._row_count = row_count
-            self._apply_layout()
+            self._schedule_layout()
 
     def update_forecast(self, event: WeatherUpdated) -> None:
         """Render future days from the shared daily model."""
 
         self.table.daily_model = event.daily
 
+    def _schedule_layout(self) -> None:
+        """Coalesce parent-budget and child-resize layout requests."""
+
+        if not self.is_mounted or self._layout_pending:
+            return
+        self._layout_pending = True
+        self.call_after_refresh(self._apply_layout)
+
     def _apply_layout(self) -> None:
+        self._layout_pending = False
         if not self.is_mounted:
             return
         available = max(1, self.content_size.width - 1)

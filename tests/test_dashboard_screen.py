@@ -941,8 +941,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.alerts_panel,
             )
 
-            await pilot.resize_terminal(80, 24)
-            await _settle(pilot)
+            with patch.object(
+                screen.forecast_panel.daily_forecast.table,
+                '_update_display',
+                wraps=screen.forecast_panel.daily_forecast.table._update_display,
+            ) as update_daily:
+                await pilot.resize_terminal(80, 24)
+                await _settle(pilot)
+                self.assertEqual(update_daily.call_count, 1)
             tabs = screen.query_one('#dashboard-pane-tabs', Tabs)
             self.assertTrue(tabs.display)
             self.assertEqual(
@@ -1271,6 +1277,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 if label.location.name == 'London'
             )
             self.assertIn('--', london.label_text)
+            show_forecast = Mock(
+                wraps=dashboard.forecast_panel.show_forecast,
+            )
+            dashboard.forecast_panel.show_forecast = show_forecast
+            rebuild_hourly = Mock(
+                wraps=dashboard.forecast_panel.hourly_forecast._rebuild,
+            )
+            dashboard.forecast_panel.hourly_forecast._rebuild = rebuild_hourly
 
             london.action_select_location()
             await forecast_started.wait()
@@ -1314,6 +1328,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 app.saved_location_weather_summary(LONDON).temperature,
                 13,
             )
+            self.assertEqual(show_forecast.call_count, 1)
+            self.assertEqual(rebuild_hourly.call_count, 1)
+
+            app._update_saved_location_weather(LONDON, _summary(18))
+            await _settle(pilot)
+            self.assertEqual(show_forecast.call_count, 1)
+            self.assertIn('18', london.label_text)
 
     async def test_late_place_forecast_cannot_replace_newer_selection(self) -> None:
         app = self._app()
@@ -1579,14 +1600,20 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             tokyo.action_select_location()
             await _settle(pilot)
 
-            await pilot.press('w')
-            await _settle(pilot)
-            self.assertIs(app.screen, weather)
-            self.assertEqual(app.location, BERLIN)
-            app.action_refresh.assert_not_awaited()
+            with patch.object(
+                dashboard.forecast_panel.hourly_forecast,
+                'update_forecast',
+                wraps=dashboard.forecast_panel.hourly_forecast.update_forecast,
+            ) as update_hourly:
+                await pilot.press('w')
+                await _settle(pilot)
+                self.assertIs(app.screen, weather)
+                self.assertEqual(app.location, BERLIN)
+                app.action_refresh.assert_not_awaited()
 
-            await pilot.press('b')
-            await _settle(pilot)
+                await pilot.press('b')
+                await _settle(pilot)
+                self.assertEqual(update_hourly.call_count, 0)
             self.assertIs(app.screen, dashboard)
             self.assertEqual(dashboard.world_map.selected_location_key, location_key(TOKYO))
 

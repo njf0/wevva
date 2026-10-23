@@ -357,10 +357,28 @@ class DashboardForecastPanel(Container):
         self,
         location: LocationMetadata,
         event: WeatherUpdated,
+        *,
+        force: bool = False,
     ) -> None:
         """Render one complete app-owned forecast in the narrow rail."""
 
         if not self.is_mounted:
+            return
+        identity = (
+            location.latitude,
+            location.longitude,
+            location.elevation,
+            location.name,
+            location.admin,
+            location.country,
+            location.country_code,
+            location.timezone,
+            location.timezone_abbreviation,
+            id(event.current),
+            id(event.hourly),
+            id(event.daily),
+        )
+        if not force and identity == getattr(self, '_forecast_identity', None):
             return
         self.loading = False
         self.query_one('#dashboard-forecast-status', Static).loading = False
@@ -383,6 +401,7 @@ class DashboardForecastPanel(Container):
         for separator in self.query('.dashboard-forecast-separator'):
             separator.display = True
         self.query_one('#dashboard-forecast-status', Static).display = False
+        self._forecast_identity = identity
 
     def show_hour(self, index: int) -> None:
         """Update standard current instruments and AQI for one hourly row."""
@@ -441,6 +460,7 @@ class DashboardForecastPanel(Container):
         )
 
     def _show_status(self, message: str) -> None:
+        self._forecast_identity = None
         self._forecast_event = None
         self.current_conditions.display = False
         self.hourly_forecast.display = False
@@ -1248,7 +1268,6 @@ class DashboardScreen(Screen[None]):
         self._layout_budget: DashboardLayoutBudget | None = None
         self._active_pane = 'map'
         self._selected_location: LocationMetadata | None = None
-        self._displayed_location: LocationMetadata | None = None
         self._selected_tropical_system: CanonicalTropicalSystem | None = None
         self._selected_tropical_observation: TropicalSystem | None = None
         self._forecast_request_generation = 0
@@ -1449,11 +1468,6 @@ class DashboardScreen(Screen[None]):
             return
         self.world_map.set_temperature_unit(temperature_unit)
         self.world_map.update_weather_summary(location, summary)
-        if (
-            self._displayed_location is not None
-            and location_key(self._displayed_location) == location_key(location)
-        ):
-            self._show_persistent_location()
 
     def refresh_appearance(self) -> None:
         """Rebuild theme/emoji-sensitive Rich content from cached state only."""
@@ -1474,7 +1488,7 @@ class DashboardScreen(Screen[None]):
         )
         self._cancel_alert_place_weather()
         self.alert_detail_panel.alert_map.reset_city_tooltips()
-        self._show_persistent_location()
+        self._show_persistent_location(force=True)
         for panel in self.query(DashboardWeatherAlertsPanel):
             panel.refresh_appearance()
         self._ensure_persistent_alerts()
@@ -1926,15 +1940,14 @@ class DashboardScreen(Screen[None]):
         if was_loading and self.is_mounted:
             self.tropical_panel.set_loading(False)
 
-    def _show_persistent_location(self) -> None:
+    def _show_persistent_location(self, *, force: bool = False) -> None:
         location = self._selected_location or self.app.location
-        self._displayed_location = location
         if location is None:
             self.forecast_panel.show_location(None)
             return
         snapshot = self.app.dashboard_forecast_snapshot(location)
         if snapshot is not None:
-            self.forecast_panel.show_forecast(location, snapshot)
+            self.forecast_panel.show_forecast(location, snapshot, force=force)
             return
         if (
             self._forecast_wait_task is not None

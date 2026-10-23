@@ -54,6 +54,7 @@ class DashboardHourlyForecast(Container):
         self._indices: list[int] = []
         self._column_widths: tuple[int, ...] = ()
         self._cell_padding = 0
+        self._rebuild_pending = False
 
     def compose(self) -> ComposeResult:
         table = DataTable(
@@ -75,22 +76,30 @@ class DashboardHourlyForecast(Container):
         return self.query_one('#dashboard-hourly-table', DataTable)
 
     def on_mount(self) -> None:
-        self._rebuild()
+        self._schedule_rebuild()
 
     def on_resize(self, event: Resize) -> None:
         event.stop()
         padding, widths = _fitted_layout(max(1, event.size.width - 1))
         if padding != self._cell_padding or widths != self._column_widths:
-            self._rebuild()
+            self._schedule_rebuild()
 
     def update_forecast(self, event: WeatherUpdated) -> None:
         """Render the next 24 hours from an app-owned forecast snapshot."""
 
         self._hourly_model = event.hourly
-        if self.is_mounted:
-            self._rebuild()
+        self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """Coalesce model and size changes delivered in the same frame."""
+
+        if not self.is_mounted or self._rebuild_pending:
+            return
+        self._rebuild_pending = True
+        self.call_after_refresh(self._rebuild)
 
     def _rebuild(self) -> None:
+        self._rebuild_pending = False
         if not self.is_mounted:
             return
         table = self.table
