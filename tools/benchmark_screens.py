@@ -1098,6 +1098,11 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
 
     boundaries = (
         (DashboardWorldMap, '_sync_label_widgets', 'world.labels_sync'),
+        (
+            DashboardWorldMap,
+            '_apply_label_state',
+            'world.label_state_apply',
+        ),
         (DashboardWorldMap, '_reflow', 'world.reflow'),
         (DashboardHourlyForecast, '_rebuild', 'forecast.hourly_rebuild'),
         (DailySummaryTable, '_update_display', 'forecast.daily_rebuild'),
@@ -1232,6 +1237,28 @@ async def _dashboard_scenarios(recorder: _Recorder) -> None:
             await recorder.measure(
                 'dashboard.summary_updates_3',
                 summary_updates,
+                counters=counters,
+            )
+
+            async def map_selection_changes() -> None:
+                dashboard.world_map.set_selected_location(LONDON)
+                await _settle(pilot)
+                dashboard.world_map.set_selected_location(TOKYO)
+                await _settle(pilot)
+
+            await recorder.measure(
+                'dashboard.map_selection_changes_2',
+                map_selection_changes,
+                counters=counters,
+            )
+
+            async def appearance_refresh() -> None:
+                dashboard.refresh_appearance()
+                await _settle(pilot, 4)
+
+            await recorder.measure(
+                'dashboard.appearance_refresh',
+                appearance_refresh,
                 counters=counters,
             )
 

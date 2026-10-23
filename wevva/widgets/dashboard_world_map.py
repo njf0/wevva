@@ -362,18 +362,24 @@ class DashboardWorldMap(WorldLocationsMap):
     def set_active_location(self, location: LocationMetadata | None) -> None:
         """Update the active-place emphasis without changing selection."""
 
-        self._active_location_key = (
+        key = (
             location_key(location) if location is not None else None
         )
+        if key == self._active_location_key:
+            return
+        self._active_location_key = key
         self._apply_label_state()
         self._schedule_reflow()
 
     def set_selected_location(self, location: LocationMetadata | None) -> None:
         """Apply persistent dashboard selection without moving callouts."""
 
-        self._selected_location_key = (
+        key = (
             location_key(location) if location is not None else None
         )
+        if key == self._selected_location_key:
+            return
+        self._selected_location_key = key
         self._apply_label_state()
 
     def set_tropical_loading(self) -> None:
@@ -385,12 +391,17 @@ class DashboardWorldMap(WorldLocationsMap):
     def set_tropical_systems(
         self,
         systems: Sequence[CanonicalTropicalSystem],
+        *,
+        force: bool = False,
     ) -> None:
         """Replace canonical storm inputs while retaining matching widgets."""
 
-        self._tropical_systems = sort_canonical_tropical_systems_by_severity(
+        sorted_systems = sort_canonical_tropical_systems_by_severity(
             systems
         )
+        if not force and sorted_systems == self._tropical_systems:
+            return
+        self._tropical_systems = sorted_systems
         if self.is_mounted:
             self._sync_tropical_label_widgets()
             self._apply_label_state()
@@ -400,9 +411,12 @@ class DashboardWorldMap(WorldLocationsMap):
         self,
         system: CanonicalTropicalSystem | None,
     ) -> None:
-        self._selected_tropical_key = (
+        key = (
             canonical_storm_key(system) if system is not None else None
         )
+        if key == self._selected_tropical_key:
+            return
+        self._selected_tropical_key = key
         self._apply_label_state()
         self._schedule_reflow()
 

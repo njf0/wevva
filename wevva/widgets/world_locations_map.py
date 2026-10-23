@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import astuple
 from functools import lru_cache
 import math
 
@@ -178,7 +179,12 @@ class WorldLocationsMap(Container):
         super().__init__(id=id)
         self.border_title = 'Saved Locations — World'
         self._locations = list(locations)
+        self._location_keys = {
+            location_key(location) for location in self._locations
+        }
         self._summaries = dict(summaries or {})
+        self._location_state = _location_state(self._locations)
+        self._summary_state = _summary_state(self._summaries)
         self._temperature_unit = temperature_unit
         self._labels: dict[str, WorldLocationLabel] = {}
         self._placements: dict[str, WorldLocationPlacement] = {}
@@ -200,13 +206,29 @@ class WorldLocationsMap(Container):
         locations: Sequence[LocationMetadata],
         *,
         summaries: Mapping[str, SavedLocationWeatherSummary] | None = None,
+        force: bool = False,
     ) -> None:
         """Replace map inputs while retaining widgets for unchanged locations."""
 
-        self._locations = list(locations)
+        new_locations = list(locations)
+        new_location_state = _location_state(new_locations)
+        new_summaries = (
+            dict(summaries) if summaries is not None else self._summaries
+        )
+        new_summary_state = _summary_state(new_summaries)
+        changed = (
+            new_location_state != self._location_state
+            or new_summary_state != self._summary_state
+        )
+        self._locations = new_locations
+        self._location_keys = {
+            location_key(location) for location in new_locations
+        }
         if summaries is not None:
-            self._summaries = dict(summaries)
-        if self.is_mounted:
+            self._summaries = new_summaries
+        self._location_state = new_location_state
+        self._summary_state = new_summary_state
+        if self.is_mounted and (changed or force):
             self._sync_label_widgets()
             self._schedule_reflow()
 
@@ -218,11 +240,20 @@ class WorldLocationsMap(Container):
         """Update one existing callout without rebuilding the map surface."""
 
         key = location_key(location)
+        if key not in self._location_keys:
+            return
+        previous_state = self._summary_state.get(key)
+        next_state = _summary_display_state(summary)
         self._summaries[key] = summary
+        self._summary_state = _summary_state(self._summaries)
+        if next_state == previous_state:
+            return
         label = self._labels.get(key)
         if label is not None:
+            previous_width = cell_len(label.label_text)
             label.update_weather(summary, temperature_unit=self._temperature_unit)
-            self._schedule_reflow()
+            if cell_len(label.label_text) != previous_width:
+                self._schedule_reflow()
 
     def set_temperature_unit(self, temperature_unit: str) -> None:
         """Recolour every callout for a changed temperature unit."""
@@ -230,12 +261,16 @@ class WorldLocationsMap(Container):
         if temperature_unit == self._temperature_unit:
             return
         self._temperature_unit = temperature_unit
+        width_changed = False
         for key, label in self._labels.items():
+            previous_width = cell_len(label.label_text)
             label.update_weather(
                 self._summaries.get(key),
                 temperature_unit=temperature_unit,
             )
-        self._schedule_reflow()
+            width_changed |= cell_len(label.label_text) != previous_width
+        if width_changed:
+            self._schedule_reflow()
 
     def focus_location(self, location: LocationMetadata | None) -> bool:
         """Focus a visible callout for ``location`` when one exists."""
@@ -274,8 +309,10 @@ class WorldLocationsMap(Container):
         return True
 
     def on_mount(self) -> None:
-        self._sync_label_widgets()
-        self._schedule_reflow()
+        if not self._labels:
+            self._sync_label_widgets()
+        if self._current_frame is None:
+            self._schedule_reflow()
 
     def on_resize(self, event: Resize) -> None:
         del event
@@ -431,6 +468,29 @@ def _valid_location(location: LocationMetadata) -> bool:
         and math.isfinite(longitude)
         and -360.0 <= longitude <= 360.0
     )
+
+
+def _location_state(
+    locations: Sequence[LocationMetadata],
+) -> tuple[tuple[object, ...], ...]:
+    """Snapshot mutable location values which affect map presentation."""
+
+    return tuple(astuple(location) for location in locations)
+
+
+def _summary_display_state(
+    summary: SavedLocationWeatherSummary,
+) -> tuple[object, ...]:
+    return summary.temperature, summary.temperature_unit, summary.error
+
+
+def _summary_state(
+    summaries: Mapping[str, SavedLocationWeatherSummary],
+) -> dict[str, tuple[object, ...]]:
+    return {
+        key: _summary_display_state(summary)
+        for key, summary in summaries.items()
+    }
 
 
 __all__ = [

@@ -206,6 +206,13 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
                 world_resource = stack.enter_context(
                     patch('wevva.widgets.world_locations_map.world_map_unit_polygons')
                 )
+                reflow = stack.enter_context(
+                    patch.object(
+                        world_map,
+                        '_reflow',
+                        new=Mock(wraps=world_map._reflow),
+                    )
+                )
                 for index, location in enumerate((LONDON, NEW_YORK, TOKYO)):
                     world_map.update_weather_summary(
                         location,
@@ -219,13 +226,62 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
 
             cache_after = _world_frame.cache_info()
             self.assertEqual(cache_after.misses, cache_before.misses)
-            self.assertEqual(cache_after.hits, cache_before.hits + 1)
+            self.assertEqual(cache_after.hits, cache_before.hits)
             backdrop_update.assert_not_called()
             world_resource.assert_not_called()
+            reflow.assert_not_called()
             for update in label_updates:
                 update.assert_called_once()
             self.assertEqual(list(world_map.query(WorldLocationLabel)), labels)
             self.assertIs(app.focused, labels[0])
+
+            with patch.object(
+                world_map,
+                '_reflow',
+                wraps=world_map._reflow,
+            ) as reflow:
+                world_map.update_weather_summary(
+                    LONDON,
+                    SavedLocationWeatherSummary(
+                        temperature=100,
+                        temperature_unit='°C',
+                    ),
+                )
+                for _ in range(3):
+                    await pilot.pause()
+                reflow.assert_called_once_with()
+
+    async def test_summary_for_location_outside_map_is_ignored(self) -> None:
+        app = _WorldMapApp()
+        outside = LocationMetadata(
+            name='Berlin',
+            country='Germany',
+            country_code='DE',
+            latitude=52.52,
+            longitude=13.405,
+        )
+        async with app.run_test(size=(100, 30)) as pilot:
+            for _ in range(3):
+                await pilot.pause()
+
+            world_map = app.world_map
+            with patch.object(
+                world_map,
+                '_reflow',
+                wraps=world_map._reflow,
+            ) as reflow:
+                world_map.update_weather_summary(
+                    outside,
+                    SavedLocationWeatherSummary(
+                        temperature=14,
+                        temperature_unit='°C',
+                    ),
+                )
+                for _ in range(2):
+                    await pilot.pause()
+
+            self.assertNotIn(location_key(outside), world_map._summaries)
+            reflow.assert_not_called()
 
     async def test_resize_repositions_existing_native_widgets(self) -> None:
         app = _WorldMapApp()

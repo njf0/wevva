@@ -1478,6 +1478,7 @@ class DashboardScreen(Screen[None]):
         self.world_map.set_locations(
             locations,
             summaries=self.app.saved_location_weather_summaries(locations),
+            force=True,
         )
         self.world_map.set_temperature_unit(self.app.temperature_unit)
         if (systems := self.app.tropical_systems_snapshot()) is not None:

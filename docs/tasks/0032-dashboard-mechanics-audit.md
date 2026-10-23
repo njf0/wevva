@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — Slices A-B complete
+In progress — Slices A-C complete
 
 ## Context
 
@@ -596,3 +596,71 @@ The three focused mounted regressions pass, as does a one-pass structural
 matrix after the final hourly coalescing change. `compileall` and
 `git diff --check` also pass. No live provider, interactive terminal, colour,
 font, emoji, or manual mouse check was performed.
+
+### Slice C — world map and saved-location integration
+
+Slice C retained `WorldLocationsMap` as the shared map/callout owner and kept
+`DashboardWorldMap` as its interaction-specific subclass. The existing
+projected-land and bounded frame caches were already correctly reused; no new
+map cache, projection layer, or generic screen abstraction was warranted.
+
+The measured redundant work was removed at the existing input boundaries:
+
+- `WorldLocationsMap.set_locations()` snapshots the mutable location values
+  and rendered summary values it last received. Identical resume input now
+  updates stored references without synchronizing widgets or planning
+  callouts. A narrow `force` option is used only by Dashboard appearance
+  refresh so theme-sensitive labels and the land backdrop are still rebuilt.
+- Active location, selected location, selected tropical system, and canonical
+  tropical-system setters now return when their effective key or ordered input
+  is unchanged. Actual place selection still reapplies selection classes, and
+  active/storm changes still reflow because they change callout priority.
+- Individual weather-summary delivery updates its label but schedules a map
+  reflow only when the rendered cell width changes. Temperature-unit changes
+  use the same rule. The callout planner depends on width and position, not
+  text colour or the numeric value itself.
+- A map now ignores summaries for locations outside its owned location set.
+  Previously, the active Weather location could enter the Dashboard map's
+  internal summary dictionary even when it was not saved; the first resume
+  then removed that stray entry and falsely treated the map as changed.
+- Remount initialization now preserves already-retained labels and frames.
+  Missing labels or a missing frame still take the normal initialization path;
+  resize and forced appearance refresh remain authoritative invalidations.
+
+The benchmark added explicit selection-only and appearance-refresh scenarios
+plus a label-state counter. In the comparable one-warm-up/three-sample pass,
+cached resume and five Weather/Dashboard cycles performed zero location-label
+synchronizations, selection-state applications, or world reflows. The Slice A
+baseline performed one label synchronization and reflow per resume/cycle.
+Three same-width summary updates now cross no counted forecast or map boundary,
+down from one forecast/hourly rebuild in Slice A and one remaining world reflow
+after Slice B. Two real selection changes perform exactly two class-state
+applications and no reflow. Appearance refresh deliberately performs one label
+synchronization, one state application, and one reflow; four real resizes still
+perform four reflows.
+
+Indicative medians were 1,598 ms for cold entry, 409 ms for cached resume,
+43 ms for three summary updates, 39 ms for two selection-only changes, 126 ms
+for appearance refresh, and 2,419 ms for five navigation cycles. Resume and
+cycle medians were below Slice B's 466 ms and 2,788 ms observations, while the
+resize burst varied upward. Structural counts remain the claimed result.
+
+#### Slice C accounting and verification
+
+- Production: `+86/-11` lines across the shared world map, Dashboard subclass,
+  and one forced appearance-refresh call. Most additions are small input-state
+  snapshots and guards; no new owner or dependency was introduced.
+- Tests: `+100/-17` lines across the mounted Dashboard and world-map suites,
+  covering unchanged resume, same-width and width-changing summaries,
+  non-owned summary rejection, selection preservation, and forced appearance
+  refresh.
+- Audit tooling: `+27/-0` lines for the selection/appearance scenarios and
+  label-state counter.
+- Public API, provider requests, application summary cache, saved-location
+  ordering, map projection, callout policy, resize behavior, focus behavior,
+  visual output, and specialist-screen ownership: unchanged.
+
+Five focused mounted regressions, all nine shared world-map tests, and the
+final three-sample Dashboard matrix pass. `compileall` and `git diff --check`
+also pass. No live provider, interactive terminal, colour, font, emoji, or
+manual mouse check was performed.

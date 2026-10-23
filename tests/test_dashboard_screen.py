@@ -444,19 +444,30 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             app.controller.fetch.assert_not_awaited()
 
             screen.refresh_appearance = Mock(wraps=screen.refresh_appearance)
-            await app._on_settings_result(
-                {
-                    'temperature_unit': app.temperature_unit,
-                    'wind_speed_unit': app.wind_speed_unit,
-                    'precipitation_unit': app.precipitation_unit,
-                    'theme': 'textual-light',
-                    'emoji_enabled': True,
-                    'warning_language': app.warning_language,
-                    'default_location_action': 'keep',
-                    'save_defaults': False,
-                }
-            )
-            await _settle(pilot)
+            with patch.object(
+                screen.world_map,
+                '_sync_label_widgets',
+                wraps=screen.world_map._sync_label_widgets,
+            ) as sync_labels, patch.object(
+                screen.world_map,
+                '_reflow',
+                wraps=screen.world_map._reflow,
+            ) as reflow:
+                await app._on_settings_result(
+                    {
+                        'temperature_unit': app.temperature_unit,
+                        'wind_speed_unit': app.wind_speed_unit,
+                        'precipitation_unit': app.precipitation_unit,
+                        'theme': 'textual-light',
+                        'emoji_enabled': True,
+                        'warning_language': app.warning_language,
+                        'default_location_action': 'keep',
+                        'save_defaults': False,
+                    }
+                )
+                await _settle(pilot)
+                sync_labels.assert_called_once_with()
+                reflow.assert_called_once_with()
             screen.refresh_appearance.assert_called_once_with()
             app.action_refresh.assert_not_awaited()
             app.controller.fetch.assert_not_awaited()
@@ -1331,8 +1342,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(show_forecast.call_count, 1)
             self.assertEqual(rebuild_hourly.call_count, 1)
 
-            app._update_saved_location_weather(LONDON, _summary(18))
-            await _settle(pilot)
+            with patch.object(
+                dashboard.world_map,
+                '_reflow',
+                wraps=dashboard.world_map._reflow,
+            ) as reflow:
+                app._update_saved_location_weather(LONDON, _summary(18))
+                await _settle(pilot)
+                reflow.assert_not_called()
             self.assertEqual(show_forecast.call_count, 1)
             self.assertIn('18', london.label_text)
 
@@ -1604,7 +1621,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 dashboard.forecast_panel.hourly_forecast,
                 'update_forecast',
                 wraps=dashboard.forecast_panel.hourly_forecast.update_forecast,
-            ) as update_hourly:
+            ) as update_hourly, patch.object(
+                dashboard.world_map,
+                '_sync_label_widgets',
+                wraps=dashboard.world_map._sync_label_widgets,
+            ) as sync_labels, patch.object(
+                dashboard.world_map,
+                '_reflow',
+                wraps=dashboard.world_map._reflow,
+            ) as reflow:
                 await pilot.press('w')
                 await _settle(pilot)
                 self.assertIs(app.screen, weather)
@@ -1614,6 +1639,8 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press('b')
                 await _settle(pilot)
                 self.assertEqual(update_hourly.call_count, 0)
+                sync_labels.assert_not_called()
+                reflow.assert_not_called()
             self.assertIs(app.screen, dashboard)
             self.assertEqual(dashboard.world_map.selected_location_key, location_key(TOKYO))
 
