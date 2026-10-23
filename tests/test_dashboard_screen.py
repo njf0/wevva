@@ -20,13 +20,16 @@ from wevva_warnings import (
 )
 from wevva_warnings.registry import get_source
 
-from tests.weather_fixtures import weather_update
+from tests.weather_fixtures import warning_alerts, weather_update
 from wevva.app import Wevva
 from wevva.conditions import get_condition
 from wevva.config import location_key
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected
-from wevva.screens.dashboard_screen import DashboardScreen
+from wevva.screens.dashboard_screen import (
+    DashboardScreen,
+    DashboardWeatherAlertsPanel,
+)
 from wevva.services.alert_bulletin import BulletinAlert
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.dashboard_daily_forecast import DashboardDailyForecast
@@ -139,11 +142,116 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             for location in (BERLIN, LONDON, TOKYO)
         }
         app.controller.fetch = AsyncMock()
+        app.load_dashboard_alerts = AsyncMock(return_value=[])
         app._tropical_system_cache = (
             app._tropical_system_cache_clock(),
             (),
         )
         return app
+
+    async def test_location_warnings_reuse_tabs_with_only_a_top_rule(self) -> None:
+        app = self._app()
+        app.load_dashboard_alerts = AsyncMock(return_value=warning_alerts())
+        app.open_alerts_centre_screen = Mock()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot, 8)
+            await pilot.press('b')
+            await _settle(pilot, 8)
+
+            screen = app.screen
+            self.assertIsInstance(screen, DashboardScreen)
+            warning_panel = screen.query_one(DashboardWeatherAlertsPanel)
+            self.assertTrue(warning_panel.display)
+            self.assertEqual(len(warning_panel.tabs.query(Tab)), 2)
+            self.assertEqual(warning_panel.border_title, '')
+            self.assertEqual(warning_panel.styles.border_top[0], 'solid')
+            self.assertEqual(warning_panel.styles.border_left[0], '')
+            self.assertEqual(warning_panel.styles.border_right[0], '')
+            self.assertEqual(warning_panel.styles.border_bottom[0], '')
+            self.assertEqual(warning_panel.region.height, 5)
+            self.assertLessEqual(
+                warning_panel.region.bottom,
+                screen.forecast_panel.content_region.bottom,
+            )
+            self.assertFalse(screen.forecast_panel.context_bar.display)
+
+            await pilot.resize_terminal(160, 42)
+            await _settle(pilot)
+            self.assertTrue(warning_panel.display)
+            self.assertTrue(screen.forecast_panel.context_bar.display)
+            self.assertLessEqual(
+                screen.forecast_panel.context_bar.region.bottom,
+                screen.forecast_panel.content_region.bottom,
+            )
+
+            heading = screen.query_one(
+                '#dashboard-forecast-place',
+                Static,
+            ).render()
+            self.assertEqual(heading.plain, 'Berlin\nGermany')
+            country_span = heading.spans[-1]
+            self.assertEqual(
+                heading.plain[country_span.start : country_span.end],
+                'Germany',
+            )
+            self.assertIn('dim', str(country_span.style))
+            self.assertIn('not bold', str(country_span.style))
+
+            warning_panel.refresh_appearance()
+            warning_panel.body.focus()
+            await pilot.press('enter')
+            await _settle(pilot)
+            self.assertIs(app.screen, screen)
+            app.open_alerts_centre_screen.assert_called_once_with(
+                country_code='DE',
+                alert_identity=('nws', 'fixture-heat'),
+            )
+
+    async def test_dashboard_alert_loader_combines_catalogue_and_native_results(self) -> None:
+        app = self._app()
+        del app.load_dashboard_alerts
+        catalogue_alert = warning_alerts()[0]
+        native_alert = Alert(
+            id='native-point',
+            source='fixture',
+            event='Wind Warning',
+            headline='Wind Warning',
+            severity='Moderate',
+        )
+        app.country_alerts_service.get_alerts = AsyncMock(
+            return_value=[catalogue_alert]
+        )
+        matched = [catalogue_alert, native_alert]
+
+        with (
+            patch(
+                'wevva.app.get_native_point_alerts_async',
+                new=AsyncMock(return_value=([native_alert], True)),
+            ) as native_loader,
+            patch(
+                'wevva.app.match_alert_candidates_async',
+                new=AsyncMock(return_value=matched),
+            ) as matcher,
+        ):
+            alerts = await app.load_dashboard_alerts(BERLIN)
+
+        self.assertEqual(alerts, matched)
+        app.country_alerts_service.get_alerts.assert_awaited_once_with(
+            'DE',
+            warning_language='auto',
+        )
+        native_loader.assert_awaited_once_with(
+            BERLIN.latitude,
+            BERLIN.longitude,
+            'DE',
+            'auto',
+        )
+        matcher.assert_awaited_once_with(
+            [catalogue_alert],
+            [native_alert],
+            BERLIN.latitude,
+            BERLIN.longitude,
+        )
 
     async def test_wide_dashboard_uses_existing_state_without_fetching(self) -> None:
         app = self._app()

@@ -320,9 +320,11 @@ canonical group chooses one real source observation with a valid centre as its
 anchor, ordered by declared classification strength, newest issue time, then
 source and ID. This is a display choice only and does not merge observations.
 The world-map base exposes narrow candidate and label hooks so the Dashboard
-can send locations and storms through the same callout planner. Selected
-features rank first, then canonical storms, the active location, and ordinary
-saved locations; the resulting order also drives keyboard traversal.
+can send locations and storms through the same callout planner. A selected
+tropical system ranks first, followed by the active weather location, canonical
+storms, and ordinary saved locations. Selecting a location changes only its
+reverse-video emphasis, preserving the planner's existing marker side and
+neighbouring callouts.
 
 Canonical storm map labels use an accent-coloured, classification-first
 formatter, including their `★` marker. Their native tooltip contains only
@@ -396,6 +398,17 @@ stable identity-derived rows and one selection. Refresh-scoped `is_new` renders
 only its `NEW` token as dark background-theme text on the primary colour,
 matching Alerts Centre, and is neither durable unread state nor an issuance-
 time claim.
+
+The Dashboard location rail keeps point warnings separate from the short-lived
+forecast cache. For its selected location it reuses the shared country-alert
+catalogue, performs the same local geometry matching used by Weather, and
+refreshes native point-query sources for that location. A selection generation
+prevents a late warning result from replacing a newer place. Applicable alerts
+reuse Weather's compact tabs and preview, presented with only a severity-coloured
+top rule; activating one follows the Dashboard's existing Alerts Centre deep
+link rather than adopting the place as Weather state. At constrained heights an
+active warning preview takes the context tables' space; once the rail can fit
+both minimums, location, astronomy, and air-quality context returns beneath it.
 
 Alert activation prepares a country/identity deep link before opening the
 installed Alerts Centre. The destination applies it only from the matching

@@ -53,6 +53,7 @@ from wevva.services.alert_bulletin import AlertBulletinCoordinator
 from wevva.services.country_alerts import (
     CountryAlertsService,
     list_supported_alert_countries,
+    sort_country_alerts,
 )
 from wevva.services.warning_cache import WarningCache, WarningCacheProduct
 from wevva.services.tropical import (
@@ -382,6 +383,51 @@ class Wevva(App, inherit_bindings=False):
         finally:
             if task.done() and self._dashboard_forecast_tasks.get(cache_key) is task:
                 self._dashboard_forecast_tasks.pop(cache_key, None)
+
+    async def load_dashboard_alerts(
+        self,
+        location: LocationMetadata,
+    ) -> list[Alert]:
+        """Return current point-matched alerts without changing Weather state."""
+
+        lat = location.latitude
+        lon = location.longitude
+        country_code = normalize_country_code(location.country_code)
+        if lat is None or lon is None or country_code is None:
+            return []
+        warning_language = 'en' if self.warning_language == 'en' else 'auto'
+        native_task = asyncio.create_task(
+            get_native_point_alerts_async(
+                lat,
+                lon,
+                country_code,
+                warning_language,
+            )
+        )
+        try:
+            try:
+                candidates = await self.country_alerts_service.get_alerts(
+                    country_code,
+                    warning_language=warning_language,
+                )
+            except Exception:
+                retained = await self.country_alerts_service.get_retained_alerts(
+                    country_code,
+                    warning_language=warning_language,
+                )
+                candidates = [] if retained is None else list(retained.alerts)
+            native_alerts, _ = await native_task
+            return sort_country_alerts(
+                await match_alert_candidates_async(
+                    candidates,
+                    native_alerts,
+                    lat,
+                    lon,
+                )
+            )
+        finally:
+            if not native_task.done():
+                native_task.cancel()
 
     def _discard_dashboard_forecast_task(
         self,

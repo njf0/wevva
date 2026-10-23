@@ -24,6 +24,7 @@ from wevva_warnings import (
     TropicalSystem,
 )
 
+from wevva.alerts import Alert
 from wevva.config import location_key
 from wevva.dashboard_layout import DashboardLayoutBudget, dashboard_layout_for
 from wevva.layout import CurrentDensity
@@ -62,6 +63,8 @@ from wevva.widgets.tropical_products import (
 from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
 from wevva.widgets.weather_alerts import (
+    WeatherAlertPreviewBody,
+    WeatherAlertsPanel,
     alert_condition_name,
     alert_renderable,
     alert_severity_color,
@@ -69,8 +72,62 @@ from wevva.widgets.weather_alerts import (
 from wevva.utils.country_codes import get_country_name_by_alpha2
 
 
+class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
+    """Weather's tabbed warning preview with a separator instead of a frame."""
+
+    DEFAULT_CSS = """
+    DashboardWeatherAlertsPanel {
+        height: 5;
+        max-width: 100%;
+        border: none;
+        border-top: solid $primary-muted;
+        hatch: none;
+    }
+
+    DashboardWeatherAlertsPanel #weather-alert-body {
+        padding: 0;
+    }
+    """
+
+    def panel_title(self) -> str:
+        return ''
+
+    def __init__(
+        self,
+        alerts: list[Alert],
+        location: LocationMetadata,
+    ) -> None:
+        super().__init__(alerts)
+        self.location = location
+
+    def apply_frame_color(self, color: str | None) -> None:
+        if color:
+            self.set_styles(f'border: none; border-top: solid {color};')
+
+    def on_weather_alert_preview_body_open_requested(
+        self,
+        event: WeatherAlertPreviewBody.OpenRequested,
+    ) -> None:
+        """Open the selected warning through Dashboard's accurate detail route."""
+
+        event.stop()
+        event.prevent_default()
+        alert = self.alerts[self.selected_index]
+        self.app.open_alerts_centre_screen(
+            country_code=self.location.country_code,
+            alert_identity=country_alert_identity(alert),
+        )
+
+    def refresh_appearance(self) -> None:
+        """Rebuild theme-sensitive tab labels and selected-alert content."""
+
+        for index, tab in enumerate(self.tabs.query(Tab)):
+            tab.label = self.build_tab_label(self.alerts[index])
+        self.update_selected_alert()
+
+
 class DashboardForecastPanel(Container):
-    """Current, hourly, and daily weather for one Dashboard place."""
+    """Current, hourly, daily, and warning context for one Dashboard place."""
 
     DEFAULT_CSS = """
     DashboardForecastPanel {
@@ -87,7 +144,6 @@ class DashboardForecastPanel(Container):
     #dashboard-forecast-place {
         width: 100%;
         height: 2;
-        text-style: bold;
         text-align: center;
         content-align: center middle;
     }
@@ -151,6 +207,12 @@ class DashboardForecastPanel(Container):
         height: 6;
     }
 
+    #dashboard-location-alerts {
+        display: none;
+        width: 100%;
+        height: 5;
+    }
+
     #dashboard-forecast-status {
         width: 100%;
         height: 1fr;
@@ -179,6 +241,7 @@ class DashboardForecastPanel(Container):
             classes='dashboard-forecast-separator',
         )
         yield DashboardDailyForecast(id='dashboard-daily-forecast')
+        yield Container(id='dashboard-location-alerts')
         yield ContextBar(id='dashboard-forecast-context')
         yield Static(
             'Select a place to load its forecast.',
@@ -207,8 +270,16 @@ class DashboardForecastPanel(Container):
     def context_bar(self) -> ContextBar:
         return self.query_one('#dashboard-forecast-context', ContextBar)
 
+    @property
+    def location_alerts(self) -> Container:
+        return self.query_one('#dashboard-location-alerts', Container)
+
     def on_mount(self) -> None:
         self._layout_context_rows = 1
+        self._current_conditions_height = 5
+        self._hourly_min_height = 5
+        self._daily_rows = 3
+        self._context_height = 6
         self._show_status('Select a place to load its forecast.')
 
     def set_layout(self, budget: DashboardLayoutBudget) -> None:
@@ -232,6 +303,10 @@ class DashboardForecastPanel(Container):
         context_height = (
             (budget.context_rows + 1) * 3 if budget.context_rows else 0
         )
+        self._current_conditions_height = budget.current_conditions_height
+        self._hourly_min_height = budget.hourly_min_height
+        self._daily_rows = budget.daily_rows
+        self._context_height = context_height
         self.context_bar.set_layout(
             row_count=budget.context_rows,
             height=context_height,
@@ -239,6 +314,8 @@ class DashboardForecastPanel(Container):
             show_air_quality=True,
             separated=True,
         )
+        self._sync_context_visibility()
+        self.call_after_refresh(self._sync_context_visibility)
 
     def show_location(
         self,
@@ -299,7 +376,10 @@ class DashboardForecastPanel(Container):
         self.current_conditions.display = True
         self.hourly_forecast.display = True
         self.daily_forecast.display = True
-        self.context_bar.display = self._layout_context_rows > 0
+        self.location_alerts.display = bool(
+            self.location_alerts.children
+        )
+        self._sync_context_visibility()
         for separator in self.query('.dashboard-forecast-separator'):
             separator.display = True
         self.query_one('#dashboard-forecast-status', Static).display = False
@@ -315,12 +395,56 @@ class DashboardForecastPanel(Container):
         self.current_conditions.hour_index = index
         self.context_bar.on_hour_highlighted(index)
 
+    async def show_alerts(
+        self,
+        location: LocationMetadata,
+        alerts: list[Alert],
+    ) -> None:
+        """Replace the selected location's compact warning preview."""
+
+        await self.location_alerts.remove_children()
+        if not alerts:
+            self.location_alerts.display = False
+            self._sync_context_visibility()
+            return
+        await self.location_alerts.mount(
+            DashboardWeatherAlertsPanel(alerts, location)
+        )
+        self.location_alerts.display = getattr(self, '_forecast_event', None) is not None
+        self._sync_context_visibility()
+
+    def hide_alerts(self) -> None:
+        """Hide stale warning content while another location is selected."""
+
+        self.location_alerts.display = False
+        self._sync_context_visibility()
+
+    def _sync_context_visibility(self) -> None:
+        """Keep the bottom context block inside the available forecast rail."""
+
+        has_forecast = getattr(self, '_forecast_event', None) is not None
+        required_height = (
+            2
+            + 3
+            + self._current_conditions_height
+            + self._hourly_min_height
+            + self._daily_rows
+            + self._context_height
+            + (5 if self.location_alerts.display else 0)
+        )
+        self.context_bar.display = (
+            has_forecast
+            and self._layout_context_rows > 0
+            and self.content_size.height >= required_height
+        )
+
     def _show_status(self, message: str) -> None:
         self._forecast_event = None
         self.current_conditions.display = False
         self.hourly_forecast.display = False
         self.daily_forecast.display = False
         self.context_bar.display = False
+        self.location_alerts.display = False
         for separator in self.query('.dashboard-forecast-separator'):
             separator.display = False
         status = self.query_one('#dashboard-forecast-status', Static)
@@ -1128,6 +1252,10 @@ class DashboardScreen(Screen[None]):
         self._forecast_request_generation = 0
         self._forecast_request_key: tuple[str, str, str, str] | None = None
         self._forecast_wait_task: asyncio.Task[None] | None = None
+        self._location_alert_generation = 0
+        self._location_alert_key: tuple[str, str] | None = None
+        self._location_alert_loaded_at: float | None = None
+        self._location_alert_task: asyncio.Task[None] | None = None
         self._tropical_wait_task: asyncio.Task[None] | None = None
         self._tropical_product_task: asyncio.Task[None] | None = None
         self._tropical_detail_generation = 0
@@ -1240,6 +1368,7 @@ class DashboardScreen(Screen[None]):
             self._time_refresh_timer.stop()
             self._time_refresh_timer = None
         self._cancel_forecast_wait()
+        self._cancel_location_alert_wait()
         if self._tropical_wait_task is not None:
             self._tropical_wait_task.cancel()
             self._tropical_wait_task = None
@@ -1302,6 +1431,7 @@ class DashboardScreen(Screen[None]):
         )
         self._show_persistent_location()
         self._ensure_persistent_forecast()
+        self._ensure_persistent_alerts()
 
     def update_weather_summary(
         self,
@@ -1342,6 +1472,9 @@ class DashboardScreen(Screen[None]):
         self._cancel_alert_place_weather()
         self.alert_detail_panel.alert_map.reset_city_tooltips()
         self._show_persistent_location()
+        for panel in self.query(DashboardWeatherAlertsPanel):
+            panel.refresh_appearance()
+        self._ensure_persistent_alerts()
 
     def on_dashboard_place_pressed(self, message: DashboardPlacePressed) -> None:
         message.stop()
@@ -1427,6 +1560,7 @@ class DashboardScreen(Screen[None]):
         if arrived_while_open and unflashed_rows:
             self.world_map.flash_new_alerts(unflashed_rows)
         self.alert_detail_panel.show_alert(self.alerts_panel.selected_row)
+        self._ensure_persistent_alerts()
 
     def on_dashboard_alerts_panel_selected(
         self,
@@ -1798,6 +1932,7 @@ class DashboardScreen(Screen[None]):
         self.world_map.set_selected_location(location)
         self._show_persistent_location()
         self._ensure_persistent_forecast()
+        self._ensure_persistent_alerts()
 
     def _ensure_persistent_forecast(self) -> None:
         """Start at most one selected-place preview wait for the current state."""
@@ -1883,6 +2018,88 @@ class DashboardScreen(Screen[None]):
             self._forecast_wait_task.cancel()
         self._forecast_wait_task = None
         self._forecast_request_key = None
+
+    def _ensure_persistent_alerts(self) -> None:
+        """Load warnings once for the current Dashboard location selection."""
+
+        location = self._selected_location or self.app.location
+        if location is None:
+            self._cancel_location_alert_wait()
+            self.forecast_panel.hide_alerts()
+            return
+        key = (location_key(location), self.app.warning_language)
+        loaded_is_fresh = (
+            self._location_alert_loaded_at is not None
+            and asyncio.get_running_loop().time() - self._location_alert_loaded_at
+            < self.app.country_alerts_service.ttl_seconds
+        )
+        if key == self._location_alert_key and (
+            loaded_is_fresh
+            or (
+                self._location_alert_task is not None
+                and not self._location_alert_task.done()
+            )
+        ):
+            return
+        replacing_same_location = key == self._location_alert_key
+        self._cancel_location_alert_wait()
+        if not replacing_same_location:
+            self.forecast_panel.hide_alerts()
+        self._location_alert_generation += 1
+        generation = self._location_alert_generation
+        self._location_alert_key = key
+        self._location_alert_task = asyncio.create_task(
+            self._load_location_alerts(location, key, generation)
+        )
+
+    async def _load_location_alerts(
+        self,
+        location: LocationMetadata,
+        key: tuple[str, str],
+        generation: int,
+    ) -> None:
+        """Apply point warnings only to the selection that requested them."""
+
+        try:
+            alerts = await self.app.load_dashboard_alerts(location)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            alerts = []
+        if not self._location_alert_result_is_current(key, generation):
+            return
+        try:
+            await self.forecast_panel.show_alerts(location, alerts)
+            self._location_alert_loaded_at = asyncio.get_running_loop().time()
+        finally:
+            if (
+                generation == self._location_alert_generation
+                and self._location_alert_task is asyncio.current_task()
+            ):
+                self._location_alert_task = None
+
+    def _location_alert_result_is_current(
+        self,
+        key: tuple[str, str],
+        generation: int,
+    ) -> bool:
+        location = self._selected_location or self.app.location
+        return (
+            generation == self._location_alert_generation
+            and location is not None
+            and key == (location_key(location), self.app.warning_language)
+        )
+
+    def _cancel_location_alert_wait(self) -> None:
+        self._location_alert_generation += 1
+        if (
+            self._location_alert_task is not None
+            and not self._location_alert_task.done()
+        ):
+            self._location_alert_task.cancel()
+        self._location_alert_task = None
+        self._location_alert_key = None
+        self._location_alert_loaded_at = None
 
     def on_hour_highlighted(self, message: HourHighlighted) -> None:
         """Keep the fixed conditions summary aligned with the hourly cursor."""
@@ -2046,17 +2263,21 @@ def _relative_observation(value: datetime) -> str:
     return observed.strftime('on %d %b')
 
 
-def _dashboard_place_heading(location: LocationMetadata | None) -> str:
+def _dashboard_place_heading(location: LocationMetadata | None) -> Text:
     """Return the compact place heading without administrative regions."""
 
     if location is None:
-        return 'No location selected'
+        return Text('No location selected', style='bold', justify='center')
     name = (location.name or '').strip()
     if not name and location.latitude is not None and location.longitude is not None:
         name = f'{location.latitude:.3f}, {location.longitude:.3f}'
     name = name or 'Selected location'
+    heading = Text(name, style='bold', justify='center')
     country = (location.country or '').strip()
-    return f'{name}\n{country}' if country and country != name else name
+    if country and country != name:
+        heading.append('\n')
+        heading.append(country, style='dim not bold')
+    return heading
 
 
 def _tropical_observation_key(
