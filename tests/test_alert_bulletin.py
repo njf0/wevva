@@ -407,6 +407,57 @@ class AlertBulletinCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(all(row.is_new for row in rows))
 
+    async def test_shared_feed_uses_primary_before_its_catalogue_catches_up(self) -> None:
+        now = datetime(2030, 1, 1, 12, tzinfo=UTC)
+        source = WarningSource(
+            id='shared',
+            name='Shared warnings',
+            backend='fixture',
+            country_code='US',
+            additional_country_codes=('GU', 'PR'),
+            url='https://example.test/alerts',
+        )
+        ordinary = Alert(
+            id='ordinary',
+            source='shared',
+            event='Flood Warning',
+            headline='Flooding expected in coastal counties',
+            area_names=['Seguam to Adak Bering Side'],
+            source_info=source,
+        )
+        territory = Alert(
+            id='territory',
+            source='shared',
+            event='Typhoon Warning',
+            headline='Typhoon warning for Guam',
+            source_info=source,
+        )
+        identities = frozenset(
+            {('shared', 'ordinary'), ('shared', 'territory')}
+        )
+        coordinator = AlertBulletinCoordinator(
+            _Service(),  # type: ignore[arg-type]
+            ['US', 'GU', 'PR'],
+            wall_clock=lambda: now,
+        )
+        coordinator._catalogues = {
+            ('GU', 'auto'): BulletinCatalogue(
+                'GU',
+                'auto',
+                (ordinary, territory),
+                now,
+                identities,
+                identities,
+            ),
+        }
+
+        rows = coordinator.recent_alerts_snapshot()
+
+        self.assertEqual(
+            {row.alert.id: row.country_code for row in rows},
+            {'ordinary': 'US', 'territory': 'GU'},
+        )
+
     async def test_priority_then_rolling_lane_are_staggered_and_fair(self) -> None:
         clock = _Clock()
         service = _Service()

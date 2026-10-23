@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import random
+import re
 import time
 
 from wevva_warnings import Alert
@@ -520,10 +521,15 @@ def _attributed_bulletin_row(candidates: Sequence[BulletinAlert]) -> BulletinAle
         }
         country_name = get_country_name_by_alpha2(row.country_code) or ''
         normalized_name = ' '.join(country_name.casefold().split())
+        search_text = country_alert_search_text(row.alert)
         territory_match = (
             row.country_code in additional
             and bool(normalized_name)
-            and normalized_name in country_alert_search_text(row.alert)
+            and re.search(
+                rf'(?<!\w){re.escape(normalized_name)}(?!\w)',
+                search_text,
+            )
+            is not None
         )
         if territory_match:
             priority = 0
@@ -533,7 +539,19 @@ def _attributed_bulletin_row(candidates: Sequence[BulletinAlert]) -> BulletinAle
             priority = 2
         return priority, row.first_observed, row.country_code
 
-    return min(candidates, key=rank)
+    selected = min(candidates, key=rank)
+    if rank(selected)[0] != 2:
+        return selected
+    source = selected.alert.source_info
+    primary = normalize_country_code(
+        getattr(source, 'country_code', None)
+        or getattr(source, 'issuer_country_code', None)
+    )
+    return (
+        replace(selected, country_code=primary)
+        if primary is not None
+        else selected
+    )
 
 
 __all__ = [
