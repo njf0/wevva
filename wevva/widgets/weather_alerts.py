@@ -9,6 +9,7 @@ from typing import Any
 
 from rich.console import Group
 from rich.markup import escape
+from rich.rule import Rule
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
@@ -445,7 +446,7 @@ class WeatherAlertPresentation(Container):
     def update_alert(self, alert: Alert, *, warning_color: str | None) -> None:
         """Update every selected-alert surface as one presentation change."""
 
-        self.details.content.update(alert_renderable(alert))
+        self.details.content.update(alert_renderable(alert, include_timing=True))
         self.details.scroll_home(animate=False)
         latitude, longitude, location_name, country_code = _alert_location_context(
             self.app
@@ -742,7 +743,7 @@ class WeatherAlertDetailsSidebar(Container):
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.details.set_styles(f'border: round {color}; border-title-color: {color};')
-        self.content.update(alert_renderable(alert))
+        self.content.update(alert_renderable(alert, include_timing=True))
         latitude, longitude, location_name, country_code = self._location_context()
         self.query_one(WarningAreaScope).update_alert(
             alert,
@@ -758,15 +759,14 @@ def alert_markdown(alert: Alert) -> str:
     description = _normalise_alert_text(alert.description or '')
     instruction = _normalise_alert_text(alert.instruction or '')
     headline = (alert.headline or alert.event or 'Weather alert').strip()
-
-    if description and instruction:
-        content = f'### {headline}\n\n{description}\n\n{instruction}'
-    elif description:
-        content = f'### {headline}\n\n{description}'
-    elif instruction:
-        content = f'### {headline}\n\n{instruction}'
-    else:
-        content = f'### {headline}'
+    sections = [f'### {headline}']
+    if area := alert_area_text(alert):
+        sections.append(f'Affects: {area}')
+    if description:
+        sections.append(description)
+    if instruction:
+        sections.append(instruction)
+    content = '\n\n'.join(sections)
 
     if url := (alert.url or '').strip():
         return f'{content}\n\n[View official warning]({url})'
@@ -779,6 +779,11 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
     heading = Text(headline)
     heading.stylize('markdown.h3')
     renderables: list[object] = [heading]
+    if area := alert_area_text(alert):
+        area_line = Text()
+        area_line.append('Affects: ', style='dim italic')
+        area_line.append(area, style='italic')
+        renderables.append(area_line)
     if include_timing:
         renderables.extend((Text(''), alert_timing_renderable(alert)))
     if alert.description and alert.description.strip():
@@ -791,8 +796,23 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
     return Group(*renderables)
 
 
-def alert_timing_renderable(alert: Alert) -> Text:
-    """Render the same concise local timing used by the weather alert panel."""
+def alert_area_text(alert: Alert) -> str:
+    """Return complete, de-duplicated provider area names for alert prose."""
+
+    areas: list[str] = []
+    seen: set[str] = set()
+    for raw_name in alert.area_names:
+        name = ' '.join(raw_name.split())
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        areas.append(name)
+    return ', '.join(areas)
+
+
+def alert_timing_renderable(alert: Alert) -> object:
+    """Render concise local timing as a centred single-line timeline."""
 
     def local_time(value: datetime | None) -> datetime | None:
         if value is None or value.tzinfo is None:
@@ -804,17 +824,24 @@ def alert_timing_renderable(alert: Alert) -> Text:
 
     onset = local_time(alert.onset)
     end = local_time(alert.expires)
-    line = Text()
     if onset is not None and end is not None:
-        line.append('Active from ', style='dim italic')
-        line.append(clock(onset), style='italic')
-        line.append(' until ', style='dim italic')
-        line.append(clock(end), style='italic')
-    elif onset is not None:
-        line.append('Active from ', style='dim italic')
+        timeline = Table.grid(expand=True, padding=(0, 1))
+        timeline.add_column(no_wrap=True)
+        timeline.add_column(ratio=1)
+        timeline.add_column(no_wrap=True)
+        timeline.add_row(
+            Text(clock(onset), style='italic'),
+            Rule(style='dim', characters='─'),
+            Text(clock(end), style='italic'),
+        )
+        return timeline
+
+    line = Text(justify='center')
+    if onset is not None:
+        line.append('From ', style='dim italic')
         line.append(clock(onset), style='italic')
     elif end is not None:
-        line.append('Active until ', style='dim italic')
+        line.append('Until ', style='dim italic')
         line.append(clock(end), style='italic')
     else:
         line.append(

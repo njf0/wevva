@@ -626,7 +626,21 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 detail.query_one('#dashboard-alert-document-body', Static)
             )
             self.assertIn('Extremely long river flooding warning', document_text)
-            self.assertIn('Active from ', document_text)
+            self.assertIn(
+                'Affects: A deliberately long affected-area label for the Lower Rhine',
+                document_text,
+            )
+            assert alert.onset is not None
+            assert alert.expires is not None
+            self.assertIn(
+                alert.onset.astimezone().strftime('%H:%M %A'),
+                document_text,
+            )
+            self.assertIn(
+                alert.expires.astimezone().strftime('%H:%M %A'),
+                document_text,
+            )
+            self.assertIn('─', document_text)
             self.assertIn('River levels are expected to remain high.', document_text)
             self.assertIn('Avoid flooded roads.', document_text)
             screen.update_bulletin(1, (row,))

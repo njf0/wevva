@@ -57,6 +57,7 @@ from wevva.widgets.country_alerts_map import (
 )
 from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsPanel,
+    alert_area_text,
     alert_condition_name,
     alert_renderable,
     alert_severity_color,
@@ -1522,17 +1523,8 @@ class AlertsCentreScreen(Screen[None]):
 
 def _alert_area_label(alert: Alert) -> str:
     """Return a concise provider-supplied geography label."""
-    areas: list[str] = []
-    seen: set[str] = set()
-    for raw_name in alert.area_names:
-        name = ' '.join(raw_name.split())
-        key = name.casefold()
-        if not name or key in seen:
-            continue
-        seen.add(key)
-        areas.append(name)
-    if areas:
-        return _ellipsize_area_label(', '.join(areas))
+    if area := alert_area_text(alert):
+        return _ellipsize_area_label(area)
 
     display_geography = getattr(alert.source_info, 'display_geography', None)
     display_name = getattr(display_geography, 'name', None)

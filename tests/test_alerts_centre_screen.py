@@ -772,8 +772,15 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             screen.alert_list.action_select()
             await pilot.pause()
             details = _rendered(screen.details.content)
-            self.assertIn('Flooding expected\n\nActive from ', details)
-            self.assertIn(' until ', details)
+            lines = details.splitlines()
+            assert alert.onset is not None
+            assert alert.expires is not None
+            onset = alert.onset.astimezone().strftime('%H:%M %A')
+            expires = alert.expires.astimezone().strftime('%H:%M %A')
+            self.assertEqual(lines[0], 'Flooding expected')
+            self.assertTrue(lines[2].startswith(f'{onset} '))
+            self.assertTrue(lines[2].endswith(f' {expires}'))
+            self.assertIn('─', lines[2])
 
     async def test_successful_empty_and_total_failure_have_inline_states(self) -> None:
         empty_service = _FixtureService({'DE': []})

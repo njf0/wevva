@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from io import StringIO
 import unittest
 
@@ -17,6 +18,46 @@ from wevva.widgets.weather_alerts import (
 
 
 class AlertMarkdownTests(unittest.TestCase):
+    def test_area_and_timing_form_one_detail_header(self) -> None:
+        alert = Alert(
+            id='timed-area',
+            source='test',
+            event='Storm Warning',
+            headline='Damaging storms expected',
+            area_names=[
+                ' NORTH DISTRICT ',
+                'North district',
+                'River   Valley',
+            ],
+            onset=datetime(2030, 1, 1, 12, 0, tzinfo=UTC),
+            expires=datetime(2030, 1, 1, 14, 0, tzinfo=UTC),
+        )
+
+        self.assertEqual(
+            alert_markdown(alert),
+            '### Damaging storms expected\n\n'
+            'Affects: NORTH DISTRICT, River Valley',
+        )
+        console = Console(
+            width=60,
+            record=True,
+            color_system=None,
+            file=StringIO(),
+        )
+        console.print(alert_renderable(alert, include_timing=True))
+        lines = console.export_text().splitlines()
+        assert alert.onset is not None
+        assert alert.expires is not None
+        onset = alert.onset.astimezone().strftime('%H:%M %A')
+        expires = alert.expires.astimezone().strftime('%H:%M %A')
+
+        self.assertEqual(lines[0], 'Damaging storms expected')
+        self.assertEqual(lines[1], 'Affects: NORTH DISTRICT, River Valley')
+        self.assertEqual(lines[2], '')
+        self.assertTrue(lines[3].startswith(f'{onset} '))
+        self.assertTrue(lines[3].endswith(f' {expires}'))
+        self.assertIn('─', lines[3])
+
     def test_instruction_keeps_indented_provider_list_items(self) -> None:
         alert = Alert(
             id='nz-storm',

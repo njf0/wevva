@@ -491,7 +491,10 @@ up to three more rows to wrap the provider headline; fully-budgeted and compact
 layouts retain the abbreviated presentation. Activating the selected preview
 opens that warning. Mouse activation, Enter,
 or Space opens a modal where those tabs directly select the complete provider
-document in one independently scrolling, unframed detail body. When the
+document in one independently scrolling, unframed detail body. Full alert
+documents share the same heading, complete `Affects:` line, expanding local-time
+timeline, description, instruction, and official-link presentation across
+Weather, Dashboard, and Alerts Centre. When the
 selected warning has real polygon geometry, the same selection path adds a
 bounded Warning Area peer beside the document; alerts without geometry return
 the complete width to the prose. The modal's single rounded frame is centred,
