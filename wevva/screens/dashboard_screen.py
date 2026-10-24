@@ -1206,7 +1206,14 @@ class DashboardAlertDetailPanel(Container):
             return
         body = self.query_one('#dashboard-alert-document-body', Static)
         if tab_id == self._DOCUMENT_TAB_ID:
-            body.update(alert_renderable(row.alert, include_timing=True))
+            body.update(
+                alert_renderable(
+                    row.alert,
+                    include_timing=True,
+                    theme=self.app.theme_variables,
+                    dark=self.app.current_theme.dark,
+                )
+            )
 
     def refresh_appearance(self) -> None:
         """Refresh theme-derived detail styling without rebuilding geometry."""

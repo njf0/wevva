@@ -45,13 +45,25 @@ class AlertMarkdownTests(unittest.TestCase):
             color_system=None,
             file=StringIO(),
         )
-        console.print(alert_renderable(alert, include_timing=True))
+        theme = {
+            'background': '#202020',
+            'warning': '#ffaa00',
+            'text-warning': '#ffcc00',
+        }
+        console.print(
+            alert_renderable(
+                alert,
+                include_timing=True,
+                theme=theme,
+                dark=True,
+            )
+        )
         lines = console.export_text().splitlines()
         assert alert.onset is not None
         assert alert.expires is not None
         onset = alert.onset.astimezone().strftime('%H:%M %A')
         expires = alert.expires.astimezone().strftime('%H:%M %A')
-        timing = alert_timing_renderable(alert)
+        timing = alert_timing_renderable(alert, theme=theme, dark=True)
 
         self.assertEqual(lines[0], 'Damaging storms expected')
         self.assertEqual(lines[1], '')
@@ -59,7 +71,12 @@ class AlertMarkdownTests(unittest.TestCase):
         self.assertEqual(lines[3], '')
         self.assertEqual(lines[4].strip(), f'{onset} ··· {expires}')
         self.assertEqual(timing.justify, 'center')
-        self.assertEqual(timing.style, 'markdown.code')
+        self.assertIsNotNone(timing.style.color)
+        self.assertIsNotNone(timing.style.bgcolor)
+        assert timing.style.color is not None
+        assert timing.style.bgcolor is not None
+        self.assertEqual(timing.style.color.get_truecolor().hex, '#f4c401')
+        self.assertEqual(timing.style.bgcolor.get_truecolor().hex, '#362d1c')
 
     def test_instruction_keeps_indented_provider_list_items(self) -> None:
         alert = Alert(

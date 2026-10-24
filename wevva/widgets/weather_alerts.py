@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -14,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
+from textual.color import Color, ColorParseError
 from textual.events import Click, Key, Resize
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -445,7 +447,14 @@ class WeatherAlertPresentation(Container):
     def update_alert(self, alert: Alert, *, warning_color: str | None) -> None:
         """Update every selected-alert surface as one presentation change."""
 
-        self.details.content.update(alert_renderable(alert, include_timing=True))
+        self.details.content.update(
+            alert_renderable(
+                alert,
+                include_timing=True,
+                theme=self.app.theme_variables,
+                dark=self.app.current_theme.dark,
+            )
+        )
         self.details.scroll_home(animate=False)
         latitude, longitude, location_name, country_code = _alert_location_context(
             self.app
@@ -742,7 +751,14 @@ class WeatherAlertDetailsSidebar(Container):
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.details.set_styles(f'border: round {color}; border-title-color: {color};')
-        self.content.update(alert_renderable(alert, include_timing=True))
+        self.content.update(
+            alert_renderable(
+                alert,
+                include_timing=True,
+                theme=self.app.theme_variables,
+                dark=self.app.current_theme.dark,
+            )
+        )
         latitude, longitude, location_name, country_code = self._location_context()
         self.query_one(WarningAreaScope).update_alert(
             alert,
@@ -772,7 +788,13 @@ def alert_markdown(alert: Alert) -> str:
     return content
 
 
-def alert_renderable(alert: Alert, *, include_timing: bool = False):
+def alert_renderable(
+    alert: Alert,
+    *,
+    include_timing: bool = False,
+    theme: Mapping[str, str] | None = None,
+    dark: bool = True,
+):
     """Render authoritative provider prose without interpreting it as Markdown."""
     headline = (alert.headline or alert.event or 'Weather alert').strip()
     heading = Text(headline)
@@ -785,7 +807,9 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
         area_line.append(area, style='italic')
         renderables.append(area_line)
     if include_timing:
-        renderables.extend((Text(''), alert_timing_renderable(alert)))
+        renderables.extend(
+            (Text(''), alert_timing_renderable(alert, theme=theme, dark=dark))
+        )
     if alert.description and alert.description.strip():
         renderables.extend((Text(''), *alert_text_renderables(alert.description)))
     if alert.instruction and alert.instruction.strip():
@@ -811,7 +835,12 @@ def alert_area_text(alert: Alert) -> str:
     return ', '.join(areas)
 
 
-def alert_timing_renderable(alert: Alert) -> Text:
+def alert_timing_renderable(
+    alert: Alert,
+    *,
+    theme: Mapping[str, str] | None = None,
+    dark: bool = True,
+) -> Text:
     """Render concise local timing as a centred single-line timeline."""
 
     def local_time(value: datetime | None) -> datetime | None:
@@ -824,17 +853,18 @@ def alert_timing_renderable(alert: Alert) -> Text:
 
     onset = local_time(alert.onset)
     end = local_time(alert.expires)
+    code_style = _alert_code_style(theme, dark=dark)
     if onset is not None and end is not None:
         return Text(
             f'{clock(onset)} ··· {clock(end)}',
-            style='markdown.code',
+            style=code_style,
             justify='center',
             no_wrap=True,
             overflow='ellipsis',
         )
 
     line = Text(
-        style='markdown.code',
+        style=code_style,
         justify='center',
         no_wrap=True,
         overflow='ellipsis',
@@ -846,6 +876,38 @@ def alert_timing_renderable(alert: Alert) -> Text:
     else:
         line.append(f'{alert_condition_name(alert)} timing not published')
     return line
+
+
+def _alert_code_style(
+    theme: Mapping[str, str] | None,
+    *,
+    dark: bool,
+) -> Style:
+    """Mirror Textual Markdown's inline-code colours for generated metadata."""
+
+    if theme is None:
+        return Style(reverse=True)
+    surface_key, text_key, strength = (
+        ('warning', 'text-warning', 0.10)
+        if dark
+        else ('error', 'text-error', 0.05)
+    )
+    try:
+        background = Color.parse(theme['background'])
+        code_background = background.blend(
+            Color.parse(theme[surface_key]),
+            strength,
+        )
+        code_foreground = code_background.blend(
+            Color.parse(theme[text_key]),
+            0.95,
+        )
+    except (ColorParseError, KeyError):
+        return Style(reverse=True)
+    return Style(
+        color=code_foreground.hex,
+        bgcolor=code_background.hex,
+    )
 
 
 def _official_warning_link(alert: Alert) -> Text | None:
