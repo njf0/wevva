@@ -428,8 +428,10 @@ catalogue, performs the same local geometry matching used by Weather, and
 refreshes native point-query sources for that location. A selection generation
 prevents a late warning result from replacing a newer place. Applicable alerts
 reuse Weather's compact tabs and preview immediately below the location heading,
-presented with only a severity-coloured top rule; activating one follows the
-Dashboard's existing Alerts Centre deep
+presented with only a severity-coloured top rule. The Dashboard preview keeps
+the complete provider headline and grows to wrap it; its context-space decision
+uses that mounted height rather than assuming a fixed warning card. Activating
+one follows the Dashboard's existing Alerts Centre deep
 link rather than adopting the place as Weather state. At constrained heights an
 active warning preview takes the context tables' space; once the rail can fit
 both minimums, location, astronomy, and air-quality context returns beneath it.
@@ -480,8 +482,11 @@ warning work.
 
 Weather-warning presence is a bordered focusable summary card at compact
 heights. Once three additional rows are available after the standard current
-instruments, it upgrades to the classic alert tabs and a two-line preview;
-activating the selected preview opens that warning. Mouse activation, Enter,
+instruments, it upgrades to the classic alert tabs and a two-line preview.
+On wide layouts that still have unused vertical budget, the tabbed card may use
+up to three more rows to wrap the provider headline; fully-budgeted and compact
+layouts retain the abbreviated presentation. Activating the selected preview
+opens that warning. Mouse activation, Enter,
 or Space opens a modal where those tabs directly select the complete provider
 document in one independently scrolling, unframed detail body. When the
 selected warning has real polygon geometry, the same selection path adds a

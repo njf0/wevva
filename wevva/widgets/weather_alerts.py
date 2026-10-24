@@ -222,6 +222,10 @@ class WeatherAlertsPanel(Container):
         text-overflow: ellipsis;
     }
 
+    WeatherAlertsPanel.-wrap-headline #weather-alert-body {
+        text-wrap: wrap;
+    }
+
     #weather-alert-body:focus {
         background: $boost;
         text-style: underline;
@@ -264,6 +268,11 @@ class WeatherAlertsPanel(Container):
     def on_mount(self) -> None:
         if self.alerts:
             self.update_selected_alert()
+
+    def set_headline_wrapping(self, enabled: bool) -> None:
+        """Allow the full headline to occupy the body's available rows."""
+
+        self.set_class(enabled, '-wrap-headline')
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         if event.tab.id is None:

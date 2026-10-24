@@ -173,6 +173,13 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(warning.display)
                         self.assertTrue(screen.weather_alert_panel.display)
                         self.assertEqual(screen.weather_alert_panel.region.height, 6)
+                        self.assertFalse(
+                            screen.weather_alert_panel.has_class('-wrap-headline')
+                        )
+                        self.assertEqual(
+                            screen.weather_alert_panel.body.styles.text_wrap,
+                            'nowrap',
+                        )
 
                     temperature = screen.query_one('#ww-temp', WeatherWidget)
                     wind = screen.query_one('#ww-wind', WeatherWidget)
@@ -896,6 +903,46 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             rendered = console.export_text()
             self.assertIn('High waves and dangerous currents', rendered)
             self.assertIn('Waves of five to eight feet', rendered)
+
+    async def test_large_warning_wraps_then_returns_to_compact_height(self) -> None:
+        app = _ResponsiveWeatherApp()
+        async with app.run_test(size=(160, 60)) as pilot:
+            screen = await _load_update(
+                app,
+                pilot,
+                _imperial_update(long_warning=True, multiple_warnings=False),
+            )
+            budget = screen._layout_budget
+            assert budget is not None
+
+            self.assertEqual(budget.warning_density, WarningDensity.TABBED)
+            self.assertGreaterEqual(budget.remaining_rows, 3)
+            self.assertTrue(screen.weather_alert_panel.has_class('-wrap-headline'))
+            self.assertEqual(
+                screen.weather_alert_panel.body.styles.text_wrap,
+                'wrap',
+            )
+            self.assertEqual(screen.warnings_row.region.height, 10)
+            self.assertEqual(screen.weather_alert_panel.region.height, 9)
+            self.assertEqual(screen.weather_alert_panel.body.region.height, 5)
+            self.assertGreaterEqual(
+                screen.weather_alert_panel.body.content_size.height,
+                3,
+            )
+            self.assertEqual(screen.main_panel.max_scroll_y, 0)
+
+            await pilot.resize_terminal(120, 40)
+            for _ in range(3):
+                await pilot.pause()
+
+            self.assertFalse(screen.weather_alert_panel.has_class('-wrap-headline'))
+            self.assertEqual(
+                screen.weather_alert_panel.body.styles.text_wrap,
+                'nowrap',
+            )
+            self.assertEqual(screen.warnings_row.region.height, 7)
+            self.assertEqual(screen.weather_alert_panel.region.height, 6)
+            self.assertEqual(screen.weather_alert_panel.body.region.height, 2)
 
 
 if __name__ == '__main__':

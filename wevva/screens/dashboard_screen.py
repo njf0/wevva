@@ -77,7 +77,8 @@ class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
 
     DEFAULT_CSS = """
     DashboardWeatherAlertsPanel {
-        height: 5;
+        height: auto;
+        min-height: 5;
         max-width: 100%;
         border: none;
         border-top: solid $primary-muted;
@@ -85,6 +86,8 @@ class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
     }
 
     DashboardWeatherAlertsPanel #weather-alert-body {
+        height: auto;
+        min-height: 2;
         padding: 0;
     }
     """
@@ -99,6 +102,7 @@ class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
     ) -> None:
         super().__init__(alerts)
         self.location = location
+        self.set_headline_wrapping(True)
 
     def apply_frame_color(self, color: str | None) -> None:
         if color:
@@ -210,7 +214,8 @@ class DashboardForecastPanel(Container):
     #dashboard-location-alerts {
         display: none;
         width: 100%;
-        height: 5;
+        height: auto;
+        min-height: 5;
     }
 
     #dashboard-forecast-status {
@@ -431,6 +436,7 @@ class DashboardForecastPanel(Container):
         )
         self.location_alerts.display = getattr(self, '_forecast_event', None) is not None
         self._sync_context_visibility()
+        self.call_after_refresh(self._sync_context_visibility)
 
     def hide_alerts(self) -> None:
         """Hide stale warning content while another location is selected."""
@@ -444,6 +450,9 @@ class DashboardForecastPanel(Container):
         """Keep the bottom context block inside the available forecast rail."""
 
         has_forecast = getattr(self, '_forecast_event', None) is not None
+        alert_height = 0
+        if self.location_alerts.display:
+            alert_height = max(5, self.location_alerts.outer_size.height)
         required_height = (
             2
             + 3
@@ -451,7 +460,7 @@ class DashboardForecastPanel(Container):
             + self._hourly_min_height
             + self._daily_rows
             + self._context_height
-            + (5 if self.location_alerts.display else 0)
+            + alert_height
         )
         self.context_bar.display = (
             has_forecast

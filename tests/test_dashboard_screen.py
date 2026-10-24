@@ -176,7 +176,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(warning_panel.styles.border_left[0], '')
             self.assertEqual(warning_panel.styles.border_right[0], '')
             self.assertEqual(warning_panel.styles.border_bottom[0], '')
-            self.assertEqual(warning_panel.region.height, 5)
+            self.assertTrue(warning_panel.has_class('-wrap-headline'))
+            self.assertEqual(warning_panel.body.styles.text_wrap, 'wrap')
+            self.assertGreater(warning_panel.region.height, 5)
+            self.assertGreaterEqual(warning_panel.body.content_size.height, 3)
             self.assertLess(
                 warning_panel.region.y,
                 screen.forecast_panel.current_conditions.region.y,

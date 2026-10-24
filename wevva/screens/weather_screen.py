@@ -463,13 +463,26 @@ class WeatherScreen(Screen[None]):
         if budget == self._layout_budget:
             return
         self._layout_budget = budget
+        expanded_warning_rows = (
+            min(3, budget.remaining_rows)
+            if (
+                budget.warning_density is WarningDensity.TABBED
+                and budget.usable_width
+                >= DEFAULT_LAYOUT_METRICS.current_full_detail_min_width
+            )
+            else 0
+        )
         self.summary_row.display = budget.show_summary
         self.weather_summary.set_layout(budget.usable_width)
         self.warnings_row.styles.height = (
-            budget.warning_height if self._alerts else 0
+            budget.warning_height + expanded_warning_rows
+            if self._alerts
+            else 0
         )
         self.weather_warnings.styles.height = (
-            budget.warning_card_height if self._alerts else 0
+            budget.warning_card_height + expanded_warning_rows
+            if self._alerts
+            else 0
         )
         if self._alerts:
             self.weather_alert_summary.display = (
@@ -478,6 +491,14 @@ class WeatherScreen(Screen[None]):
             self.weather_alert_panel.display = (
                 budget.warning_density is WarningDensity.TABBED
             )
+            self.weather_alert_panel.set_headline_wrapping(
+                expanded_warning_rows > 0
+            )
+            self.weather_alert_panel.styles.height = (
+                DEFAULT_LAYOUT_METRICS.warning_tabbed_card_rows
+                + expanded_warning_rows
+            )
+            self.weather_alert_panel.body.styles.height = 2 + expanded_warning_rows
         self.current_weather.set_layout(
             budget.current_density,
             budget.current_height,
@@ -529,7 +550,11 @@ class WeatherScreen(Screen[None]):
         self.context_row.styles.height = context_height
         self.bottom_info_bar.styles.height = context_height
 
-        forecast_height = budget.used_rows - DEFAULT_LAYOUT_METRICS.outer_vertical_padding
+        forecast_height = (
+            budget.used_rows
+            - DEFAULT_LAYOUT_METRICS.outer_vertical_padding
+            + expanded_warning_rows
+        )
         if (
             show_context
             and budget.context_presentation is ContextPresentation.BOTTOM

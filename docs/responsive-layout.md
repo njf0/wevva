@@ -277,6 +277,9 @@ Warnings use a master/detail relationship:
 - once height permits, the card grows into the classic tabbed warning preview;
   selecting a tab changes its headline/timing preview and activating the body
   opens that selected warning;
+- wide tabbed layouts may spend up to three otherwise-unused rows to wrap the
+  provider headline; compact and fully-budgeted layouts retain the single-line
+  ellipsis treatment;
 - the modal uses the same tab selector over the complete warning body shown in
   the detail rail, without a duplicate compact preview above it; the document
   scrolls independently from the tabs;
