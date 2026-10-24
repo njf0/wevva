@@ -217,10 +217,25 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press('enter')
             await _settle(pilot)
             self.assertIs(app.screen, screen)
-            app.open_alerts_centre_screen.assert_called_once_with(
-                country_code='DE',
-                alert_identity=('nws', 'fixture-heat'),
+            app.open_alerts_centre_screen.assert_not_called()
+            self.assertIsNone(screen.alerts_panel.selected_row)
+            self.assertEqual(len(screen.alerts_panel.alert_list.options), 0)
+            selected_alert = screen._selected_alert
+            self.assertIsNotNone(selected_alert)
+            assert selected_alert is not None
+            self.assertIs(selected_alert.alert, warning_panel.alerts[0])
+            self.assertEqual(selected_alert.country_code, 'DE')
+            self.assertFalse(screen._selected_alert_is_bulletin)
+            self.assertEqual(
+                screen.world_map._selected_alert_fallback_point,
+                (BERLIN.longitude, BERLIN.latitude),
             )
+            marker = screen.world_map.alert_marker
+            self.assertTrue(marker.display)
+            self.assertEqual(marker.render().plain, '!')
+            self.assertIs(marker.row, selected_alert)
+            self.assertTrue(screen.alert_detail_panel.tabs.display)
+            self.assertEqual(screen.alert_detail_panel.border_title, 'Heat')
 
             london = next(
                 label

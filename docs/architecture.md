@@ -431,15 +431,18 @@ reuse Weather's compact tabs and preview immediately below the location heading,
 presented with only a severity-coloured top rule. The Dashboard preview keeps
 the complete provider headline and grows to wrap it; its context-space decision
 uses that mounted height rather than assuming a fixed warning card. Activating
-one follows the Dashboard's existing Alerts Centre deep
-link rather than adopting the place as Weather state. At constrained heights an
-active warning preview takes the context tables' space; once the rail can fit
-both minimums, location, astronomy, and air-quality context returns beneath it.
+one selects the existing Dashboard alert map/document reader and places the
+steady `!` marker at its geometry, or at the forecast point when the provider
+has no polygon. This is presentation-only state and does not insert the warning
+into the new-alert bulletin. At constrained heights an active warning preview
+takes the context tables' space; once the rail can fit both minimums, location,
+astronomy, and air-quality context returns beneath it.
 
-Alert activation prepares a country/identity deep link before opening the
-installed Alerts Centre. The destination applies it only from the matching
-country's current load, clears local filters when the identity is found, and
-retains ordinary request-generation guards so a superseded country response
+Activating the selected Dashboard map marker prepares a country/identity deep
+link before opening the installed Alerts Centre. The destination applies it
+only from the matching country's current load, clears local filters when the
+identity is found, and retains ordinary request-generation guards so a
+superseded country response
 cannot select the wrong document. The dashboard map owns one steady selected-
 alert marker above the ordinary callout layer. Feed hover or keyboard highlight
 shows the same severity-coloured, reverse-video `!`; committed selection does

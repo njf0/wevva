@@ -75,6 +75,14 @@ from wevva.utils.country_codes import get_country_name_by_alpha2
 class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
     """Weather's tabbed warning preview with a separator instead of a frame."""
 
+    class OpenRequested(Message):
+        """Request an in-Dashboard detail view for one location warning."""
+
+        def __init__(self, alert: Alert, location: LocationMetadata) -> None:
+            super().__init__()
+            self.alert = alert
+            self.location = location
+
     DEFAULT_CSS = """
     DashboardWeatherAlertsPanel {
         height: auto;
@@ -112,14 +120,15 @@ class DashboardWeatherAlertsPanel(WeatherAlertsPanel):
         self,
         event: WeatherAlertPreviewBody.OpenRequested,
     ) -> None:
-        """Open the selected warning through Dashboard's accurate detail route."""
+        """Route the selected warning into Dashboard's detail surfaces."""
 
         event.stop()
         event.prevent_default()
-        alert = self.alerts[self.selected_index]
-        self.app.open_alerts_centre_screen(
-            country_code=self.location.country_code,
-            alert_identity=country_alert_identity(alert),
+        self.post_message(
+            self.OpenRequested(
+                self.alerts[self.selected_index],
+                self.location,
+            )
         )
 
     def refresh_appearance(self) -> None:
@@ -656,12 +665,13 @@ class DashboardAlertsPanel(Container):
 
         self._refresh_option_labels()
 
-    def clear_selection(self) -> None:
+    def clear_selection(self, *, notify: bool = True) -> None:
         self._selected_identity = None
         self.alert_list.clear_preview()
         self.alert_list.highlighted = None
         self._refresh_option_labels()
-        self.post_message(self.Selected(None))
+        if notify:
+            self.post_message(self.Selected(None))
 
     def on_option_list_option_selected(
         self,
@@ -1034,10 +1044,10 @@ class DashboardTropicalPanel(Container):
 
 
 class DashboardAlertDetailPanel(Container):
-    """Provider-neutral map and document reader for one bulletin alert."""
+    """Provider-neutral map and document reader for one selected alert."""
 
     _SELECTION_PROMPT = (
-        'Select an alert from the bulletin to view its map and full details.'
+        'Select an alert to view its map and full details.'
     )
 
     DEFAULT_CSS = """
@@ -1350,6 +1360,9 @@ class DashboardScreen(Screen[None]):
         self._alert_place_weather_label: CountryAlertCityLabel | None = None
         self._bulletin_generation = -1
         self._present_new_alert_identities: frozenset[tuple[str, str]] = frozenset()
+        self._selected_alert: BulletinAlert | None = None
+        self._selected_alert_fallback_point: tuple[float, float] | None = None
+        self._selected_alert_is_bulletin = False
         self._alert_return_focus: str | None = None
         self._time_refresh_timer = None
 
@@ -1412,8 +1425,7 @@ class DashboardScreen(Screen[None]):
         )
 
     def selected_alert_country_code(self) -> str | None:
-        panels = tuple(self.query(DashboardAlertsPanel)) if self.is_attached else ()
-        row = panels[0].selected_row if panels and panels[0].is_attached else None
+        row = self._selected_alert
         return row.country_code if row is not None else None
 
     def action_refresh_bulletin(self) -> None:
@@ -1437,7 +1449,8 @@ class DashboardScreen(Screen[None]):
             self._time_refresh_timer.resume()
         self.sync_from_app()
         self.world_map.set_selected_alert(
-            self.alerts_panel.selected_row,
+            self._selected_alert,
+            fallback_point=self._selected_alert_fallback_point,
         )
         self.call_after_refresh(self._restore_focus)
 
@@ -1658,11 +1671,12 @@ class DashboardScreen(Screen[None]):
         if alerts_panel.needs_update(rows):
             alerts_panel.update_alerts(rows)
         selected_row = alerts_panel.selected_row
-        if _bulletin_detail_key(previous_selection) != _bulletin_detail_key(
-            selected_row
+        if (
+            self._selected_alert_is_bulletin
+            and _bulletin_detail_key(previous_selection)
+            != _bulletin_detail_key(selected_row)
         ):
-            world_map.set_selected_alert(selected_row)
-            detail_panel.show_alert(selected_row)
+            self._show_selected_alert(selected_row, is_bulletin=True)
         if arrived_while_open and unflashed_rows:
             world_map.flash_new_alerts(unflashed_rows)
         self._ensure_persistent_alerts()
@@ -1673,10 +1687,50 @@ class DashboardScreen(Screen[None]):
     ) -> None:
         message.stop()
         self._cancel_alert_place_weather()
-        self.world_map.set_selected_alert(message.row)
-        self.alert_detail_panel.show_alert(message.row)
-        if message.row is not None:
-            self.app.note_bulletin_country_used(message.row.country_code)
+        self._show_selected_alert(message.row, is_bulletin=True)
+
+    def on_dashboard_weather_alerts_panel_open_requested(
+        self,
+        message: DashboardWeatherAlertsPanel.OpenRequested,
+    ) -> None:
+        """Show a location warning without publishing it to the bulletin."""
+
+        message.stop()
+        location = message.location
+        country_code = location.country_code or ''
+        row = BulletinAlert(
+            country_code=country_code,
+            alert=message.alert,
+            first_observed=datetime.now(UTC),
+        )
+        fallback_point = (
+            (location.longitude, location.latitude)
+            if location.longitude is not None and location.latitude is not None
+            else None
+        )
+        self.alerts_panel.clear_selection(notify=False)
+        self._show_selected_alert(
+            row,
+            fallback_point=fallback_point,
+            is_bulletin=False,
+        )
+
+    def _show_selected_alert(
+        self,
+        row: BulletinAlert | None,
+        *,
+        fallback_point: tuple[float, float] | None = None,
+        is_bulletin: bool,
+    ) -> None:
+        """Keep the Dashboard map and detail reader on one alert selection."""
+
+        self._selected_alert = row
+        self._selected_alert_fallback_point = fallback_point
+        self._selected_alert_is_bulletin = is_bulletin and row is not None
+        self.world_map.set_selected_alert(row, fallback_point=fallback_point)
+        self.alert_detail_panel.show_alert(row)
+        if row is not None:
+            self.app.note_bulletin_country_used(row.country_code)
 
     def on_dashboard_alerts_panel_previewed(
         self,

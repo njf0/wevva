@@ -279,6 +279,7 @@ class DashboardWorldMap(WorldLocationsMap):
         self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
         self._selected_tropical_key: str | None = None
         self._selected_alert: BulletinAlert | None = None
+        self._selected_alert_fallback_point: tuple[float, float] | None = None
         self._preview_alert: BulletinAlert | None = None
         self._alert_marker_widget: DashboardAlertMarker | None = None
         self._incoming_alerts: tuple[BulletinAlert, ...] = ()
@@ -313,13 +314,23 @@ class DashboardWorldMap(WorldLocationsMap):
     def set_selected_alert(
         self,
         row: BulletinAlert | None,
+        *,
+        fallback_point: tuple[float, float] | None = None,
     ) -> None:
         """Replace the one persistent, steady alert marker."""
 
-        if row == self._selected_alert and self._preview_alert is None:
+        if (
+            row == self._selected_alert
+            and fallback_point == self._selected_alert_fallback_point
+            and self._preview_alert is None
+        ):
             return
-        changed = _bulletin_identity(row) != _bulletin_identity(self._selected_alert)
+        changed = (
+            _bulletin_identity(row) != _bulletin_identity(self._selected_alert)
+            or fallback_point != self._selected_alert_fallback_point
+        )
         self._selected_alert = row
+        self._selected_alert_fallback_point = fallback_point
         self._preview_alert = None
         self._update_alert_marker()
         if changed:
@@ -475,7 +486,7 @@ class DashboardWorldMap(WorldLocationsMap):
 
     def _reflow(self) -> None:
         super()._reflow()
-        self._position_alert_marker()
+        self._update_alert_marker()
         self._sync_incoming_alert_markers()
 
     def _update_alert_marker(self) -> None:
@@ -483,11 +494,9 @@ class DashboardWorldMap(WorldLocationsMap):
             return
         marker = self.alert_marker
         row = self._preview_alert or self._selected_alert
-        point = (
-            representative_polygon_point(row.alert.geometry)
-            if row is not None
-            else None
-        )
+        point = representative_polygon_point(row.alert.geometry) if row else None
+        if point is None and row is self._selected_alert:
+            point = self._selected_alert_fallback_point
         if row is None or point is None:
             marker.display = False
             marker.row = None
@@ -683,11 +692,9 @@ class DashboardWorldMap(WorldLocationsMap):
         frame: GeographicFrame,
     ) -> tuple[int, int] | None:
         row = self._selected_alert
-        point = (
-            representative_polygon_point(row.alert.geometry)
-            if row is not None
-            else None
-        )
+        point = representative_polygon_point(row.alert.geometry) if row else None
+        if point is None:
+            point = self._selected_alert_fallback_point
         if point is None:
             return None
         longitude, latitude = point
