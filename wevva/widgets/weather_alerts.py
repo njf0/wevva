@@ -9,7 +9,6 @@ from typing import Any
 
 from rich.console import Group
 from rich.markup import escape
-from rich.rule import Rule
 from rich.style import Style
 from rich.table import Table
 from rich.text import Text
@@ -780,6 +779,7 @@ def alert_renderable(alert: Alert, *, include_timing: bool = False):
     heading.stylize('markdown.h3')
     renderables: list[object] = [heading]
     if area := alert_area_text(alert):
+        renderables.append(Text(''))
         area_line = Text()
         area_line.append('Affects: ', style='dim italic')
         area_line.append(area, style='italic')
@@ -811,7 +811,7 @@ def alert_area_text(alert: Alert) -> str:
     return ', '.join(areas)
 
 
-def alert_timing_renderable(alert: Alert) -> object:
+def alert_timing_renderable(alert: Alert) -> Text:
     """Render concise local timing as a centred single-line timeline."""
 
     def local_time(value: datetime | None) -> datetime | None:
@@ -825,29 +825,26 @@ def alert_timing_renderable(alert: Alert) -> object:
     onset = local_time(alert.onset)
     end = local_time(alert.expires)
     if onset is not None and end is not None:
-        timeline = Table.grid(expand=True, padding=(0, 1))
-        timeline.add_column(no_wrap=True)
-        timeline.add_column(ratio=1)
-        timeline.add_column(no_wrap=True)
-        timeline.add_row(
-            Text(clock(onset), style='italic'),
-            Rule(style='dim', characters='─'),
-            Text(clock(end), style='italic'),
+        return Text(
+            f'{clock(onset)} ··· {clock(end)}',
+            style='markdown.code',
+            justify='center',
+            no_wrap=True,
+            overflow='ellipsis',
         )
-        return timeline
 
-    line = Text(justify='center')
+    line = Text(
+        style='markdown.code',
+        justify='center',
+        no_wrap=True,
+        overflow='ellipsis',
+    )
     if onset is not None:
-        line.append('From ', style='dim italic')
-        line.append(clock(onset), style='italic')
+        line.append(f'From {clock(onset)}')
     elif end is not None:
-        line.append('Until ', style='dim italic')
-        line.append(clock(end), style='italic')
+        line.append(f'Until {clock(end)}')
     else:
-        line.append(
-            f'{alert_condition_name(alert)} timing not published',
-            style='dim italic',
-        )
+        line.append(f'{alert_condition_name(alert)} timing not published')
     return line
 
 

@@ -14,6 +14,7 @@ from wevva.widgets.weather_alerts import (
     _normalise_alert_text,
     alert_markdown,
     alert_renderable,
+    alert_timing_renderable,
 )
 
 
@@ -50,13 +51,15 @@ class AlertMarkdownTests(unittest.TestCase):
         assert alert.expires is not None
         onset = alert.onset.astimezone().strftime('%H:%M %A')
         expires = alert.expires.astimezone().strftime('%H:%M %A')
+        timing = alert_timing_renderable(alert)
 
         self.assertEqual(lines[0], 'Damaging storms expected')
-        self.assertEqual(lines[1], 'Affects: NORTH DISTRICT, River Valley')
-        self.assertEqual(lines[2], '')
-        self.assertTrue(lines[3].startswith(f'{onset} '))
-        self.assertTrue(lines[3].endswith(f' {expires}'))
-        self.assertIn('─', lines[3])
+        self.assertEqual(lines[1], '')
+        self.assertEqual(lines[2], 'Affects: NORTH DISTRICT, River Valley')
+        self.assertEqual(lines[3], '')
+        self.assertEqual(lines[4].strip(), f'{onset} ··· {expires}')
+        self.assertEqual(timing.justify, 'center')
+        self.assertEqual(timing.style, 'markdown.code')
 
     def test_instruction_keeps_indented_provider_list_items(self) -> None:
         alert = Alert(

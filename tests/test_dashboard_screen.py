@@ -640,7 +640,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 alert.expires.astimezone().strftime('%H:%M %A'),
                 document_text,
             )
-            self.assertIn('─', document_text)
+            self.assertIn(' ··· ', document_text)
             self.assertIn('River levels are expected to remain high.', document_text)
             self.assertIn('Avoid flooded roads.', document_text)
             screen.update_bulletin(1, (row,))
