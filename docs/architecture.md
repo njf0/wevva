@@ -260,6 +260,11 @@ delete are Weather-local actions. Settings, help, credits, and quit are
 application bindings shared by every workspace. A specialist `b` action pops
 to the suspended Dashboard when it is immediately below, so the installed
 Dashboard is not pushed onto the stack twice.
+The shared Help action selects one concise workspace section at the app/screen
+boundary; only a focused Weather air-quality card substitutes its own glossary.
+Help, Settings, Credits, and that glossary use the same header/footer and
+responsive, internally scrolling modal presentation without owning provider
+work or background tasks.
 `wevva/dashboard_layout.py` makes the pure presentation decision: a
 120×30-or-larger viewport shows the forecast rail, dominant world map, and
 alerts rail together; larger widths progressively grow both rails rather than

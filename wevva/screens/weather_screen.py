@@ -657,8 +657,7 @@ class WeatherScreen(Screen[None]):
         if isinstance(focused, AirQualityWidget):
             self.app.push_screen(AirQualityHelp())
         else:
-            # Default help
-            self.app.push_screen(HelpScreen())
+            self.app.push_screen(HelpScreen('weather'))
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Expose auxiliary access actions only when they have content."""

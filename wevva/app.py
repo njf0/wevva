@@ -531,11 +531,26 @@ class Wevva(App, inherit_bindings=False):
         self.push_screen(SearchScreen())
 
     def action_help(self):  # textual binding: 'h'
-        """Open help screen."""
+        """Open focused or active-workspace help."""
         if self.screen is self.weather_screen:
             self.weather_screen.action_help()
-        else:
-            self.push_screen(HelpScreen())
+            return
+
+        help_context = {
+            DashboardScreen: 'dashboard',
+            WorldLocationsScreen: 'world-map',
+            TropicalSystemsScreen: 'tropical-systems',
+            AlertsCentreScreen: 'alerts-centre',
+        }
+        context = next(
+            (
+                candidate
+                for screen_type, candidate in help_context.items()
+                if isinstance(self.screen, screen_type)
+            ),
+            'dashboard',
+        )
+        self.push_screen(HelpScreen(context))
 
     def action_credits(self) -> None:
         """Open project credits from any workspace."""

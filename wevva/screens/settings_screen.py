@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.screen import ModalScreen
 from textual.theme import BUILTIN_THEMES
 from textual.widgets import Button, Footer, Header, Label, Select, Static
@@ -17,25 +17,25 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
     DEFAULT_CSS = """
     SettingsScreen {
         align: center middle;
-        content-align: center middle;
-        align-horizontal: center;
-        align-vertical: middle;
+        background: $background;
+        hatch: right $background-lighten-1;
     }
 
-    #settings-dialog {
-        align: center middle;
-        align-horizontal: center;
-        align-vertical: middle;
-        content-align: center middle;
-        width: 60;
+    SettingsScreen > #settings-dialog {
+        width: 64;
+        max-width: 96%;
         height: auto;
-        padding: 2 4;
-        border: thick $primary;
+        max-height: 100%;
+        padding: 1 2;
+        overflow-y: auto;
+        border: round $primary;
+        border-title-color: $primary;
+        border-title-align: left;
         background: $panel;
     }
 
     #settings-dialog Label {
-        margin: 1 0;
+        margin-top: 1;
     }
 
     #settings-dialog Select {
@@ -47,7 +47,7 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
         layout: horizontal;
         width: 100%;
         height: auto;
-        margin-top: 2;
+        margin-top: 1;
         align-horizontal: center;
     }
 
@@ -85,8 +85,12 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
         """Build settings UI."""
         yield Header(show_clock=True, id='settings-header')
 
-        with Container(id='settings-dialog'):
-            yield Static('[bold]Settings[/]', id='settings-title')
+        with VerticalScroll(id='settings-dialog') as dialog:
+            dialog.border_title = 'Settings'
+            yield Static(
+                'Apply changes this session. Save Defaults also stores them for future launches.',
+                id='settings-save-note',
+            )
             yield Label('Theme:')
             yield Select(
                 options=self._theme_options(),
@@ -104,7 +108,7 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
                 id='emoji-select',
             )
             yield Static(
-                '[dim]Emoji rendering varies by terminal, font, and locale.[/]',
+                'Emoji rendering varies by terminal, font, and locale.',
                 id='emoji-note',
             )
 
@@ -116,6 +120,10 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
                 ],
                 value=self.warning_language,
                 id='warning-language-select',
+            )
+            yield Static(
+                'Auto uses the provider default; English is requested where supported.',
+                id='warning-language-note',
             )
 
             yield Label('Temperature Unit:')
@@ -155,6 +163,10 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
                 options=self._default_location_options(),
                 value='keep',
                 id='default-location-select',
+            )
+            yield Static(
+                'Default-location actions apply only when you choose Save Defaults.',
+                id='default-location-note',
             )
 
             with Container(classes='button-row'):
@@ -198,7 +210,12 @@ class SettingsScreen(ModalScreen[dict[str, Any] | None]):
 
     def _default_location_options(self) -> list[tuple[str, str]]:
         """Return default-location actions for this session context."""
-        options = [(f'Keep saved ({self.saved_default_location})', 'keep')]
+        keep_label = (
+            f'Keep saved ({self.saved_default_location})'
+            if self.saved_default_location
+            else 'Keep no saved default location'
+        )
+        options = [(keep_label, 'keep')]
         if self.current_location_label:
             options.append(('Set to current location', 'use_current'))
         options.append(('Clear saved default location', 'clear'))
