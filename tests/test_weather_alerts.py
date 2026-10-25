@@ -9,6 +9,7 @@ import unittest
 from wevva.alerts import Alert
 from rich.console import Console
 
+from wevva.utils import date_suffix
 from wevva.widgets.weather_alerts import (
     WeatherAlertsPanel,
     _normalise_alert_text,
@@ -19,6 +20,35 @@ from wevva.widgets.weather_alerts import (
 
 
 class AlertMarkdownTests(unittest.TestCase):
+    def test_metadata_table_escapes_provider_column_separators(self) -> None:
+        alert = Alert(
+            id='table-area',
+            source='test',
+            event='Rain',
+            headline='Rain expected',
+            area_names=['Coast | River Valley'],
+        )
+
+        self.assertIn(
+            '| **Area** | Coast \\| River Valley |',
+            alert_markdown(alert),
+        )
+
+    def test_metadata_table_omits_unpublished_timing_rows(self) -> None:
+        alert = Alert(
+            id='partial-timing',
+            source='test',
+            event='Rain',
+            headline='Rain expected',
+            expires=datetime(2030, 1, 1, 14, 0, tzinfo=UTC),
+        )
+
+        markdown = alert_markdown(alert, include_timing=True)
+
+        self.assertNotIn('Starts', markdown)
+        self.assertNotIn('Not published', markdown)
+        self.assertIn('| **Ends** |', markdown)
+
     def test_area_and_timing_form_one_detail_header(self) -> None:
         alert = Alert(
             id='timed-area',
@@ -36,8 +66,31 @@ class AlertMarkdownTests(unittest.TestCase):
 
         self.assertEqual(
             alert_markdown(alert),
-            '### Damaging storms expected\n\n'
-            'Affects: NORTH DISTRICT, River Valley',
+            '# Damaging storms expected\n\n'
+            '| | |\n'
+            '| --- | --- |\n'
+            '| **Area** | NORTH DISTRICT, River Valley |',
+        )
+        assert alert.onset is not None
+        assert alert.expires is not None
+        onset_local = alert.onset.astimezone()
+        expires_local = alert.expires.astimezone()
+        onset = (
+            f'{onset_local:%H:%M %A} '
+            f'{onset_local.day}{date_suffix(onset_local.day)} {onset_local:%B}'
+        )
+        expires = (
+            f'{expires_local:%H:%M %A} '
+            f'{expires_local.day}{date_suffix(expires_local.day)} {expires_local:%B}'
+        )
+        self.assertEqual(
+            alert_markdown(alert, include_timing=True),
+            '# Damaging storms expected\n\n'
+            '| | |\n'
+            '| --- | --- |\n'
+            '| **Area** | NORTH DISTRICT, River Valley |\n'
+            f'| **Starts** | {onset} |\n'
+            f'| **Ends** | {expires} |',
         )
         console = Console(
             width=60,
@@ -59,10 +112,6 @@ class AlertMarkdownTests(unittest.TestCase):
             )
         )
         lines = console.export_text().splitlines()
-        assert alert.onset is not None
-        assert alert.expires is not None
-        onset = alert.onset.astimezone().strftime('%H:%M %A')
-        expires = alert.expires.astimezone().strftime('%H:%M %A')
         timing = alert_timing_renderable(alert, theme=theme, dark=True)
 
         self.assertEqual(lines[0], 'Damaging storms expected')
@@ -95,7 +144,8 @@ class AlertMarkdownTests(unittest.TestCase):
 
         self.assertEqual(
             alert_markdown(alert),
-            '### Severe thunderstorm warning\n\n'
+            '# Severe thunderstorm warning\n\n'
+            '## Instruction\n\n'
             'The National Emergency Management Agency advises that as storms approach you should:\n'
             '- Take shelter, preferably indoors away from windows;\n'
             '- Avoid sheltering under trees, if outside;\n'
@@ -115,8 +165,10 @@ class AlertMarkdownTests(unittest.TestCase):
 
         self.assertEqual(
             alert_markdown(alert),
-            '### Rain warning\n\n'
+            '# Rain warning\n\n'
+            '## Description\n\n'
             'Read the [official guidance](https://example.com).\n\n'
+            '## Instruction\n\n'
             '1. Stay indoors\n'
             '2. Avoid flooded roads',
         )
@@ -142,7 +194,8 @@ class AlertMarkdownTests(unittest.TestCase):
 
         self.assertEqual(
             alert_markdown(alert),
-            '### Flood watch\n\n'
+            '# Flood watch\n\n'
+            '## Instruction\n\n'
             '- WHAT...Flash flooding caused by excessive rainfall continues to be possible.\n'
             '- WHERE...A portion of western Nevada, including the following areas, '
             'Greater Reno-Carson City-Minden Area.\n'
@@ -235,7 +288,7 @@ class AlertMarkdownTests(unittest.TestCase):
 
         self.assertEqual(
             alert_markdown(alert),
-            '### Rain warning\n\nHeavy rain is expected.\n\n'
+            '# Rain warning\n\n## Description\n\nHeavy rain is expected.\n\n'
             '[View official warning](https://example.com/warnings/rain)',
         )
         self.assertNotIn('View official warning', WeatherAlertsPanel([]).build_timing_line(alert))

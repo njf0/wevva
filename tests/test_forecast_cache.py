@@ -119,6 +119,21 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(second.hourly, self.event.hourly)
         self.assertIs(self.app.location, self.location)
 
+    async def test_dashboard_preview_explicit_refresh_bypasses_cache(self) -> None:
+        preview_location = LocationMetadata(
+            latitude=48.8566,
+            longitude=2.3522,
+            country_code='FR',
+        )
+
+        await self.app.load_dashboard_forecast(preview_location)
+        await self.app.load_dashboard_forecast(
+            preview_location,
+            refresh=True,
+        )
+
+        self.assertEqual(self.app.controller.fetch.await_count, 2)
+
     async def test_cancelled_dashboard_preview_cancels_provider_task(self) -> None:
         preview_location = LocationMetadata(
             latitude=48.8566,

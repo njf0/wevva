@@ -16,7 +16,7 @@ from textual.containers import Container, VerticalScroll
 from textual.events import Resize
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Footer, Header, OptionList, Static, Tab, Tabs
+from textual.widgets import Footer, Header, Markdown, OptionList, Static, Tab, Tabs
 from textual.widgets.option_list import Option
 from wevva_warnings import (
     CanonicalTropicalSystem,
@@ -63,10 +63,11 @@ from wevva.widgets.tropical_products import (
 from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
 from wevva.widgets.weather_alerts import (
+    AlertMarkdown,
     WeatherAlertPreviewBody,
     WeatherAlertsPanel,
     alert_condition_name,
-    alert_renderable,
+    alert_markdown,
     alert_severity_color,
 )
 from wevva.utils.country_codes import get_country_name_by_alpha2
@@ -902,8 +903,8 @@ class DashboardTropicalPanel(Container):
         self._set_frame(
             ' '.join(part for part in (classification, name) if part)
             or 'Tropical System',
-            self.app.theme_variables.get('accent')
-            or self.app.theme_variables.get('text-accent'),
+            self.app.theme_variables.get('text-accent')
+            or self.app.theme_variables.get('accent'),
         )
         self._observation = observation
         self._products = ()
@@ -1007,6 +1008,7 @@ class DashboardTropicalPanel(Container):
         )
         body.display = True
         await body.remove_children()
+        body.scroll_home(animate=False)
         if tab_id == 'dashboard-tropical-product-forecast':
             await body.mount(Static(tropical_forecast_summary(observation)))
             return
@@ -1120,7 +1122,7 @@ class DashboardAlertDetailPanel(Container):
             document = VerticalScroll(id='dashboard-alert-document')
             document.display = False
             with document:
-                yield Static(id='dashboard-alert-document-body')
+                yield AlertMarkdown('', id='dashboard-alert-document-body')
             yield Static(
                 self._SELECTION_PROMPT,
                 id='dashboard-alert-detail-state',
@@ -1204,16 +1206,9 @@ class DashboardAlertDetailPanel(Container):
         document.display = not is_map
         if is_map:
             return
-        body = self.query_one('#dashboard-alert-document-body', Static)
+        body = self.query_one('#dashboard-alert-document-body', Markdown)
         if tab_id == self._DOCUMENT_TAB_ID:
-            body.update(
-                alert_renderable(
-                    row.alert,
-                    include_timing=True,
-                    theme=self.app.theme_variables,
-                    dark=self.app.current_theme.dark,
-                )
-            )
+            body.update(alert_markdown(row.alert, include_timing=True))
 
     def refresh_appearance(self) -> None:
         """Refresh theme-derived detail styling without rebuilding geometry."""
@@ -1249,7 +1244,7 @@ class DashboardScreen(Screen[None]):
         Binding('m', 'world_map', 'World Map'),
         Binding('t', 'tropical_systems', 'Tropical Systems'),
         Binding('g', 'alerts_centre', 'Alerts Centre'),
-        Binding('r', 'refresh_bulletin', 'Refresh alerts'),
+        Binding('r', 'refresh_dashboard', 'Refresh dashboard'),
         Binding('left', 'previous_feature', 'Previous feature', show=False),
         Binding('right', 'next_feature', 'Next feature', show=False),
         Binding('escape', 'clear_alert_selection', 'Clear alert', show=False),
@@ -1431,14 +1426,12 @@ class DashboardScreen(Screen[None]):
             else None
         )
 
-    def selected_alert_country_code(self) -> str | None:
-        row = self._selected_alert
-        return row.country_code if row is not None else None
+    def action_refresh_dashboard(self) -> None:
+        """Refresh visible Dashboard data without touching the bulletin."""
 
-    def action_refresh_bulletin(self) -> None:
-        """Request only the bounded local bulletin refresh set."""
-
-        self.app.refresh_dashboard_bulletin()
+        self._ensure_persistent_forecast(refresh=True)
+        self._ensure_persistent_alerts(refresh=True)
+        self._refresh_dashboard_tropical_systems()
 
     def on_mount(self) -> None:
         self.title = 'Dashboard'
@@ -1875,9 +1868,38 @@ class DashboardScreen(Screen[None]):
                 self._load_tropical_systems()
             )
 
-    async def _load_tropical_systems(self) -> None:
+    def _refresh_dashboard_tropical_systems(self) -> None:
+        """Force the Dashboard storm snapshot without opening its workspace."""
+
+        if (
+            self._tropical_wait_task is not None
+            and not self._tropical_wait_task.done()
+        ) or (
+            self._tropical_selection_refresh_task is not None
+            and not self._tropical_selection_refresh_task.done()
+        ):
+            return
+        if (
+            self._selected_tropical_system is not None
+            and self._selected_tropical_observation is not None
+        ):
+            self._refresh_tropical_selection(
+                self._selected_tropical_system,
+                self._selected_tropical_observation,
+                refresh=True,
+            )
+            return
+        self.tropical_panel.show_overview(None)
+        self._tropical_wait_task = asyncio.create_task(
+            self._load_tropical_systems(refresh=True)
+        )
+
+    async def _load_tropical_systems(self, *, refresh: bool = False) -> None:
         try:
-            systems = await self.app.load_tropical_systems()
+            if refresh:
+                systems = await self.app.refresh_tropical_systems()
+            else:
+                systems = await self.app.load_tropical_systems()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1923,6 +1945,8 @@ class DashboardScreen(Screen[None]):
         self,
         system: CanonicalTropicalSystem,
         observation: TropicalSystem,
+        *,
+        refresh: bool = False,
     ) -> None:
         """Refresh one stale selection without disturbing its visible pane."""
 
@@ -1939,6 +1963,7 @@ class DashboardScreen(Screen[None]):
             self._load_refreshed_tropical_selection(
                 *self._tropical_selection_refresh_target,
                 generation,
+                refresh=refresh,
             )
         )
 
@@ -1948,12 +1973,17 @@ class DashboardScreen(Screen[None]):
         source: str,
         observation_id: str,
         generation: int,
+        *,
+        refresh: bool = False,
     ) -> None:
         """Replace a stale pane only after its fresh products are available."""
 
         task = asyncio.current_task()
         try:
-            systems = await self.app.load_tropical_systems()
+            if refresh:
+                systems = await self.app.refresh_tropical_systems()
+            else:
+                systems = await self.app.load_tropical_systems()
             refreshed = _matching_tropical_selection(
                 systems,
                 system_key,
@@ -1985,11 +2015,14 @@ class DashboardScreen(Screen[None]):
         ):
             return
         self.world_map.set_tropical_systems(systems)
-        if refreshed is None or products is None:
+        if refreshed is None:
             self._selected_tropical_system = None
             self._selected_tropical_observation = None
             self.world_map.set_selected_tropical(None)
             self.tropical_panel.show_overview(tuple(systems))
+            return
+        if products is None:
+            self.tropical_panel.set_loading(False)
             return
 
         system, observation = refreshed
@@ -2097,7 +2130,7 @@ class DashboardScreen(Screen[None]):
         self._ensure_persistent_forecast()
         self._ensure_persistent_alerts()
 
-    def _ensure_persistent_forecast(self) -> None:
+    def _ensure_persistent_forecast(self, *, refresh: bool = False) -> None:
         """Start at most one selected-place preview wait for the current state."""
 
         location = self._selected_location or self.app.location
@@ -2105,7 +2138,10 @@ class DashboardScreen(Screen[None]):
             location is None
             or location.latitude is None
             or location.longitude is None
-            or self.app.dashboard_forecast_snapshot(location) is not None
+            or (
+                not refresh
+                and self.app.dashboard_forecast_snapshot(location) is not None
+            )
         ):
             return
         key = self._forecast_selection_key(location)
@@ -2120,20 +2156,33 @@ class DashboardScreen(Screen[None]):
         generation = self._forecast_request_generation
         self._forecast_request_key = key
         self._forecast_wait_task = asyncio.create_task(
-            self._load_forecast(location, key, generation)
+            self._load_forecast(
+                location,
+                key,
+                generation,
+                refresh=refresh,
+            )
         )
-        self._show_persistent_location()
+        if refresh:
+            self.forecast_panel.show_loading(location)
+        else:
+            self._show_persistent_location()
 
     async def _load_forecast(
         self,
         location: LocationMetadata,
         key: tuple[str, str, str, str],
         generation: int,
+        *,
+        refresh: bool = False,
     ) -> None:
         """Apply a preview only while its selected-place generation is current."""
 
         try:
-            await self.app.load_dashboard_forecast(location)
+            if refresh:
+                await self.app.load_dashboard_forecast(location, refresh=True)
+            else:
+                await self.app.load_dashboard_forecast(location)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -2182,7 +2231,7 @@ class DashboardScreen(Screen[None]):
         self._forecast_wait_task = None
         self._forecast_request_key = None
 
-    def _ensure_persistent_alerts(self) -> None:
+    def _ensure_persistent_alerts(self, *, refresh: bool = False) -> None:
         """Load warnings once for the current Dashboard location selection."""
 
         location = self._selected_location or self.app.location
@@ -2197,7 +2246,7 @@ class DashboardScreen(Screen[None]):
             < self.app.country_alerts_service.ttl_seconds
         )
         if key == self._location_alert_key and (
-            loaded_is_fresh
+            (loaded_is_fresh and not refresh)
             or (
                 self._location_alert_task is not None
                 and not self._location_alert_task.done()
@@ -2212,7 +2261,12 @@ class DashboardScreen(Screen[None]):
         generation = self._location_alert_generation
         self._location_alert_key = key
         self._location_alert_task = asyncio.create_task(
-            self._load_location_alerts(location, key, generation)
+            self._load_location_alerts(
+                location,
+                key,
+                generation,
+                refresh=refresh,
+            )
         )
 
     async def _load_location_alerts(
@@ -2220,11 +2274,19 @@ class DashboardScreen(Screen[None]):
         location: LocationMetadata,
         key: tuple[str, str],
         generation: int,
+        *,
+        refresh: bool = False,
     ) -> None:
         """Apply point warnings only to the selection that requested them."""
 
         try:
-            alerts = await self.app.load_dashboard_alerts(location)
+            if refresh:
+                alerts = await self.app.load_dashboard_alerts(
+                    location,
+                    refresh=True,
+                )
+            else:
+                alerts = await self.app.load_dashboard_alerts(location)
         except asyncio.CancelledError:
             raise
         except Exception:

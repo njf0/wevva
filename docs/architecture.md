@@ -350,6 +350,13 @@ status or focused-tooltip copy is painted over the world map. The Tropical
 Systems workspace uses a separate tab formatter which colours only the
 classification and leaves the name plain.
 
+If a previously mapped storm is absent from the next completed canonical
+fetch, the Dashboard retains its last map position instead of silently
+removing it, and changes its label to a non-interactive dim accent `×`. If that
+storm was selected, Dashboard clears the stale track and products and returns
+the lower pane to its current-system overview. A returning storm resumes its
+normal interactive accent `★` label.
+
 Storm activation records the exact Dashboard canonical/source observation and
 renders that source's `LargeTropicalStormTrackScope` immediately in the lower
 tropical pane. It then joins `Wevva.load_tropical_products()`, retaining the
@@ -378,10 +385,12 @@ Dashboard-selected, saved, and recently inspected Alerts Centre countries on
 the fifteen-minute cadence; a fair rolling lane staggers the remaining warning
 registry across a target two-hour cycle. Both lanes share a two-request
 semaphore, per-country/language refresh coalescing in `CountryAlertsService`,
-and bounded failure backoff. Dashboard hard refresh is limited to its active
-and selected country keys and never restarts the rolling queue. Only complete
-country catalogues still inside `CountryAlertsService`'s fifteen-minute fresh
-window hydrate immutable coordinator snapshots before provider work; older
+and bounded failure backoff. Dashboard `r` does not schedule bulletin work or
+restart the rolling queue; it refreshes the selected location forecast, its
+point-matched alerts, and canonical tropical systems (including fresh products
+for a selected storm). Only complete country catalogues still inside
+`CountryAlertsService`'s fifteen-minute fresh window hydrate immutable
+coordinator snapshots before provider work; older
 provisional/retained entries do not populate the startup bulletin. Warning-cache
 pruning applies separate limits to catalogues and reusable point candidates,
 while the bounded observation journal preferentially retains identities still
@@ -482,6 +491,8 @@ Alert marker deep links restore marker focus on return.
 Appearance-only settings changes rebuild Dashboard's cached Rich renderables
 for the new theme or emoji preference without starting forecast, tropical, or
 warning work.
+Selected tropical frames use the same `text-accent` border and title colour as
+accent-severity alert frames rather than the theme's distinct surface accent.
 
 Weather-warning presence is a bordered focusable summary card at compact
 heights. Once three additional rows are available after the standard current
@@ -492,11 +503,15 @@ layouts retain the abbreviated presentation. Activating the selected preview
 opens that warning. Mouse activation, Enter,
 or Space opens a modal where those tabs directly select the complete provider
 document in one independently scrolling, unframed detail body. Full alert
-documents share the same heading, complete `Affects:` line, centred code-styled
-local-time range, description, instruction, and official-link presentation
-across Weather, Dashboard, and Alerts Centre. The generated timing strip mirrors
-Textual Markdown's dark/light inline-code palette while provider prose remains
-literal rather than being reinterpreted as Markdown. When the
+documents share one Textual Markdown presentation containing the centred,
+compactly spaced root heading,
+complete affected area and separate start/end values in a visually headerless
+metadata table, using local times with weekday, ordinal day, and month and
+omitting unavailable timing rows, provider description and instruction
+sections, and official link across Weather, Dashboard, and Alerts Centre.
+Ordinary document section headings retain
+Textual's standard Markdown styling and spacing.
+When the
 selected warning has real polygon geometry, the same selection path adds a
 bounded Warning Area peer beside the document; alerts without geometry return
 the complete width to the prose. The modal's single rounded frame is centred,
@@ -662,6 +677,11 @@ workspace fills its full-height stage. Its frame has no internal padding; the
 stage supplies the only `1 2` outer inset.
 Product tabs begin directly with retrieved provider content; the UI does not
 prepend a redundant product title or issued-time block.
+Provider root headings retain their centred document-title treatment with one
+row of vertical margin; ordinary product section headings retain the same
+standard Markdown styling and spacing as alert sections. Both the full
+workspace and Dashboard reset the shared product body's scroll position when
+changing tabs, so each document opens on that root heading.
 Centre conditions use a current-only request in the application's configured
 temperature, wind, and precipitation units. Results are cached by source-centre
 coordinates for the screen lifetime, refresh with the tropical workspace, and

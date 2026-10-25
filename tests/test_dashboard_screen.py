@@ -10,8 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from rich.console import Console
 from rich.text import Text
+from textual.color import Color
 from textual.containers import Container, VerticalScroll
-from textual.widgets import OptionList, Static, Tab, Tabs
+from textual.widgets import Markdown, OptionList, Static, Tab, Tabs
 from wevva_warnings import (
     Alert,
     CanonicalTropicalSystem,
@@ -79,7 +80,9 @@ async def _settle(pilot, cycles: int = 4) -> None:
         await pilot.pause(0)
 
 
-def _rendered(static: Static) -> str:
+def _rendered(static: Static | Markdown) -> str:
+    if isinstance(static, Markdown):
+        return static._markdown
     console = Console(width=100, file=StringIO(), record=True, color_system=None)
     console.print(static._Static__content)
     return console.export_text()
@@ -276,12 +279,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=matched),
             ) as matcher,
         ):
-            alerts = await app.load_dashboard_alerts(BERLIN)
+            alerts = await app.load_dashboard_alerts(BERLIN, refresh=True)
 
         self.assertEqual(alerts, matched)
         app.country_alerts_service.get_alerts.assert_awaited_once_with(
             'DE',
             warning_language='auto',
+            refresh=True,
         )
         native_loader.assert_awaited_once_with(
             BERLIN.latitude,
@@ -453,13 +457,28 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.forecast_panel.context_bar.air_quality.hour_index,
                 1,
             )
-            await pilot.press('r')
-            await _settle(pilot)
-            app.action_refresh.assert_not_awaited()
-            app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
-                ['DE', None, None]
+            app.controller.fetch.return_value = weather_update(
+                with_warnings=False
             )
-            app.controller.fetch.assert_not_awaited()
+            app.controller.fetch.reset_mock()
+            app.load_dashboard_alerts.reset_mock()
+            app.refresh_tropical_systems = AsyncMock(return_value=[])
+            app.alert_bulletin.schedule_hard_refresh.reset_mock()
+            await pilot.press('r')
+            await _settle(pilot, cycles=8)
+            app.action_refresh.assert_not_awaited()
+            app.controller.fetch.assert_awaited_once_with(
+                lat=BERLIN.latitude,
+                lon=BERLIN.longitude,
+                country_code=BERLIN.country_code,
+            )
+            app.load_dashboard_alerts.assert_awaited_once_with(
+                BERLIN,
+                refresh=True,
+            )
+            app.refresh_tropical_systems.assert_awaited_once_with()
+            app.alert_bulletin.schedule_hard_refresh.assert_not_called()
+            app.controller.fetch.reset_mock()
 
             screen.refresh_appearance = Mock(wraps=screen.refresh_appearance)
             with patch.object(
@@ -615,21 +634,30 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
             detail.tabs.active = 'dashboard-alert-document-tab'
-            await pilot.pause()
+            await _settle(pilot)
             self.assertTrue(
                 detail.query_one(
                     '#dashboard-alert-document',
                     VerticalScroll,
                 ).display
             )
+            self.assertGreater(
+                detail.query_one('MarkdownH1').region.height,
+                1,
+            )
             document_text = _rendered(
-                detail.query_one('#dashboard-alert-document-body', Static)
+                detail.query_one('#dashboard-alert-document-body', Markdown)
             )
             self.assertIn('Extremely long river flooding warning', document_text)
             self.assertIn(
-                'Affects: A deliberately long affected-area label for the Lower Rhine',
+                '| **Area** | A deliberately long affected-area label for the Lower Rhine',
                 document_text,
             )
+            table_headers = list(
+                detail.query('MarkdownTableCellContents.header')
+            )
+            self.assertEqual(len(table_headers), 2)
+            self.assertTrue(all(not header.display for header in table_headers))
             assert alert.onset is not None
             assert alert.expires is not None
             self.assertIn(
@@ -640,7 +668,6 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 alert.expires.astimezone().strftime('%H:%M %A'),
                 document_text,
             )
-            self.assertIn(' ··· ', document_text)
             self.assertIn('River levels are expected to remain high.', document_text)
             self.assertIn('Avoid flooded roads.', document_text)
             screen.update_bulletin(1, (row,))
@@ -677,10 +704,6 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(1.05)
             self.assertIsNotNone(
                 screen.world_map._incoming_alert_pulse_task
-            )
-            app.refresh_dashboard_bulletin()
-            app.alert_bulletin.schedule_hard_refresh.assert_called_once_with(
-                ['DE', 'DE', 'DE']
             )
 
             marker.action_activate()
@@ -1280,12 +1303,21 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 TropicalProduct(
                     kind='advisory',
                     label='Public Advisory',
-                    content='Official advisory text',
+                    content=(
+                        '# ...TYPHOON NANGKA CONTINUES...\n\n'
+                        'Official advisory text'
+                    ),
                 ),
                 TropicalProduct(
                     kind='discussion',
                     label='Forecast Discussion',
-                    content='Official forecast discussion',
+                    content='\n\n'.join(
+                        ['# Typhoon Nangka Discussion Number 12']
+                        + [
+                            f'Official forecast discussion paragraph {index}.'
+                            for index in range(30)
+                        ]
+                    ),
                 ),
                 TropicalProduct(
                     kind='forecast',
@@ -1346,6 +1378,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 dashboard.tropical_panel.border_title,
                 'Typhoon NANGKA',
             )
+            accent = Color.parse(app.theme_variables['text-accent'])
+            self.assertEqual(
+                dashboard.tropical_panel.styles.border.top[1],
+                accent,
+            )
+            self.assertEqual(
+                dashboard.tropical_panel.styles.border_title_color,
+                accent,
+            )
             self.assertIs(app.focused, label)
             app.load_tropical_products.assert_awaited_once_with(jma)
             detail_tabs = dashboard.tropical_panel.tabs
@@ -1369,12 +1410,38 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn(
                 'Official advisory text',
-                product_body.query_one(Static).render().plain,
+                _rendered(product_body.query_one(Markdown)),
+            )
+            detail_tabs.active = 'dashboard-tropical-product-1'
+            await _settle(pilot)
+            product_body.scroll_end(animate=False)
+            await _settle(pilot)
+            self.assertGreater(product_body.scroll_y, 0)
+            detail_tabs.active = 'dashboard-tropical-product-0'
+            await _settle(pilot)
+            self.assertEqual(product_body.scroll_y, 0)
+            self.assertEqual(
+                product_body.query_one('MarkdownH1').render().plain,
+                '...TYPHOON NANGKA CONTINUES...',
             )
 
             label.action_activate()
             await _settle(pilot)
             app.load_tropical_products.assert_awaited_once_with(jma)
+
+            app.refresh_tropical_systems = AsyncMock(
+                return_value=[lala, nangka]
+            )
+            app.controller.fetch.return_value = weather_update(
+                with_warnings=False
+            )
+            app.load_tropical_products.reset_mock()
+            app.alert_bulletin.schedule_hard_refresh.reset_mock()
+            await pilot.press('r')
+            await _settle(pilot, cycles=8)
+            app.refresh_tropical_systems.assert_awaited_once_with()
+            app.load_tropical_products.assert_awaited_once_with(jma)
+            app.alert_bulletin.schedule_hard_refresh.assert_not_called()
 
             storm_place = LocationMetadata(
                 name='Storm City',
@@ -1867,6 +1934,102 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 label.tropical_key,
             )
             app.load_tropical_systems.assert_awaited_once_with()
+
+    async def test_absent_storms_become_noninteractive_dim_crosses(self) -> None:
+        app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma',
+            'jma_tropical',
+            'NANGKA',
+            classification='Typhoon',
+            latitude=20.0,
+            longitude=130.0,
+        )
+        system = CanonicalTropicalSystem('NANGKA', [observation])
+        other_observation = _tropical_observation(
+            'lala-cphc',
+            'cphc_gis_central_pacific',
+            'LALA',
+            classification='Tropical Storm',
+            latitude=15.2,
+            longitude=-145.5,
+        )
+        other_system = CanonicalTropicalSystem('LALA', [other_observation])
+        now = [1_000.0]
+        app._tropical_system_cache_clock = lambda: now[0]
+        app._tropical_system_cache = (now[0], (system, other_system))
+        app.load_tropical_products = AsyncMock(
+            return_value=[
+                TropicalProduct(
+                    kind='advisory',
+                    label='Public Advisory',
+                    content='Existing product',
+                )
+            ]
+        )
+
+        async with app.run_test(size=(180, 45)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            labels = {
+                item.system.name: item
+                for item in dashboard.world_map.query(DashboardTropicalLabel)
+            }
+            label = labels['NANGKA']
+            other_label = labels['LALA']
+
+            label.action_activate()
+            await _settle(pilot, cycles=8)
+            self.assertIn('★', label.label_text)
+
+            now[0] += app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS
+            app.load_tropical_systems = AsyncMock(return_value=[])
+            label.action_activate()
+            await _settle(pilot, cycles=8)
+
+            self.assertIn(
+                label,
+                list(dashboard.world_map.query(DashboardTropicalLabel)),
+            )
+            self.assertTrue(label.disappeared)
+            self.assertIn('×', label.label_text)
+            self.assertNotIn('★', label.label_text)
+            self.assertTrue(label.has_class('disappeared-tropical'))
+            self.assertTrue(label.disabled)
+            self.assertFalse(label.has_class('selected-tropical'))
+            self.assertTrue(other_label.disappeared)
+            self.assertTrue(other_label.disabled)
+            self.assertIn('×', other_label.label_text)
+            self.assertNotIn('★', other_label.label_text)
+            self.assertIsNone(dashboard.world_map.selected_tropical_key)
+            self.assertIsNone(dashboard.tropical_panel._observation)
+            self.assertIn(
+                'No active tropical systems',
+                dashboard.query_one(
+                    '#dashboard-tropical-detail-state',
+                    Static,
+                ).render().plain,
+            )
+            self.assertFalse(
+                dashboard.query_one(
+                    '#dashboard-tropical-content',
+                    Container,
+                ).loading
+            )
+            label.action_activate()
+            await _settle(pilot)
+            self.assertIsNone(dashboard.world_map.selected_tropical_key)
+
+            dashboard.world_map.set_tropical_systems([system, other_system])
+            await _settle(pilot)
+            self.assertFalse(label.disappeared)
+            self.assertFalse(label.disabled)
+            self.assertIn('★', label.label_text)
+            self.assertFalse(other_label.disappeared)
+            self.assertFalse(other_label.disabled)
+            self.assertIn('★', other_label.label_text)
 
     async def test_weather_key_returns_without_refresh_and_preserves_selection(self) -> None:
         app = self._app()

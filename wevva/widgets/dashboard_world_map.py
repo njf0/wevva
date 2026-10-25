@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 
 from rich.cells import cell_len
+from rich.style import Style
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -96,6 +97,14 @@ class DashboardTropicalLabel(Static, can_focus=True):
     DashboardTropicalLabel.selected-tropical:focus {
         text-style: reverse;
     }
+
+    DashboardTropicalLabel.disappeared-tropical,
+    DashboardTropicalLabel.disappeared-tropical:hover,
+    DashboardTropicalLabel.disappeared-tropical:focus {
+        color: $accent;
+        text-style: dim;
+        pointer: default;
+    }
     """
 
     def __init__(
@@ -108,11 +117,16 @@ class DashboardTropicalLabel(Static, can_focus=True):
         self.observation = observation
         self._body = Text()
         self._marker_on_right = False
+        self._disappeared = False
         self.label_text = ''
 
     @property
     def tropical_key(self) -> str:
         return canonical_storm_key(self.system)
+
+    @property
+    def disappeared(self) -> bool:
+        return self._disappeared
 
     def update_system(
         self,
@@ -132,21 +146,40 @@ class DashboardTropicalLabel(Static, can_focus=True):
         )
         self.set_marker_on_right(self._marker_on_right)
 
+    def set_disappeared(self, disappeared: bool) -> None:
+        """Mark a storm absent from the latest canonical fetch."""
+
+        if disappeared == self._disappeared:
+            return
+        self._disappeared = disappeared
+        self.set_class(disappeared, 'disappeared-tropical')
+        self.disabled = disappeared
+        self.set_marker_on_right(self._marker_on_right)
+
     def set_marker_on_right(self, marker_on_right: bool) -> None:
         self._marker_on_right = marker_on_right
         label = Text()
         theme = self.app.theme_variables
         accent = theme.get('accent') or theme.get('text-accent')
+        marker = '×' if self._disappeared else '★'
+        body = (
+            Text(self._body.plain, style=Style(color=accent, dim=True))
+            if self._disappeared
+            else self._body
+        )
+        marker_style = Style(color=accent, dim=self._disappeared)
         if marker_on_right:
-            label.append_text(self._body)
-            label.append(' ★', style=accent)
+            label.append_text(body)
+            label.append(f' {marker}', style=marker_style)
         else:
-            label.append('★ ', style=accent)
-            label.append_text(self._body)
+            label.append(f'{marker} ', style=marker_style)
+            label.append_text(body)
         self.label_text = label.plain
         self.update(label)
 
     def action_activate(self) -> None:
+        if self._disappeared:
+            return
         self.post_message(
             DashboardTropicalActivated(
                 system=self.system,
@@ -460,7 +493,11 @@ class DashboardWorldMap(WorldLocationsMap):
         visible = [
             labels[key]
             for key in self._placements
-            if key in labels and labels[key].display
+            if (
+                key in labels
+                and labels[key].display
+                and not labels[key].is_disabled
+            )
         ]
         if not visible:
             return False
@@ -596,9 +633,16 @@ class DashboardWorldMap(WorldLocationsMap):
             if anchor is not None:
                 anchored.setdefault(canonical_storm_key(system), (system, anchor))
 
+        fetched_keys = {
+            canonical_storm_key(system) for system in self._tropical_systems
+        }
         for key in tuple(self._tropical_labels):
             if key not in anchored:
-                self._tropical_labels.pop(key).remove()
+                label = self._tropical_labels[key]
+                if key not in fetched_keys:
+                    label.set_disappeared(True)
+                else:
+                    self._tropical_labels.pop(key).remove()
         for key, (system, anchor) in anchored.items():
             label = self._tropical_labels.get(key)
             if label is None:
@@ -606,6 +650,7 @@ class DashboardWorldMap(WorldLocationsMap):
                 self._tropical_labels[key] = label
                 self.mount(label)
             label.update_system(system, anchor)
+            label.set_disappeared(False)
 
     def _apply_label_state(self) -> None:
         for key, label in self._labels.items():
@@ -613,7 +658,7 @@ class DashboardWorldMap(WorldLocationsMap):
             label.set_class(key == self._selected_location_key, 'selected-place')
         for key, label in self._tropical_labels.items():
             label.set_class(
-                key == self._selected_tropical_key,
+                key == self._selected_tropical_key and not label.disappeared,
                 'selected-tropical',
             )
 
@@ -653,6 +698,24 @@ class DashboardWorldMap(WorldLocationsMap):
             key = canonical_storm_key(system)
             label = self._tropical_labels.get(key)
             if label is None:
+                continue
+            observation = label.observation
+            point = frame.canvas.viewport.project(
+                float(observation.center_lon),
+                float(observation.center_lat),
+            )
+            tropical_candidates.append(
+                DirectionalCalloutCandidate(
+                    key=_tropical_callout_key(key),
+                    anchor=frame.canvas.cell_position(point),
+                    width=cell_len(label.label_text),
+                )
+            )
+        active_keys = {
+            canonical_storm_key(system) for system in self._tropical_systems
+        }
+        for key, label in self._tropical_labels.items():
+            if key in active_keys or not label.disappeared:
                 continue
             observation = label.observation
             point = frame.canvas.viewport.project(

@@ -19,10 +19,11 @@ from textual.color import Color, ColorParseError
 from textual.events import Click, Key, Resize
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Static, Tab, Tabs
+from textual.widgets import Markdown, Static, Tab, Tabs
 from wevva.alerts import Alert
 from wevva.geography import short_location_name
 from wevva.messages import WeatherAlertSelected
+from wevva.utils import date_suffix
 from wevva.widgets.warning_area import WarningAreaScope
 
 SEVERITY_THEME_KEYS: dict[str, str] = {
@@ -337,7 +338,10 @@ class WeatherAlertsPanel(Container):
 
     def fmt_clock(self, value: datetime) -> str:
         # Return day name, date, and 24-hour time
-        return value.strftime('%H:%M %A')
+        return (
+            f'{value:%H:%M %A} '
+            f'{value.day}{date_suffix(value.day)} {value:%B}'
+        )
 
     def apply_frame_color(self, color: str | None) -> None:
         if color:
@@ -374,7 +378,6 @@ class WeatherAlertDetailsPanel(VerticalScroll):
     #weather-alert-details {
         width: 100%;
         height: auto;
-        padding: 0 1;
     }
     """
 
@@ -393,11 +396,26 @@ class WeatherAlertDetailsPanel(VerticalScroll):
             self.add_class('-unframed')
 
     def compose(self) -> ComposeResult:
-        yield Static('', id='weather-alert-details')
+        yield AlertMarkdown('', id='weather-alert-details')
 
     @property
-    def content(self) -> Static:
-        return self.query_one('#weather-alert-details', Static)
+    def content(self) -> Markdown:
+        return self.query_one('#weather-alert-details', Markdown)
+
+
+class AlertMarkdown(Markdown):
+    """The standard Textual Markdown renderer with wrapping alert headings."""
+
+    DEFAULT_CSS = """
+    AlertMarkdown MarkdownH1 {
+        margin: 1 0;
+        width: 100%;
+    }
+
+    AlertMarkdown MarkdownTableCellContents.header {
+        display: none;
+    }
+    """
 
 
 class WeatherAlertPresentation(Container):
@@ -447,14 +465,7 @@ class WeatherAlertPresentation(Container):
     def update_alert(self, alert: Alert, *, warning_color: str | None) -> None:
         """Update every selected-alert surface as one presentation change."""
 
-        self.details.content.update(
-            alert_renderable(
-                alert,
-                include_timing=True,
-                theme=self.app.theme_variables,
-                dark=self.app.current_theme.dark,
-            )
-        )
+        self.details.content.update(alert_markdown(alert, include_timing=True))
         self.details.scroll_home(animate=False)
         latitude, longitude, location_name, country_code = _alert_location_context(
             self.app
@@ -738,7 +749,7 @@ class WeatherAlertDetailsSidebar(Container):
         return self.query_one(WeatherAlertDetailsPanel)
 
     @property
-    def content(self) -> Static:
+    def content(self) -> Markdown:
         return self.details.content
 
     def _location_context(self) -> tuple[float | None, float | None, str, str | None]:
@@ -751,14 +762,7 @@ class WeatherAlertDetailsSidebar(Container):
         color = alert_severity_color(self.app.theme_variables, alert)
         if color:
             self.details.set_styles(f'border: round {color}; border-title-color: {color};')
-        self.content.update(
-            alert_renderable(
-                alert,
-                include_timing=True,
-                theme=self.app.theme_variables,
-                dark=self.app.current_theme.dark,
-            )
-        )
+        self.content.update(alert_markdown(alert, include_timing=True))
         latitude, longitude, location_name, country_code = self._location_context()
         self.query_one(WarningAreaScope).update_alert(
             alert,
@@ -769,18 +773,32 @@ class WeatherAlertDetailsSidebar(Container):
             warning_color=color,
         )
 
-def alert_markdown(alert: Alert) -> str:
+def alert_markdown(alert: Alert, *, include_timing: bool = False) -> str:
     """Return a conservatively de-wrapped text representation for compatibility."""
     description = _normalise_alert_text(alert.description or '')
     instruction = _normalise_alert_text(alert.instruction or '')
     headline = (alert.headline or alert.event or 'Weather alert').strip()
-    sections = [f'### {headline}']
+    sections = [f'# {headline}']
+    metadata: list[tuple[str, str]] = []
     if area := alert_area_text(alert):
-        sections.append(f'Affects: {area}')
+        metadata.append(('Area', area))
+    if include_timing:
+        start, end = _alert_timing_values(alert)
+        if start is not None:
+            metadata.append(('Starts', start))
+        if end is not None:
+            metadata.append(('Ends', end))
+    if metadata:
+        rows = ['| | |', '| --- | --- |']
+        rows.extend(
+            f'| **{label}** | {_markdown_table_cell(value)} |'
+            for label, value in metadata
+        )
+        sections.append('\n'.join(rows))
     if description:
-        sections.append(description)
+        sections.append(f'## Description\n\n{description}')
     if instruction:
-        sections.append(instruction)
+        sections.append(f'## Instruction\n\n{instruction}')
     content = '\n\n'.join(sections)
 
     if url := (alert.url or '').strip():
@@ -842,6 +860,31 @@ def alert_timing_renderable(
     dark: bool = True,
 ) -> Text:
     """Render concise local timing as a centred single-line timeline."""
+    code_style = _alert_code_style(theme, dark=dark)
+    return Text(
+        alert_timing_text(alert),
+        style=code_style,
+        justify='center',
+        no_wrap=True,
+        overflow='ellipsis',
+    )
+
+
+def alert_timing_text(alert: Alert) -> str:
+    """Return the local timing copy shared by Markdown and Rich presentations."""
+
+    onset, end = _alert_timing_values(alert)
+    if onset is not None and end is not None:
+        return f'{onset} ··· {end}'
+    if onset is not None:
+        return f'From {onset}'
+    if end is not None:
+        return f'Until {end}'
+    return f'{alert_condition_name(alert)} timing not published'
+
+
+def _alert_timing_values(alert: Alert) -> tuple[str | None, str | None]:
+    """Return independently displayable local start and end values."""
 
     def local_time(value: datetime | None) -> datetime | None:
         if value is None or value.tzinfo is None:
@@ -849,33 +892,22 @@ def alert_timing_renderable(
         return value.astimezone()
 
     def clock(value: datetime) -> str:
-        return value.strftime('%H:%M %A')
+        return (
+            f'{value:%H:%M %A} '
+            f'{value.day}{date_suffix(value.day)} {value:%B}'
+        )
 
     onset = local_time(alert.onset)
     end = local_time(alert.expires)
-    code_style = _alert_code_style(theme, dark=dark)
-    if onset is not None and end is not None:
-        return Text(
-            f'{clock(onset)} ··· {clock(end)}',
-            style=code_style,
-            justify='center',
-            no_wrap=True,
-            overflow='ellipsis',
-        )
-
-    line = Text(
-        style=code_style,
-        justify='center',
-        no_wrap=True,
-        overflow='ellipsis',
+    return (
+        clock(onset) if onset is not None else None,
+        clock(end) if end is not None else None,
     )
-    if onset is not None:
-        line.append(f'From {clock(onset)}')
-    elif end is not None:
-        line.append(f'Until {clock(end)}')
-    else:
-        line.append(f'{alert_condition_name(alert)} timing not published')
-    return line
+
+
+def _markdown_table_cell(value: str) -> str:
+    """Escape provider prose used in a generated Markdown table cell."""
+    return value.replace('\\', '\\\\').replace('|', '\\|')
 
 
 def _alert_code_style(

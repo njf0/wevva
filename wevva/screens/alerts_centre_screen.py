@@ -59,7 +59,7 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertDetailsPanel,
     alert_area_text,
     alert_condition_name,
-    alert_renderable,
+    alert_markdown,
     alert_severity_color,
 )
 
@@ -1287,14 +1287,7 @@ class AlertsCentreScreen(Screen[None]):
         self.country_map.update_selected_alert(self.selected_alert_key)
         self.query_one('#alerts-centre-document-empty', Static).display = False
         self.details.display = True
-        self.details.content.update(
-            alert_renderable(
-                alert,
-                include_timing=True,
-                theme=self.app.theme_variables,
-                dark=self.app.current_theme.dark,
-            )
-        )
+        self.details.content.update(alert_markdown(alert, include_timing=True))
         self.details.scroll_home(animate=False)
         pane = self.query_one('#alerts-centre-document-pane', Container)
         pane.border_title = 'Alert Detail'

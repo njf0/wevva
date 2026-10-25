@@ -595,9 +595,13 @@ caches, and the session-owned alert bulletin coordinator. The final integration
 pass retained the reviewed rail and map proportions. It tightened alert rows to
 two deterministic lines at the current rail width, kept the fixed preview's
 condition and area to one line each, added a non-geographic selection chevron,
-made the footer's `r` action explicit as `Refresh alerts`, restored focus to the
+made the footer's original `r` action explicit as `Refresh alerts`, restored focus to the
 originating alert row/button/marker after a deep-link return, and rebuilds only
 cached theme/emoji-sensitive Dashboard content when appearance changes.
+
+Later Dashboard integration work superseded that original binding: `r` now
+refreshes the selected forecast, point-matched alerts, and tropical systems,
+while the bulletin remains wholly on its application-owned background cadence.
 
 The final fixture-heavy visual matrix covered 80×24 and 100×30 fallback panes,
 the 120×30 simultaneous baseline, 140×40, and 250×70. It used fifteen weather

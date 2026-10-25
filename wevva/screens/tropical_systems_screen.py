@@ -797,6 +797,7 @@ class TropicalSystemsScreen(Screen[None]):
             return
         body = self.query_one('#tropical-product-body', VerticalScroll)
         await body.remove_children()
+        body.scroll_home(animate=False)
         tabs = self.query_one('#tropical-product-tabs', Tabs)
         active = tabs.active
         key = _observation_key(observation)

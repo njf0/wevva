@@ -27,6 +27,7 @@ from wevva.screens.weather_screen import WeatherScreen
 from wevva.tropical_layout import TropicalTopology
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_info_table import TropicalInfoTable
+from wevva.widgets.tropical_products import TropicalProductMarkdown
 from wevva.widgets.tropical_summary import TropicalStormSummary
 from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import (
@@ -670,6 +671,55 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(calls, 1)
 
+    async def test_product_switch_restores_centred_advisory_heading(self) -> None:
+        long_discussion = '\n\n'.join(
+            ['# Tropical Storm Vance Discussion Number 12']
+            + [f'Discussion paragraph {index}.' for index in range(30)]
+        )
+
+        async def loader(_system: TropicalSystem) -> list[TropicalProduct]:
+            return [
+                TropicalProduct(
+                    kind='discussion',
+                    label='Forecast Discussion',
+                    content=long_discussion,
+                ),
+                TropicalProduct(
+                    kind='advisory',
+                    label='Public Advisory',
+                    content=(
+                        '# ...TROPICAL STORM VANCE CHURNING...\n\n'
+                        '## SUMMARY OF 300 AM CST...0900 UTC...INFORMATION\n\n'
+                        'Official advisory text.'
+                    ),
+                ),
+            ]
+
+        screen = TropicalSystemsScreen([self.lala], product_loader=loader)
+        app = _ScreenApp(screen)
+        async with app.run_test(size=(140, 30)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            tabs = screen.query_one('#tropical-product-tabs', Tabs)
+            body = screen.query_one('#tropical-product-body', VerticalScroll)
+
+            tabs.active = 'tropical-product-0'
+            await pilot.pause()
+            body.scroll_end(animate=False)
+            await pilot.pause()
+            self.assertGreater(body.scroll_y, 0)
+
+            tabs.active = 'tropical-product-1'
+            await pilot.pause()
+
+            self.assertEqual(body.scroll_y, 0)
+            heading = body.query_one('MarkdownH1')
+            self.assertEqual(
+                _rendered(heading).strip(),
+                '...TROPICAL STORM VANCE CHURNING...',
+            )
+            self.assertEqual(heading.styles.content_align[0], 'center')
+
     def test_last_product_update_survives_refresh_cache_clear(self) -> None:
         self.cphc.issued_at = None
         screen = TropicalSystemsScreen([self.lala])
@@ -699,7 +749,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(widgets), 1)
-        self.assertIsInstance(widgets[0], Markdown)
+        self.assertIsInstance(widgets[0], TropicalProductMarkdown)
 
     def test_plain_product_starts_with_retrieved_message_not_ui_preamble(self) -> None:
         widgets = _product_widgets(

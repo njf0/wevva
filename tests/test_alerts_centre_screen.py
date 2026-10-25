@@ -11,7 +11,7 @@ from unittest.mock import patch
 from rich.console import Console
 from textual.app import App
 from textual.containers import Container
-from textual.widgets import ProgressBar, Select, Static
+from textual.widgets import Markdown, ProgressBar, Select, Static
 from wevva_warnings import Alert, WarningSource
 
 from wevva.screens.alerts_centre_screen import AlertFilterDialog, AlertsCentreScreen
@@ -19,6 +19,7 @@ from wevva.services.country_alerts import (
     CountryAlertsCacheHit,
     SupportedAlertCountry,
 )
+from wevva.utils import date_suffix
 from wevva.widgets.country_alerts_map import CountryAlertsMap
 
 
@@ -64,7 +65,9 @@ def _alert(
     )
 
 
-def _rendered(static: Static) -> str:
+def _rendered(static: Static | Markdown) -> str:
+    if isinstance(static, Markdown):
+        return static._markdown
     console = Console(width=100, file=StringIO(), record=True, color_system=None)
     console.print(static._Static__content)
     return console.export_text()
@@ -775,10 +778,19 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             lines = details.splitlines()
             assert alert.onset is not None
             assert alert.expires is not None
-            onset = alert.onset.astimezone().strftime('%H:%M %A')
-            expires = alert.expires.astimezone().strftime('%H:%M %A')
-            self.assertEqual(lines[0], 'Flooding expected')
-            self.assertEqual(lines[2].strip(), f'{onset} ··· {expires}')
+            onset_local = alert.onset.astimezone()
+            expires_local = alert.expires.astimezone()
+            onset = (
+                f'{onset_local:%H:%M %A} '
+                f'{onset_local.day}{date_suffix(onset_local.day)} {onset_local:%B}'
+            )
+            expires = (
+                f'{expires_local:%H:%M %A} '
+                f'{expires_local.day}{date_suffix(expires_local.day)} {expires_local:%B}'
+            )
+            self.assertEqual(lines[0], '# Flooding expected')
+            self.assertEqual(lines[4], f'| **Starts** | {onset} |')
+            self.assertEqual(lines[5], f'| **Ends** | {expires} |')
 
     async def test_successful_empty_and_total_failure_have_inline_states(self) -> None:
         empty_service = _FixtureService({'DE': []})

@@ -406,18 +406,23 @@ class Wevva(App, inherit_bindings=False):
     async def load_dashboard_forecast(
         self,
         location: LocationMetadata,
+        *,
+        refresh: bool = False,
     ) -> WeatherUpdated:
         """Load one preview without changing the active Weather location."""
 
         if location.latitude is None or location.longitude is None:
             raise ValueError('Dashboard forecast requires coordinates')
         cache_key = self._forecast_cache_key_for(location)
-        cached = self._cached_forecast(cache_key)
-        if cached is not None:
-            self._update_summary_from_forecast(location, cached)
-            return cached
-
         task = self._dashboard_forecast_tasks.get(cache_key)
+        if not refresh:
+            cached = self._cached_forecast(cache_key)
+            if cached is not None:
+                self._update_summary_from_forecast(location, cached)
+                return cached
+        elif task is None:
+            self._forecast_cache.pop(cache_key, None)
+
         if task is None:
             task = asyncio.create_task(
                 self._fetch_dashboard_forecast(location, cache_key)
@@ -440,6 +445,8 @@ class Wevva(App, inherit_bindings=False):
     async def load_dashboard_alerts(
         self,
         location: LocationMetadata,
+        *,
+        refresh: bool = False,
     ) -> list[Alert]:
         """Return current point-matched alerts without changing Weather state."""
 
@@ -462,6 +469,7 @@ class Wevva(App, inherit_bindings=False):
                 candidates = await self.country_alerts_service.get_alerts(
                     country_code,
                     warning_language=warning_language,
+                    refresh=refresh,
                 )
             except Exception:
                 retained = await self.country_alerts_service.get_retained_alerts(
@@ -633,23 +641,6 @@ class Wevva(App, inherit_bindings=False):
             countries.append(self._dashboard_screen.selected_country_code())
         countries.extend(location.country_code for location in self.saved_locations)
         self.alert_bulletin.set_priority_countries(countries)
-
-    def _dashboard_bulletin_countries(self) -> list[str | None]:
-        countries: list[str | None] = [self.location.country_code]
-        if self._dashboard_screen is not None:
-            countries.append(self._dashboard_screen.selected_country_code())
-            countries.append(
-                self._dashboard_screen.selected_alert_country_code()
-            )
-        return countries
-
-    def refresh_dashboard_bulletin(self) -> None:
-        """Hard-refresh only the Dashboard's bounded local country set."""
-
-        self._sync_bulletin_priorities()
-        self.alert_bulletin.schedule_hard_refresh(
-            self._dashboard_bulletin_countries()
-        )
 
     def _on_bulletin_updated(self, generation: int) -> None:
         """Publish coordinator state without giving Dashboard fetch ownership."""

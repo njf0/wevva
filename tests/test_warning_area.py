@@ -214,9 +214,7 @@ class _WarningModalApp(App):
 class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _details_text(sidebar: WeatherAlertDetailsSidebar) -> str:
-        console = Console(width=80, file=StringIO(), record=True)
-        console.print(getattr(sidebar.content, '_Static__content'))
-        return console.export_text()
+        return sidebar.content._markdown
 
     async def test_cap_details_and_warning_scope_share_the_sidebar(self) -> None:
         app = _WarningSidebarApp()
@@ -384,17 +382,16 @@ class WarningAreaSidebarTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             details = reader.details
-            console = Console(width=80, file=StringIO(), record=True)
-            console.print(getattr(details.content, '_Static__content'))
-            self.assertIn('second-tab heavy rain warning', console.export_text())
+            self.assertIn(
+                'second-tab heavy rain warning',
+                details.content._markdown,
+            )
 
 
 class WarningAreaModalTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _details_text(reader: WeatherAlertsReader) -> str:
-        console = Console(width=80, file=StringIO(), record=True)
-        console.print(getattr(reader.details.content, '_Static__content'))
-        return console.export_text()
+        return reader.details.content._markdown
 
     async def test_modal_is_geometrically_centred_at_supported_sizes(self) -> None:
         for size in ((80, 24), (200, 60)):

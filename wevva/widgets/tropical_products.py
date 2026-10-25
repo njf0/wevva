@@ -12,6 +12,18 @@ from textual.widgets import Markdown, Static
 from wevva_warnings import TropicalProduct, TropicalSystem
 
 
+class TropicalProductMarkdown(Markdown):
+    """Provider Markdown with compact root-heading spacing."""
+
+    DEFAULT_CSS = """
+    TropicalProductMarkdown MarkdownH1 {
+        margin: 1 0;
+        width: 100%;
+    }
+
+    """
+
+
 def tropical_product_tab_specs(
     observation: TropicalSystem,
     products: Sequence[TropicalProduct],
@@ -39,7 +51,7 @@ def tropical_product_widgets(
     widgets: list[Static | Markdown] = []
     if product.content:
         if product.content_format == 'markdown':
-            widgets.append(Markdown(product.content))
+            widgets.append(TropicalProductMarkdown(product.content))
         else:
             # Rich Text is already parsed content, so provider prose cannot be
             # reinterpreted as Rich markup or Markdown.

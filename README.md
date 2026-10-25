@@ -194,7 +194,7 @@ Dashboard is the navigation hub:
 - `m` open the interactive saved-locations world map
 - `t` investigate active tropical systems
 - `g` open the country Alerts Centre
-- `r` refresh the severe-weather bulletin
+- `r` refresh the selected forecast, its point alerts, and tropical systems
 
 On the Weather screen:
 

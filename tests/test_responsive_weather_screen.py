@@ -850,11 +850,9 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 details.region.width,
                 reader.presentation.content_region.width,
             )
-            console = Console(width=80, file=StringIO(), record=True)
-            console.print(getattr(details.content, '_Static__content'))
             self.assertIn(
                 'High waves and dangerous currents',
-                console.export_text(),
+                details.content._markdown,
             )
             self.assertEqual(details.styles.overflow_y, 'auto')
 
@@ -865,11 +863,9 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reader.tabs.active, 'alert-item-1')
             self.assertEqual(reader.selected_index, 1)
             self.assertIs(app.focused, reader.tabs)
-            console = Console(width=140, file=StringIO(), record=True)
-            console.print(getattr(details.content, '_Static__content'))
             self.assertIn(
                 'High waves and dangerous currents',
-                console.export_text(),
+                details.content._markdown,
             )
 
             await pilot.press('escape')
@@ -898,9 +894,7 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             reader = app.screen.query_one(WeatherAlertsReader)
             self.assertEqual(reader.selected_index, 1)
             self.assertEqual(reader.tabs.active, 'alert-item-1')
-            console = Console(width=80, file=StringIO(), record=True)
-            console.print(getattr(reader.details.content, '_Static__content'))
-            rendered = console.export_text()
+            rendered = reader.details.content._markdown
             self.assertIn('High waves and dangerous currents', rendered)
             self.assertIn('Waves of five to eight feet', rendered)
 
