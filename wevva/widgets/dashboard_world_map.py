@@ -102,7 +102,7 @@ class DashboardTropicalLabel(Static, can_focus=True):
     DashboardTropicalLabel.disappeared-tropical:hover,
     DashboardTropicalLabel.disappeared-tropical:focus {
         color: $accent;
-        text-style: dim;
+        text-style: bold dim;
         pointer: default;
     }
     """
@@ -163,7 +163,10 @@ class DashboardTropicalLabel(Static, can_focus=True):
         accent = theme.get('accent') or theme.get('text-accent')
         marker = '×' if self._disappeared else '★'
         body = (
-            Text(self._body.plain, style=Style(color=accent, dim=True))
+            Text(
+                self._body.plain,
+                style=Style(color=accent, bold=True, dim=True),
+            )
             if self._disappeared
             else self._body
         )
