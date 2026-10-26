@@ -20,6 +20,7 @@ from wevva.services.alerts import (
     _get_alerts_with_status,
     _get_native_alerts_with_status,
     get_alert_candidates_async,
+    get_source_alerts,
     match_alert_candidates,
     match_alert_candidates_async,
 )
@@ -536,9 +537,15 @@ class WarningCacheTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AlertServiceStatusTests(unittest.TestCase):
+    def test_detached_source_cannot_be_fetched_through_wevva_service(self) -> None:
+        with patch('wevva.services.alerts.get_alerts_for_source') as fetch:
+            self.assertEqual(get_source_alerts('ea_flood'), [])
+
+        fetch.assert_not_called()
+
     def test_provider_failure_is_not_a_successful_empty_result(self) -> None:
         with patch('wevva.services.alerts.get_alerts_for_point', side_effect=RuntimeError('offline')):
-            alerts, completed = _get_alerts_with_status(51.5, -0.1, 'GB')
+            alerts, completed = _get_alerts_with_status(52.5, 13.4, 'DE')
         self.assertEqual(alerts, [])
         self.assertFalse(completed)
 
@@ -564,6 +571,20 @@ class AlertServiceStatusTests(unittest.TestCase):
         alerts = match_alert_candidates([reusable_alert], [native_alert], 40.7128, -74.0060)
 
         self.assertEqual([alert.id for alert in alerts], ['geometry', 'nws-point'])
+
+    def test_combining_discards_detached_source_from_cached_candidates(self) -> None:
+        detached = _alert_in_box(
+            'ea-flood',
+            min_lat=51.0,
+            max_lat=52.0,
+            min_lon=-1.0,
+            max_lon=0.0,
+        )
+        detached.source = 'ea_flood'
+
+        alerts = match_alert_candidates([detached], [], 51.5, -0.1)
+
+        self.assertEqual(alerts, [])
 
     def test_combining_reports_measured_matching_progress(self) -> None:
         progress = Mock()
@@ -592,7 +613,7 @@ class AlertServiceStatusTests(unittest.TestCase):
 class AlertCandidateServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_empty_candidate_result_is_cacheable(self) -> None:
         with patch('wevva.services.alerts.get_reusable_alerts_for_country', return_value=[]):
-            result = await get_alert_candidates_async('GB')
+            result = await get_alert_candidates_async('DE')
 
         self.assertEqual(result, AlertCandidateResult(candidates=[], completed=True))
 
@@ -610,9 +631,49 @@ class AlertCandidateServiceTests(unittest.IsolatedAsyncioTestCase):
             'wevva.services.alerts.get_reusable_alerts_for_country',
             side_effect=RuntimeError('offline'),
         ):
-            result = await get_alert_candidates_async('GB')
+            result = await get_alert_candidates_async('DE')
 
         self.assertEqual(result, AlertCandidateResult(candidates=[], completed=False))
+
+    async def test_uk_candidates_skip_environment_agency_source(self) -> None:
+        meteoalarm = WarningSource(
+            id='meteoalarm_atom_united_kingdom',
+            name='Meteoalarm',
+            backend='meteoalarm_atom',
+            country_code='GB',
+            url='https://example.test/meteoalarm',
+            lang='en',
+        )
+        environment_agency = WarningSource(
+            id='ea_flood',
+            name='UK Environment Agency',
+            backend='ea_flood',
+            country_code='GB',
+            url='https://example.test/floods',
+            lang='en',
+        )
+        warning = Alert(
+            id='rain',
+            source=meteoalarm.id,
+            event='Rain',
+            headline='Heavy rain',
+        )
+        with (
+            patch(
+                'wevva.services.alerts.get_alert_sources_for_country',
+                return_value=[meteoalarm, environment_agency],
+            ),
+            patch(
+                'wevva.services.alerts.get_alerts_for_source',
+                return_value=[warning],
+            ) as source_fetch,
+            patch('wevva.services.alerts.get_reusable_alerts_for_country') as aggregate,
+        ):
+            result = await get_alert_candidates_async('GB')
+
+        self.assertEqual(result, AlertCandidateResult([warning], True))
+        source_fetch.assert_called_once_with(meteoalarm.id, active_only=False)
+        aggregate.assert_not_called()
 
     async def test_candidate_cancellation_propagates_without_a_result(self) -> None:
         with patch(

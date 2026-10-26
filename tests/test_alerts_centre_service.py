@@ -127,7 +127,7 @@ class CountryAlertOrderingTests(unittest.TestCase):
         future = _alert('future', 'Moderate', expires_in_hours=1)
 
         with patch(
-            'wevva.services.country_alerts.get_alerts_for_country',
+            'wevva.services.country_alerts.get_country_alerts',
             return_value=[future],
         ) as fetch:
             alerts = _fetch_country_alerts('GB', 'en', None)
@@ -135,9 +135,8 @@ class CountryAlertOrderingTests(unittest.TestCase):
         self.assertEqual(alerts, [future])
         fetch.assert_called_once_with(
             'GB',
-            lang='en',
-            active_only=False,
-            progress=None,
+            'en',
+            None,
         )
 
 

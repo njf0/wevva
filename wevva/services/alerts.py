@@ -9,8 +9,11 @@ from typing import NamedTuple
 from wevva_warnings import (
     Alert,
     UnsupportedCountryError,
+    WarningSource,
     WarningQueryProgress,
     deduplicate_alerts,
+    get_alert_sources_for_country,
+    get_alerts_for_country,
     get_alerts_for_point,
     get_alerts_for_source,
     get_native_alerts_for_point,
@@ -19,6 +22,13 @@ from wevva_warnings import (
 )
 
 from wevva.utils.country_codes import get_alpha2_by_alpha3
+
+
+# Keep the source available in wevva-warnings, but do not query or display it
+# in Wevva. Its many very local flood areas are too noisy for this app's
+# country and dashboard warning views.
+DETACHED_ALERT_SOURCE_IDS = frozenset({'ea_flood'})
+_DETACHED_ALERT_SOURCE_COUNTRIES = frozenset({'GB'})
 
 
 class AlertCandidateResult(NamedTuple):
@@ -54,6 +64,8 @@ def _filter_visible_alerts(alerts: list[Alert], *, now: datetime | None = None) 
 
     visible_alerts: list[Alert] = []
     for alert in alerts:
+        if alert.source in DETACHED_ALERT_SOURCE_IDS:
+            continue
         expires = alert.expires
         if expires is None:
             visible_alerts.append(alert)
@@ -80,14 +92,30 @@ def _get_alerts_with_status(
         return [], True
     lang = 'en' if warning_language == 'en' else None
     try:
-        alerts = get_alerts_for_point(
-            lat=lat,
-            lon=lon,
-            country_code=normalized_country,
-            lang=lang,
-            active_only=False,
-            progress=progress,
-        )
+        sources, detached = _enabled_alert_sources(normalized_country, lang)
+        if detached:
+            candidates = _get_alerts_from_sources(
+                sources,
+                country_code=normalized_country,
+                progress=progress,
+            )
+            native_alerts = get_native_alerts_for_point(
+                lat=lat,
+                lon=lon,
+                country_code=normalized_country,
+                lang=lang,
+                active_only=False,
+            )
+            alerts = match_alert_candidates(candidates, native_alerts, lat, lon)
+        else:
+            alerts = get_alerts_for_point(
+                lat=lat,
+                lon=lon,
+                country_code=normalized_country,
+                lang=lang,
+                active_only=False,
+                progress=progress,
+            )
         return _filter_visible_alerts(alerts), True
     except UnsupportedCountryError:
         return [], True
@@ -106,7 +134,20 @@ def _get_reusable_alerts_with_status(
         return [], True
     lang = 'en' if warning_language == 'en' else None
     try:
-        return get_reusable_alerts_for_country(normalized_country, lang=lang, progress=progress), True
+        sources, detached = _enabled_alert_sources(normalized_country, lang)
+        if detached:
+            alerts = _get_alerts_from_sources(
+                sources,
+                country_code=normalized_country,
+                progress=progress,
+            )
+        else:
+            alerts = get_reusable_alerts_for_country(
+                normalized_country,
+                lang=lang,
+                progress=progress,
+            )
+        return _filter_visible_alerts(alerts), True
     except UnsupportedCountryError:
         return [], True
     except Exception:
@@ -125,13 +166,14 @@ def _get_native_alerts_with_status(
         return [], True
     lang = 'en' if warning_language == 'en' else None
     try:
-        return get_native_alerts_for_point(
+        alerts = get_native_alerts_for_point(
             lat=lat,
             lon=lon,
             country_code=normalized_country,
             lang=lang,
             active_only=False,
-        ), True
+        )
+        return _filter_visible_alerts(alerts), True
     except UnsupportedCountryError:
         return [], True
     except Exception:
@@ -151,6 +193,8 @@ def match_alert_candidates(
     Candidate alerts are matched one at a time so the TUI can turn its
     indeterminate fetch indicator into measured local matching progress.
     """
+    candidates = _filter_visible_alerts(candidates)
+    native_alerts = _filter_visible_alerts(native_alerts)
     total = len(candidates)
     _report_progress(progress, 'alerts_total', total=total, phase='matching')
     local_alerts: list[Alert] = []
@@ -164,6 +208,87 @@ def match_alert_candidates(
             phase='matching',
         )
     return _filter_visible_alerts(deduplicate_alerts([*local_alerts, *native_alerts]))
+
+
+def get_country_alerts(
+    country_code: str,
+    warning_language: str = 'auto',
+    progress: WarningQueryProgress | None = None,
+) -> list[Alert]:
+    """Fetch one country catalogue without Wevva-detached sources."""
+
+    normalized_country = normalize_country_code(country_code)
+    if normalized_country is None:
+        return []
+    lang = 'en' if warning_language == 'en' else None
+    sources, detached = _enabled_alert_sources(normalized_country, lang)
+    if detached:
+        alerts = _get_alerts_from_sources(
+            sources,
+            country_code=normalized_country,
+            progress=progress,
+        )
+    else:
+        alerts = get_alerts_for_country(
+            normalized_country,
+            lang=lang,
+            active_only=False,
+            progress=progress,
+        )
+    return _filter_visible_alerts(alerts)
+
+
+def alert_source_is_enabled(source_id: str) -> bool:
+    """Return whether Wevva presents alerts from a warning source."""
+
+    return source_id not in DETACHED_ALERT_SOURCE_IDS
+
+
+def _enabled_alert_sources(
+    country_code: str,
+    lang: str | None,
+) -> tuple[list[WarningSource], bool]:
+    """Return selected sources and whether any were detached by Wevva."""
+
+    if country_code not in _DETACHED_ALERT_SOURCE_COUNTRIES:
+        return [], False
+    selected = get_alert_sources_for_country(country_code, lang=lang)
+    enabled = [source for source in selected if alert_source_is_enabled(source.id)]
+    return enabled, len(enabled) != len(selected)
+
+
+def _get_alerts_from_sources(
+    sources: list[WarningSource],
+    *,
+    country_code: str,
+    progress: WarningQueryProgress | None,
+) -> list[Alert]:
+    """Query selected public sources when the aggregate includes a detached one."""
+
+    _report_progress(progress, 'country_query_started', country_code=country_code)
+    _report_progress(progress, 'sources_total', total=len(sources))
+    alerts: list[Alert] = []
+    for source in sources:
+        source_id = source.id
+        provider_name = source.name
+        _report_progress(
+            progress,
+            'source_started',
+            source=source_id,
+            provider_name=provider_name,
+        )
+        source_alerts = get_alerts_for_source(source_id, active_only=False)
+        alerts.extend(source_alerts)
+        _report_progress(
+            progress,
+            'country_source_finished',
+            source=source_id,
+            candidates=len(source_alerts),
+            inactive_filtered=0,
+        )
+    alerts = deduplicate_alerts(alerts)
+    _report_progress(progress, 'country_finished', alert_count=len(alerts))
+    return alerts
 
 
 def _report_progress(
@@ -287,6 +412,8 @@ async def get_alerts_async(
 
 def get_source_alerts(source_id: str, *, active_only: bool = False) -> list[Alert]:
     """Fetch alerts from one registry source, returning ``[]`` on failure."""
+    if not alert_source_is_enabled(source_id):
+        return []
     try:
         return get_alerts_for_source(source_id, active_only=active_only)
     except Exception:
@@ -308,8 +435,11 @@ async def get_source_alerts_async(
 
 __all__ = [
     'Alert',
+    'DETACHED_ALERT_SOURCE_IDS',
+    'alert_source_is_enabled',
     'get_alerts',
     'get_alerts_async',
+    'get_country_alerts',
     'get_source_alerts',
     'get_source_alerts_async',
     'normalize_country_code',

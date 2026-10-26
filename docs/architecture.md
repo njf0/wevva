@@ -613,7 +613,11 @@ local active-time range directly below the headline.
 The warning-library country API returns complete normalized alerts: providers
 whose top-level feeds contain only links must fetch their CAP documents (and
 some separate geometries) before Wevva can render severity, active state,
-polygons, area labels, and provider prose.
+polygons, area labels, and provider prose. Wevva deliberately detaches the UK
+Environment Agency `ea_flood` source at its alert-service boundary: the source
+remains registered and usable in `wevva-warnings`, while Wevva queries the
+remaining selected UK source directly and filters older cached EA entries from
+point, country, Alerts Centre, and bulletin presentation.
 
 `wevva/alerts_centre_layout.py` owns the pure responsive allocation. Wide
 terminals show three columns, medium terminals stack map and document beside

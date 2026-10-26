@@ -14,11 +14,14 @@ from wevva_warnings import (
     Alert,
     WarningQueryProgress,
     deduplicate_alerts,
-    get_alerts_for_country,
     list_sources,
 )
 
-from wevva.services.alerts import normalize_country_code
+from wevva.services.alerts import (
+    alert_source_is_enabled,
+    get_country_alerts,
+    normalize_country_code,
+)
 from wevva.services.warning_cache import WarningCache, WarningCacheProduct
 from wevva.utils.country_codes import get_country_name_by_alpha2
 
@@ -223,7 +226,7 @@ def list_supported_alert_countries() -> list[SupportedAlertCountry]:
 
     country_codes: set[str] = set()
     for source in list_sources(kind='alert'):
-        if source.kind != 'alert':
+        if source.kind != 'alert' or not alert_source_is_enabled(source.id):
             continue
         if source.country_code:
             country_codes.add(source.country_code.strip().upper())
@@ -256,7 +259,7 @@ def country_alert_default_filter(country_code: str, country_name: str) -> str:
     has_primary_source = False
     has_shared_source = False
     for source in list_sources(kind='alert'):
-        if source.kind != 'alert':
+        if source.kind != 'alert' or not alert_source_is_enabled(source.id):
             continue
         if normalize_country_code(source.country_code) == normalized_country:
             has_primary_source = True
@@ -403,7 +406,8 @@ def _filter_unexpired(
     return [
         alert
         for alert in alerts
-        if alert.expires is None or _as_utc(alert.expires) >= now
+        if alert_source_is_enabled(alert.source)
+        and (alert.expires is None or _as_utc(alert.expires) >= now)
     ]
 
 
@@ -412,12 +416,10 @@ def _fetch_country_alerts(
     warning_language: str,
     progress: WarningQueryProgress | None,
 ) -> list[Alert]:
-    lang = 'en' if warning_language == 'en' else None
-    alerts = get_alerts_for_country(
+    alerts = get_country_alerts(
         country_code,
-        lang=lang,
-        active_only=False,
-        progress=progress,
+        warning_language,
+        progress,
     )
     return sort_country_alerts(alerts)
 
