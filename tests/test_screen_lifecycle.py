@@ -107,6 +107,8 @@ class ScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await weather.on_weather_updated(weather_update())
             await _settle(pilot)
             timer = weather._time_refresh_timer
+            background_timer = app._background_refresh_timer
+            self.assertIsNotNone(background_timer)
             stack_depth = len(app.screen_stack)
             transient_refs: list[weakref.ReferenceType[object]] = []
 
@@ -159,9 +161,11 @@ class ScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(app.screen_stack), stack_depth)
             self.assertIs(app._alerts_centre_screen, alerts)
             self.assertIs(weather._time_refresh_timer, timer)
+            self.assertIs(app._background_refresh_timer, background_timer)
             self.assertIsNone(alerts._load_task)
             self.assertIsNone(alerts._place_weather_task)
             self.assertTrue(all(reference() is None for reference in transient_refs))
+        self.assertIsNone(app._background_refresh_timer)
 
     async def test_pending_transient_work_and_hidden_alerts_keep_their_owners(self) -> None:
         country_service = _CountryService(gated=True)

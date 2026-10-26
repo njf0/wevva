@@ -519,14 +519,7 @@ class TropicalSystemsScreen(Screen[None]):
         try:
             assert self._refresh_loader is not None
             systems = await self._refresh_loader()
-            self._products.clear()
-            self._product_errors.clear()
-            for task in self._centre_weather_tasks.values():
-                task.cancel()
-            self._centre_weather_tasks.clear()
-            self._centre_weather.clear()
-            self._centre_weather_errors.clear()
-            await self._replace_systems(systems)
+            await self.update_systems(systems)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -538,6 +531,23 @@ class TropicalSystemsScreen(Screen[None]):
             self._refreshing_systems = False
             if information.is_attached:
                 information.loading = False
+
+    async def update_systems(
+        self,
+        systems: list[CanonicalTropicalSystem],
+    ) -> None:
+        """Apply one completed app-owned canonical refresh."""
+
+        if not self.is_mounted:
+            return
+        self._products.clear()
+        self._product_errors.clear()
+        for task in self._centre_weather_tasks.values():
+            task.cancel()
+        self._centre_weather_tasks.clear()
+        self._centre_weather.clear()
+        self._centre_weather_errors.clear()
+        await self._replace_systems(systems)
 
     async def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:  # type: ignore[override]
         if self._updating_tabs or event.tab.id is None:

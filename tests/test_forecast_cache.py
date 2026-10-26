@@ -46,12 +46,20 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         )
         self.app.controller.fetch = AsyncMock(return_value=self.event)
 
-    async def _refresh(self, *, force: bool = False) -> Mock:
+    async def _refresh(
+        self,
+        *,
+        force: bool = False,
+        background: bool = False,
+    ) -> Mock:
         with (
             patch.object(self.app, '_schedule_saved_weather_refresh'),
             patch.object(self.app, '_schedule_alert_refresh') as schedule_alerts,
         ):
-            await self.app._refresh_weather(force_alert_refresh=force)
+            await self.app._refresh_weather(
+                force_alert_refresh=force,
+                background=background,
+            )
         return schedule_alerts
 
     async def test_complete_forecast_is_reused_within_fifteen_minutes(self) -> None:
@@ -90,6 +98,37 @@ class ForecastCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app._forecast_cache, {})
         self.assertEqual(self.app.weather_screen.loading_states, [True, False])
         self.assertIsInstance(self.app.weather_screen.messages[0], WeatherFetchFailed)
+
+    async def test_background_forecast_failure_retains_content_silently(self) -> None:
+        self.app.controller.fetch = AsyncMock(side_effect=RuntimeError('offline'))
+
+        await self._refresh(background=True)
+
+        self.assertEqual(self.app._forecast_cache, {})
+        self.assertEqual(self.app.weather_screen.loading_states, [])
+        self.assertEqual(self.app.weather_screen.messages, [])
+
+    async def test_twenty_minute_refresh_combines_weather_and_tropical_work(self) -> None:
+        self.assertEqual(self.app.BACKGROUND_REFRESH_INTERVAL_SECONDS, 20 * 60)
+        weather_refresh = AsyncMock()
+        tropical_refresh = AsyncMock()
+
+        with (
+            patch.object(self.app, '_refresh_weather', new=weather_refresh),
+            patch.object(
+                self.app,
+                '_automatic_tropical_refresh',
+                new=tropical_refresh,
+            ),
+        ):
+            await self.app._automatic_background_refresh()
+
+        weather_refresh.assert_awaited_once_with(
+            force_alert_refresh=False,
+            background=True,
+        )
+        tropical_refresh.assert_awaited_once_with()
+        self.assertFalse(self.app._background_refresh_in_flight)
 
     async def test_cancelled_forecast_clears_loading_and_propagates(self) -> None:
         self.app.controller.fetch = AsyncMock(side_effect=asyncio.CancelledError)

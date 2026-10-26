@@ -169,6 +169,7 @@ class Wevva(App, inherit_bindings=False):
     ALERT_CACHE_STALE_GRACE_SECONDS = 6 * 60 * 60
     FORECAST_CACHE_TTL_SECONDS = 15 * 60
     TROPICAL_SYSTEM_CACHE_TTL_SECONDS = 30 * 60
+    BACKGROUND_REFRESH_INTERVAL_SECONDS = 20 * 60
     ALERT_PLACE_WEATHER_CACHE_TTL_SECONDS = 15 * 60
     ALERT_PLACE_WEATHER_CACHE_MAX_ENTRIES = 64
 
@@ -249,6 +250,8 @@ class Wevva(App, inherit_bindings=False):
             str,
             SavedLocationWeatherSummary,
         ] = {}
+        self._background_refresh_timer = None
+        self._background_refresh_in_flight = False
         self._dashboard_screen: DashboardScreen | None = None
         # Emoji rendering toggle (widgets can read via self.app.emoji_enabled)
         self.emoji_enabled = bool(emoji_enabled)
@@ -268,6 +271,10 @@ class Wevva(App, inherit_bindings=False):
 
     async def on_mount(self):
         """Start with search, or show the Dashboard while weather is fetched."""
+        self._background_refresh_timer = self.set_interval(
+            self.BACKGROUND_REFRESH_INTERVAL_SECONDS,
+            self._automatic_background_refresh,
+        )
         if self.location.latitude is not None and self.location.longitude is not None:
             self.push_screen(self.weather_screen)
             if self.start_on_dashboard:
@@ -279,6 +286,9 @@ class Wevva(App, inherit_bindings=False):
     def on_unmount(self) -> None:
         """Stop session-only background work with the Textual application."""
 
+        if self._background_refresh_timer is not None:
+            self._background_refresh_timer.stop()
+            self._background_refresh_timer = None
         self.alert_bulletin.stop()
         self._cancel_alerts_task()
         self._saved_weather_generation += 1
@@ -314,7 +324,12 @@ class Wevva(App, inherit_bindings=False):
         """Refresh weather and explicitly bypass session result caches."""
         await self._refresh_weather(force_alert_refresh=True)
 
-    async def _refresh_weather(self, *, force_alert_refresh: bool) -> None:
+    async def _refresh_weather(
+        self,
+        *,
+        force_alert_refresh: bool,
+        background: bool = False,
+    ) -> None:
         """Fetch or reuse a recent full forecast, then broadcast `WeatherUpdated`."""
         if self._refresh_in_flight:
             return
@@ -330,7 +345,8 @@ class Wevva(App, inherit_bindings=False):
             forecast_cache_key = self._forecast_cache_key()
             event = None if force_alert_refresh else self._cached_forecast(forecast_cache_key)
             if event is None:
-                self._set_forecast_loading(True)
+                if not background:
+                    self._set_forecast_loading(True)
                 if force_alert_refresh:
                     event = await self.controller.fetch(
                         lat=self.location.latitude,
@@ -347,14 +363,55 @@ class Wevva(App, inherit_bindings=False):
                 force_refresh=force_alert_refresh,
             )
         except asyncio.CancelledError:
-            self._set_forecast_loading(False)
+            if not background:
+                self._set_forecast_loading(False)
             raise
         except Exception as e:
-            # Forward error to the weather screen to surface it
-            self._set_forecast_loading(False)
-            self.weather_screen.post_message(WeatherFetchFailed(e))
+            if not background:
+                # Explicit work surfaces errors; periodic work keeps retained data.
+                self._set_forecast_loading(False)
+                self.weather_screen.post_message(WeatherFetchFailed(e))
         finally:
             self._refresh_in_flight = False
+
+    async def _automatic_background_refresh(self) -> None:
+        """Refresh session weather and tropical data on the bounded app timer."""
+
+        if self._background_refresh_in_flight:
+            return
+        self._background_refresh_in_flight = True
+        try:
+            work = [self._automatic_tropical_refresh()]
+            if self.location.latitude is not None and self.location.longitude is not None:
+                work.append(
+                    self._refresh_weather(
+                        force_alert_refresh=False,
+                        background=True,
+                    )
+                )
+            else:
+                self._schedule_saved_weather_refresh()
+            await asyncio.gather(*work, return_exceptions=True)
+            if self._dashboard_screen is not None and self._dashboard_screen.is_attached:
+                self._dashboard_screen.refresh_weather_in_background()
+        finally:
+            self._background_refresh_in_flight = False
+
+    async def _automatic_tropical_refresh(self) -> None:
+        """Refresh canonical storms when no newer manual result already exists."""
+
+        cached = self._tropical_system_cache
+        if (
+            cached is not None
+            and self._tropical_system_cache_clock() - cached[0]
+            < self.BACKGROUND_REFRESH_INTERVAL_SECONDS
+        ):
+            return
+        systems = await self.refresh_tropical_systems()
+        if self._dashboard_screen is not None and self._dashboard_screen.is_attached:
+            self._dashboard_screen.update_tropical_systems(systems)
+        if self.is_running and isinstance(self.screen, TropicalSystemsScreen):
+            await self.screen.update_systems(systems)
 
     def _forecast_cache_key(self) -> ForecastCacheKey:
         """Key a complete forecast by requested coordinates and display units."""

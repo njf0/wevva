@@ -392,6 +392,23 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
     def test_raw_tropical_cache_lasts_thirty_minutes(self) -> None:
         self.assertEqual(self.app.TROPICAL_SYSTEM_CACHE_TTL_SECONDS, 30 * 60)
 
+    async def test_background_refresh_skips_a_manually_refreshed_tropical_cache(self) -> None:
+        now = [1_000.0]
+        cached = CanonicalTropicalSystem('CACHED', [_system(name='CACHED')])
+        fresh = CanonicalTropicalSystem('FRESH', [_system(name='FRESH')])
+        self.app._tropical_system_cache_clock = lambda: now[0]
+        self.app._tropical_system_cache = (now[0], (cached,))
+        refresh = AsyncMock(return_value=[fresh])
+
+        with patch.object(self.app, 'refresh_tropical_systems', new=refresh):
+            await self.app._automatic_tropical_refresh()
+            refresh.assert_not_awaited()
+
+            now[0] += self.app.BACKGROUND_REFRESH_INTERVAL_SECONDS
+            await self.app._automatic_tropical_refresh()
+
+        refresh.assert_awaited_once_with()
+
     async def test_weather_alert_refresh_does_not_fetch_tropical_systems(self) -> None:
         tropical_lookup = AsyncMock(return_value=([], True))
         with (

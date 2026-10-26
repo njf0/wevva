@@ -602,6 +602,10 @@ cached theme/emoji-sensitive Dashboard content when appearance changes.
 Later Dashboard integration work superseded that original binding: `r` now
 refreshes the selected forecast, point-matched alerts, and tropical systems,
 while the bulletin remains wholly on its application-owned background cadence.
+The application also refreshes weather and canonical tropical systems every
+twenty minutes while it remains open. Periodic work retains visible content,
+reuses the existing cache/coalescing boundaries, and does not force a bulletin
+lap.
 
 The final fixture-heavy visual matrix covered 80×24 and 100×30 fallback panes,
 the 120×30 simultaneous baseline, 140×40, and 250×70. It used fifteen weather

@@ -1908,6 +1908,40 @@ class DashboardScreen(Screen[None]):
                 self._load_tropical_systems()
             )
 
+    def update_tropical_systems(
+        self,
+        systems: list[CanonicalTropicalSystem],
+    ) -> None:
+        """Apply a completed app-owned background storm refresh."""
+
+        if not self.is_mounted:
+            return
+        self.world_map.set_tropical_systems(systems)
+        selected_system = self._selected_tropical_system
+        selected_observation = self._selected_tropical_observation
+        if selected_system is None or selected_observation is None:
+            self.tropical_panel.show_overview(tuple(systems))
+            return
+        refreshed = _matching_tropical_selection(
+            systems,
+            canonical_storm_key(selected_system),
+            selected_observation.source,
+            selected_observation.id,
+        )
+        if refreshed is None:
+            self._cancel_tropical_product_wait()
+            self._selected_tropical_system = None
+            self._selected_tropical_observation = None
+            self.world_map.set_selected_tropical(None)
+            self.tropical_panel.show_overview(tuple(systems))
+            return
+        system, observation = refreshed
+        self._selected_tropical_system = system
+        self._selected_tropical_observation = observation
+        self.world_map.set_selected_tropical(system)
+        if _tropical_observation_key(observation) != self._tropical_detail_key:
+            self._refresh_tropical_products_from_snapshot(system, observation)
+
     def _refresh_dashboard_tropical_systems(self) -> None:
         """Force the Dashboard storm snapshot without opening its workspace."""
 
@@ -2006,6 +2040,53 @@ class DashboardScreen(Screen[None]):
                 refresh=refresh,
             )
         )
+
+    def _refresh_tropical_products_from_snapshot(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+    ) -> None:
+        """Replace selected storm detail only after fresh products are ready."""
+
+        self._cancel_tropical_product_wait()
+        generation = self._tropical_detail_generation
+        key = _tropical_observation_key(observation)
+        self.tropical_panel.set_loading(True)
+        self._tropical_product_task = asyncio.create_task(
+            self._load_snapshot_tropical_products(
+                system,
+                observation,
+                key,
+                generation,
+            )
+        )
+
+    async def _load_snapshot_tropical_products(
+        self,
+        system: CanonicalTropicalSystem,
+        observation: TropicalSystem,
+        key: tuple[str, str, str],
+        generation: int,
+    ) -> None:
+        """Fetch refreshed products while retaining the prior visible tabs."""
+
+        task = asyncio.current_task()
+        try:
+            products = await self.app.load_tropical_products(observation)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if generation == self._tropical_detail_generation:
+                self.tropical_panel.set_loading(False)
+            return
+        finally:
+            if self._tropical_product_task is task:
+                self._tropical_product_task = None
+        if not self._tropical_detail_result_is_current(key, generation):
+            return
+        self._tropical_detail_key = key
+        self.tropical_panel.show_system(system, observation)
+        await self.tropical_panel.show_products(observation, products)
 
     async def _load_refreshed_tropical_selection(
         self,
@@ -2170,7 +2251,26 @@ class DashboardScreen(Screen[None]):
         self._ensure_persistent_forecast()
         self._ensure_persistent_alerts()
 
-    def _ensure_persistent_forecast(self, *, refresh: bool = False) -> None:
+    def refresh_weather_in_background(self) -> None:
+        """Apply fresh app weather or quietly refresh a separate selection."""
+
+        if not self.is_mounted:
+            return
+        location = self._selected_location or self.app.location
+        if location is None:
+            return
+        snapshot = self.app.dashboard_forecast_snapshot(location)
+        if snapshot is not None:
+            self.forecast_panel.show_forecast(location, snapshot, force=True)
+        elif location_key(location) != location_key(self.app.location):
+            self._ensure_persistent_forecast(refresh=True, background=True)
+
+    def _ensure_persistent_forecast(
+        self,
+        *,
+        refresh: bool = False,
+        background: bool = False,
+    ) -> None:
         """Start at most one selected-place preview wait for the current state."""
 
         location = self._selected_location or self.app.location
@@ -2201,8 +2301,11 @@ class DashboardScreen(Screen[None]):
                 key,
                 generation,
                 refresh=refresh,
+                background=background,
             )
         )
+        if background:
+            return
         if refresh:
             self.forecast_panel.show_loading(location)
         else:
@@ -2215,6 +2318,7 @@ class DashboardScreen(Screen[None]):
         generation: int,
         *,
         refresh: bool = False,
+        background: bool = False,
     ) -> None:
         """Apply a preview only while its selected-place generation is current."""
 
@@ -2226,7 +2330,7 @@ class DashboardScreen(Screen[None]):
         except asyncio.CancelledError:
             raise
         except Exception:
-            if self._forecast_result_is_current(key, generation):
+            if not background and self._forecast_result_is_current(key, generation):
                 self.forecast_panel.show_error(location)
             return
         finally:
