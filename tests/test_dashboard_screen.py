@@ -358,6 +358,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 screen.query_one('#dashboard-alerts-empty', Static).display
             )
+            self.assertFalse(screen.alerts_panel.alert_list.display)
             self.assertEqual(
                 screen.alerts_panel.border_title,
                 'Severe Weather Alert Bulletin',
@@ -562,6 +563,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             await pilot.pause()
             self.assertIs(panel.selected_row, row)
+            self.assertEqual(panel.alert_list.highlighted, 0)
             selected_prompt = panel.alert_list.options[0].prompt
             self.assertIsInstance(selected_prompt, Text)
             selected_lines = selected_prompt.plain.splitlines()
@@ -718,6 +720,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             await pilot.pause()
             self.assertIsNone(panel.selected_row)
+            self.assertIsNone(panel.alert_list.highlighted)
             self.assertFalse(marker.display)
             self.assertIsNotNone(
                 screen.world_map._incoming_alert_pulse_task
@@ -952,6 +955,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             await _settle(pilot)
             screen = app.screen
             screen.update_bulletin(1, (row,))
+            original_option = screen.alerts_panel.alert_list.options[0]
             option = screen.alerts_panel.alert_list.options[0]
             screen.alerts_panel.on_option_list_option_selected(
                 OptionList.OptionSelected(
@@ -990,6 +994,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     await _settle(pilot)
 
                 update_alerts.assert_called_once_with((row,))
+                self.assertIs(
+                    screen.alerts_panel.alert_list.options[0],
+                    original_option,
+                )
                 show_alert.assert_not_called()
                 rebuild_view.assert_not_called()
 

@@ -596,11 +596,13 @@ class DashboardAlertsPanel(Container):
         self._by_option_id: dict[str, BulletinAlert] = {}
         self._selected_identity: tuple[str, str] | None = None
         self._last_text_width = 0
-        self._presentation_key: tuple[tuple[BulletinAlert, str], ...] = ()
+        self._presentation_key: tuple[tuple[BulletinAlert, str], ...] | None = None
 
     def compose(self) -> ComposeResult:
         self.border_title = 'Severe Weather Alert Bulletin'
-        yield DashboardAlertList(id='dashboard-alerts-list')
+        alert_list = DashboardAlertList(id='dashboard-alerts-list')
+        alert_list.display = False
+        yield alert_list
         yield Static(
             'New weather alerts will display here.',
             id='dashboard-alerts-empty',
@@ -622,30 +624,49 @@ class DashboardAlertsPanel(Container):
         )
 
     def update_alerts(self, rows: tuple[BulletinAlert, ...]) -> None:
-        """Replace bulletin data while retaining a still-current selection."""
+        """Update bulletin rows without disturbing an unchanged list viewport."""
 
         presentation_key = self.presentation_key(rows)
         if presentation_key == self._presentation_key:
             return
+        previous_option_ids = tuple(
+            _bulletin_option_id(row) for row in self._rows
+        )
+        option_ids = tuple(_bulletin_option_id(row) for row in rows)
+        structure_changed = option_ids != previous_option_ids
+        previous_scroll_y = self.alert_list.scroll_y
+        previous_highlighted_id = self._highlighted_option_id()
         self._presentation_key = presentation_key
-        self.alert_list.clear_preview()
         self._rows = rows
-        self._by_option_id.clear()
-        self.alert_list.clear_options()
+        self._by_option_id = {
+            option_id: row for option_id, row in zip(option_ids, rows)
+        }
         self._last_text_width = self._text_width()
-        options: list[Option | None] = []
-        for index, row in enumerate(rows):
-            option_id = _bulletin_option_id(row)
-            self._by_option_id[option_id] = row
-            options.append(Option(self._row_label(row), id=option_id))
-            if index < len(rows) - 1:
-                options.append(None)
-        self.alert_list.add_options(options)
+        if structure_changed:
+            self.alert_list.clear_preview()
+            self.alert_list.clear_options()
+            options: list[Option | None] = []
+            for index, row in enumerate(rows):
+                option_id = option_ids[index]
+                options.append(Option(self._row_label(row), id=option_id))
+                if index < len(rows) - 1:
+                    options.append(None)
+            self.alert_list.add_options(options)
+        else:
+            self._refresh_option_labels()
         empty = self.query_one('#dashboard-alerts-empty', Static)
         empty.display = not rows
         self.alert_list.display = bool(rows)
         if self.selected_row is None:
             self._selected_identity = None
+        if structure_changed:
+            highlighted_id = self._selected_option_id() or previous_highlighted_id
+            self._set_highlighted_option(highlighted_id)
+            self.call_after_refresh(
+                self.alert_list.scroll_to,
+                y=previous_scroll_y,
+                animate=False,
+            )
 
     def needs_update(self, rows: tuple[BulletinAlert, ...]) -> bool:
         """Return whether row content or its relative-time label changed."""
@@ -687,6 +708,9 @@ class DashboardAlertsPanel(Container):
         identity = country_alert_identity(row.alert)
         self._selected_identity = (
             None if identity == self._selected_identity else identity
+        )
+        self.alert_list.highlighted = (
+            None if self._selected_identity is None else event.option_index
         )
         self._refresh_option_labels()
         self.post_message(self.Selected(self.selected_row))
@@ -748,6 +772,22 @@ class DashboardAlertsPanel(Container):
                     option_id,
                     self._row_label(row),
                 )
+
+    def _selected_option_id(self) -> str | None:
+        row = self.selected_row
+        return _bulletin_option_id(row) if row is not None else None
+
+    def _highlighted_option_id(self) -> str | None:
+        highlighted = self.alert_list.highlighted
+        if highlighted is None or not 0 <= highlighted < len(self.alert_list.options):
+            return None
+        return self.alert_list.options[highlighted].id
+
+    def _set_highlighted_option(self, option_id: str | None) -> None:
+        if option_id is None or option_id not in self._by_option_id:
+            self.alert_list.highlighted = None
+            return
+        self.alert_list.highlighted = self.alert_list.get_option_index(option_id)
 
     def _text_width(self) -> int:
         if not self.is_mounted:
