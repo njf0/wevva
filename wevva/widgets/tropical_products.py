@@ -82,40 +82,99 @@ def tropical_forecast_summary(observation: TropicalSystem) -> Group:
     return Group(*parts)
 
 
-def structured_tropical_product(data: dict[str, Any]) -> Table:
+def structured_tropical_product(data: dict[str, Any]) -> Any:
     """Render structured provider data without assuming one feed shape."""
 
     points = data.get('points')
-    if isinstance(points, list) and any(isinstance(point, dict) for point in points):
-        rows = [point for point in points if isinstance(point, dict)]
-        table = Table(box=None, pad_edge=False, expand=False)
-        columns = [
-            ('Valid', _point_valid, any(_has_valid(point) for point in rows)),
-            ('Type', _point_type, any(_has_type(point) for point in rows)),
-            ('Centre', _point_centre, any(_has_centre(point) for point in rows)),
-            ('Wind', _point_wind, any(_has_wind(point) for point in rows)),
-            (
-                'Pressure',
-                _point_pressure,
-                any(_has_pressure(point) for point in rows),
-            ),
-        ]
-        visible = [
-            (label, renderer)
-            for label, renderer, present in columns
-            if present
-        ]
-        for label, _renderer in visible:
-            table.add_column(label, no_wrap=label != 'Type')
-        for point in rows:
-            table.add_row(*(renderer(point) for _label, renderer in visible))
-        return table
+    rows = (
+        [point for point in points if isinstance(point, dict)]
+        if isinstance(points, list)
+        else []
+    )
+    analysis = data.get('analysis')
+    analysis_data = analysis if isinstance(analysis, dict) else None
+    if rows or analysis_data is not None:
+        parts: list[Any] = []
+        if analysis_data is not None:
+            analysis_table = _fact_table(analysis_data)
+            if analysis_table.row_count:
+                _append_section(parts, 'Analysis', analysis_table)
+        if rows:
+            _append_section(parts, 'Forecast', _forecast_table(rows))
+        extents = _extent_table(analysis_data, rows)
+        if extents.row_count:
+            _append_section(parts, 'Official extents', extents)
 
+        extra_data = {
+            key: value
+            for key, value in data.items()
+            if key not in {'analysis', 'points'}
+        }
+        extra_table = _flat_table(extra_data)
+        if extra_table.row_count:
+            _append_section(parts, 'Product details', extra_table)
+        return Group(*parts)
+
+    return _flat_table(data)
+
+
+def _append_section(parts: list[Any], title: str, content: Any) -> None:
+    if parts:
+        parts.append(Text(''))
+    parts.extend((Text(title, style='bold'), content))
+
+
+def _flat_table(data: dict[str, Any]) -> Table:
     table = Table(box=None, pad_edge=False, expand=False)
     table.add_column('Field', style='bold')
     table.add_column('Value')
     for label, value in _flatten_data(data):
         table.add_row(label, value)
+    return table
+
+
+def _forecast_table(rows: list[dict[str, Any]]) -> Table:
+    table = Table(box=None, pad_edge=False, expand=False)
+    table.add_column('Lead', no_wrap=True)
+    table.add_column('Forecast details')
+    for point in rows:
+        table.add_row(_point_lead(point), _point_details(point))
+    return table
+
+
+def _point_details(point: dict[str, Any]) -> str:
+    fields = [
+        ('Valid', _point_valid, _has_valid),
+        ('Type', _point_type, _has_type),
+        ('Centre', _point_centre, _has_centre),
+        ('Location', _point_location, _has_location),
+        ('Movement', _point_movement, _has_movement),
+        ('Wind', _point_wind, _has_wind),
+        ('Pressure', _point_pressure, _has_pressure),
+    ]
+    return '\n'.join(
+        f'{label}: {renderer(point)}'
+        for label, renderer, present in fields
+        if present(point)
+    ) or '—'
+
+
+def _fact_table(data: dict[str, Any]) -> Table:
+    table = Table(box=None, pad_edge=False, expand=False)
+    table.add_column('Field', style='bold')
+    table.add_column('Value')
+    fields = [
+        ('Valid', _point_valid, _has_valid),
+        ('Type', _point_type, _has_type),
+        ('Centre', _point_centre, _has_centre),
+        ('Location', _point_location, _has_location),
+        ('Movement', _point_movement, _has_movement),
+        ('Wind', _point_wind, _has_wind),
+        ('Pressure', _point_pressure, _has_pressure),
+    ]
+    for label, renderer, present in fields:
+        if present(data):
+            table.add_row(label, renderer(data))
     return table
 
 
@@ -150,10 +209,14 @@ def _flatten_data(
 
 def _point_valid(point: dict[str, Any]) -> str:
     value = point.get('valid_at') or point.get('time') or point.get('forecast_type')
-    if value:
-        return str(value)
+    return str(value) if value else '—'
+
+
+def _point_lead(point: dict[str, Any]) -> str:
     lead = point.get('lead_hours')
-    return f'+{lead:g} h' if isinstance(lead, (int, float)) else '—'
+    if isinstance(lead, (int, float)):
+        return f'{lead:g}h'
+    return str(point.get('forecast_label') or '—')
 
 
 def _point_type(point: dict[str, Any]) -> str:
@@ -165,7 +228,19 @@ def _point_type(point: dict[str, Any]) -> str:
     cyclone_data = point.get('cyclone_data')
     if value is None and isinstance(cyclone_data, dict):
         value = cyclone_data.get('development')
-    return str(value).replace('_', ' ').title() if value else '—'
+    if not value:
+        return '—'
+    rendered = str(value).replace('_', ' ')
+    details = point.get('classification_details')
+    if isinstance(details, dict):
+        additions = [
+            str(detail)
+            for detail in details.values()
+            if detail and str(detail).casefold() not in rendered.casefold()
+        ]
+        if additions:
+            rendered = f'{rendered} · {" / ".join(dict.fromkeys(additions))}'
+    return rendered
 
 
 def _point_centre(point: dict[str, Any]) -> str:
@@ -179,21 +254,61 @@ def _point_centre(point: dict[str, Any]) -> str:
 
 
 def _point_wind(point: dict[str, Any]) -> str:
+    source_values = point.get('source_values')
+    source_wind = (
+        _measurement_collection(source_values.get('maximum_wind'))
+        if isinstance(source_values, dict)
+        else ''
+    )
+    source_gust = (
+        _measurement_collection(source_values.get('maximum_gust'))
+        if isinstance(source_values, dict)
+        else ''
+    )
+    wind = source_wind
     for key, unit in (('maximum_wind', ''), ('maximum_wind_mps', ' m/s')):
         value = point.get(key)
-        if value is not None:
-            return f'{value}{unit}'
+        if value is not None and not wind:
+            wind = f'{value}{unit}'
+            break
+    gust = source_gust
+    for key, unit in (('maximum_gust', ''), ('maximum_gust_mps', ' m/s')):
+        value = point.get(key)
+        if value is not None and not gust:
+            gust = f'{value}{unit}'
+            break
+
     cyclone_data = point.get('cyclone_data')
-    if isinstance(cyclone_data, dict):
+    if not wind and isinstance(cyclone_data, dict):
         wind = cyclone_data.get('maximum_wind')
         if isinstance(wind, dict) and wind.get('wind_speed_kt') is not None:
-            gust = (
-                f' (gust {wind["wind_speed_gust_kt"]} kt)'
-                if wind.get('wind_speed_gust_kt') is not None
-                else ''
-            )
-            return f'{wind["wind_speed_kt"]} kt{gust}'
-    return '—'
+            if wind.get('wind_speed_gust_kt') is not None:
+                gust = f'{wind["wind_speed_gust_kt"]} kt'
+            wind = f'{wind["wind_speed_kt"]} kt'
+    if wind and gust:
+        return f'{wind}; gust {gust}'
+    return wind or (f'gust {gust}' if gust else '—')
+
+
+def _point_location(point: dict[str, Any]) -> str:
+    return str(point.get('location') or '—')
+
+
+def _point_movement(point: dict[str, Any]) -> str:
+    movement = str(point.get('movement') or '')
+    source_values = point.get('source_values')
+    collection = (
+        source_values.get('movement_speed')
+        if isinstance(source_values, dict)
+        else None
+    )
+    values, condition = _measurement_parts(collection)
+    additions = [value for value in values if value not in movement]
+    if condition and condition not in movement:
+        additions.append(condition)
+    if movement and additions:
+        return f'{movement} / {" / ".join(additions)}'
+    return movement or ' / '.join(additions) or '—'
 
 
 def _point_pressure(point: dict[str, Any]) -> str:
@@ -210,10 +325,113 @@ def _point_pressure(point: dict[str, Any]) -> str:
     return '—'
 
 
+def _measurement_parts(value: object) -> tuple[list[str], str]:
+    if not isinstance(value, dict):
+        return [], ''
+    measurements: list[str] = []
+    values = value.get('values')
+    if isinstance(values, list):
+        for measurement in values:
+            if not isinstance(measurement, dict):
+                continue
+            raw_value = measurement.get('value')
+            condition = measurement.get('condition')
+            if raw_value is not None:
+                unit = measurement.get('unit')
+                rendered = f'{raw_value} {unit}' if unit else str(raw_value)
+                if condition:
+                    rendered = f'{condition} · {rendered}'
+                measurements.append(rendered)
+            elif condition:
+                measurements.append(str(condition))
+    condition = value.get('condition')
+    return list(dict.fromkeys(measurements)), str(condition or '')
+
+
+def _measurement_collection(value: object) -> str:
+    measurements, condition = _measurement_parts(value)
+    rendered = ' / '.join(measurements)
+    if condition and rendered:
+        return f'{condition} · {rendered}'
+    return rendered or condition
+
+
+def _extent_table(
+    analysis: dict[str, Any] | None,
+    points: list[dict[str, Any]],
+) -> Table:
+    table = Table(box=None, pad_edge=False, expand=False)
+    table.add_column('Lead', no_wrap=True)
+    table.add_column('Official extent')
+    sources: list[tuple[str, dict[str, Any]]] = []
+    if analysis is not None:
+        sources.append(('Current', analysis))
+    sources.extend((_point_lead(point), point) for point in points)
+    for horizon, source in sources:
+        probability_circle = source.get('probability_circle')
+        if isinstance(probability_circle, dict) and probability_circle:
+            table.add_row(
+                horizon,
+                _extent_details(probability_circle, default_type='Probability circle'),
+            )
+        wind_areas = source.get('wind_areas')
+        if not isinstance(wind_areas, list):
+            continue
+        for area in wind_areas:
+            if not isinstance(area, dict):
+                continue
+            table.add_row(
+                horizon,
+                _extent_details(area, default_type='Wind area'),
+            )
+    return table
+
+
+def _extent_details(value: dict[str, Any], *, default_type: str) -> str:
+    details = [str(value.get('type') or default_type)]
+    if threshold := _measurement_collection(value.get('threshold')):
+        details.append(f'Threshold: {threshold}')
+    if extent := _axes_text(value.get('axes')):
+        if extent != '—':
+            details.append(f'Extent: {extent}')
+    return '\n'.join(details)
+
+
+def _axes_text(value: object) -> str:
+    if not isinstance(value, list):
+        return '—'
+    axes: list[str] = []
+    for axis in value:
+        if not isinstance(axis, dict):
+            continue
+        components = []
+        if direction := axis.get('direction'):
+            components.append(str(direction))
+        radius_type = str(axis.get('radius_type') or '')
+        radii = axis.get('radii')
+        rendered_radii: list[str] = []
+        if isinstance(radii, list):
+            for radius in radii:
+                if not isinstance(radius, dict) or radius.get('value') is None:
+                    continue
+                unit = radius.get('unit')
+                rendered = f'{radius["value"]} {unit}' if unit else str(radius['value'])
+                individual_type = radius.get('type')
+                if individual_type:
+                    rendered = f'{individual_type}: {rendered}'
+                rendered_radii.append(rendered)
+        if rendered_radii:
+            radius_text = ' / '.join(rendered_radii)
+            components.append(f'{radius_type}: {radius_text}' if radius_type else radius_text)
+        if components:
+            axes.append(' · '.join(components))
+    return '\n'.join(axes) or '—'
+
+
 def _has_valid(point: dict[str, Any]) -> bool:
     return any(
         point.get(key) is not None
-        for key in ('valid_at', 'time', 'forecast_type', 'lead_hours')
+        for key in ('valid_at', 'time', 'forecast_type')
     )
 
 
@@ -234,10 +452,31 @@ def _has_centre(point: dict[str, Any]) -> bool:
     )
 
 
+def _has_location(point: dict[str, Any]) -> bool:
+    return bool(point.get('location'))
+
+
+def _has_movement(point: dict[str, Any]) -> bool:
+    if point.get('movement'):
+        return True
+    source_values = point.get('source_values')
+    return isinstance(source_values, dict) and bool(source_values.get('movement_speed'))
+
+
 def _has_wind(point: dict[str, Any]) -> bool:
     if any(
         point.get(key) is not None
-        for key in ('maximum_wind', 'maximum_wind_mps')
+        for key in (
+            'maximum_wind',
+            'maximum_wind_mps',
+            'maximum_gust',
+            'maximum_gust_mps',
+        )
+    ):
+        return True
+    source_values = point.get('source_values')
+    if isinstance(source_values, dict) and any(
+        source_values.get(key) for key in ('maximum_wind', 'maximum_gust')
     ):
         return True
     cyclone_data = point.get('cyclone_data')

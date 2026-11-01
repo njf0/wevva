@@ -16,8 +16,8 @@ from wevva.messages import HourHighlighted, WeatherUpdated
 from wevva.utils import rain_colour, temp_colour, wind_colour
 
 
-_MINIMUM_WIDTHS = (5, 3, 5, 4, 9)
-_PREFERRED_WIDTHS = (6, 5, 8, 6, 16)
+_MINIMUM_WIDTHS = (6, 3, 5, 4, 9)
+_PREFERRED_WIDTHS = (7, 5, 8, 6, 16)
 _COLUMN_COUNT = len(_MINIMUM_WIDTHS)
 
 
@@ -172,7 +172,7 @@ class DashboardHourlyForecast(Container):
         wind_unit = model.forecast_units.get('wind_speed_10m', '')
         direction = model.get_wind_direction(index) or '--'
         return (
-            Text(hour, style='dim'),
+            Text(f'{hour} ', style='dim'),
             Text(
                 condition.abbr if condition is not None else '--',
                 style=condition_style,

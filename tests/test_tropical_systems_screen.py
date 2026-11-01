@@ -73,8 +73,8 @@ def _rendered(widget: Static) -> str:
     return console.export_text()
 
 
-def _renderable_text(renderable) -> str:
-    console = Console(width=120, file=StringIO(), record=True)
+def _renderable_text(renderable, *, width: int = 120) -> str:
+    console = Console(width=width, file=StringIO(), record=True)
     console.print(renderable)
     return console.export_text()
 
@@ -795,6 +795,124 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Centre', centre_only)
         self.assertNotIn('Wind', centre_only)
         self.assertNotIn('Pressure', centre_only)
+
+    def test_enriched_provider_forecast_renders_analysis_fixes_and_extents(self) -> None:
+        rendered = _renderable_text(
+            _structured_product(
+                {
+                    'analysis': {
+                        'valid_at': '2026-08-11T22:00:00+09:00',
+                        'classification': '台風(TS) / 強い',
+                        'location': '日本の南',
+                        'maximum_gust': '35 m/s',
+                        'source_values': {
+                            'maximum_wind': {
+                                'condition': '中心付近',
+                                'values': [{'value': '23', 'unit': 'm/s'}],
+                            },
+                        },
+                        'wind_areas': [
+                            {
+                                'type': '暴風域',
+                                'threshold': {
+                                    'condition': '以上',
+                                    'values': [
+                                        {'value': '50', 'unit': 'ノット'},
+                                        {'value': '25', 'unit': 'm/s'},
+                                    ],
+                                },
+                                'axes': [
+                                    {
+                                        'direction': '全域',
+                                        'radius_type': '半径',
+                                        'radii': [
+                                            {'value': '45', 'unit': '海里'},
+                                            {'value': '85', 'unit': 'km'},
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    'points': [
+                        {
+                            'lead_hours': 24,
+                            'valid_at': '2026-08-12T22:00:00+09:00',
+                            'latitude': 36.5,
+                            'longitude': 141.0,
+                            'classification': '台風(TY) / 非常に強い',
+                            'classification_details': {
+                                'typhoon_class': '台風(TY)',
+                                'area_class': '大型',
+                                'intensity_class': '非常に強い',
+                            },
+                            'location': '日本の東',
+                            'movement': '北東 at 10 ノット',
+                            'minimum_pressure': '970 hPa',
+                            'maximum_wind': '80 ノット',
+                            'maximum_gust': '115 ノット',
+                            'source_values': {
+                                'movement_speed': {
+                                    'values': [
+                                        {'value': '10', 'unit': 'ノット'},
+                                        {'value': '20', 'unit': 'km/h'},
+                                    ],
+                                },
+                                'maximum_wind': {
+                                    'condition': '中心付近',
+                                    'values': [
+                                        {'value': '80', 'unit': 'ノット'},
+                                        {'value': '40', 'unit': 'm/s'},
+                                    ],
+                                },
+                                'maximum_gust': {
+                                    'values': [
+                                        {'value': '115', 'unit': 'ノット'},
+                                        {'value': '60', 'unit': 'm/s'},
+                                    ],
+                                },
+                            },
+                            'probability_circle': {
+                                'type': '予報円',
+                                'axes': [
+                                    {
+                                        'direction': '全域',
+                                        'radius_type': '７０パーセント確率半径',
+                                        'radii': [
+                                            {'value': '55', 'unit': '海里'},
+                                            {'value': '100', 'unit': 'km'},
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            'forecast_label': '予報　翌日夕方',
+                            'valid_at': '2026-08-13T18:00:00+09:00',
+                            'latitude': 37.0,
+                            'longitude': 142.0,
+                        },
+                    ],
+                }
+            ),
+            width=220,
+        )
+
+        self.assertIn('Analysis', rendered)
+        self.assertIn('Forecast', rendered)
+        self.assertIn('Official extents', rendered)
+        self.assertIn('台風(TS) / 強い', rendered)
+        self.assertIn('日本の南', rendered)
+        self.assertIn('中心付近 · 23 m/s; gust 35 m/s', rendered)
+        self.assertIn('24h', rendered)
+        self.assertNotIn('+24 h', rendered)
+        self.assertIn('台風(TY) / 非常に強い · 大型', rendered)
+        self.assertIn('北東 at 10 ノット / 20 km/h', rendered)
+        self.assertIn('中心付近 · 80 ノット / 40 m/s; gust 115 ノット / 60 m/s', rendered)
+        self.assertIn('予報　翌日夕方', rendered)
+        self.assertIn('暴風域', rendered)
+        self.assertIn('以上 · 50 ノット / 25 m/s', rendered)
+        self.assertIn('７０パーセント確率半径: 55 海里 / 100 km', rendered)
 
     async def test_product_failure_and_missing_track_leave_clear_status(self) -> None:
         no_track = _observation(

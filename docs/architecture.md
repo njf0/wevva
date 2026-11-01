@@ -310,15 +310,18 @@ and Wind instruments; the selected hourly row drives those instruments and the
 air-quality hour. A Dashboard-specific vertical hourly table shows hour,
 abbreviated condition, temperature, precipitation chance, and wind speed plus
 spaced direction/arrow without horizontal scrolling. Full `HH:MM` times are
-shown; feels-like temperature, precipitation amount, and gusts remain in the
+shown with an explicit separator before the condition; feels-like temperature,
+precipitation amount, and gusts remain in the
 current instruments rather than being repeated in each row. Units inherit
 their value colour, while spacing remains unstyled. The table caps its height
 at its 24 actual rows so the daily/context stack follows it rather than being
 anchored to the rail bottom. The adjacent Dashboard adapter wraps the standard
-`DailySummaryTable` and skips today through the standard model path. Expanded
-rails use separate rain-chance, precipitation, wind, gust, and direction
-columns with fitted spacing; narrower rails retain the standard combined field
-groups without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
+`DailySummaryTable` and skips today through the standard model path. Its five
+dashboard columns remain day, abbreviated condition, temperature range, rain
+chance, and wind speed/direction at every rail width; dashboard presentation
+suppresses inline precipitation amount and gusts while leaving standard Weather
+tables unchanged. The columns gain ordinary cell padding when all five still
+fit without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on
 taller terminals, and omit the cards in compact/medium modes. The Dashboard
@@ -343,10 +346,16 @@ anchor, ordered by declared classification strength, newest issue time, then
 source and ID. This is a display choice only and does not merge observations.
 The world-map base exposes narrow candidate and label hooks so the Dashboard
 can send locations and storms through the same callout planner. A selected
-tropical system ranks first, followed by the active weather location, canonical
-storms, and ordinary saved locations. Selecting a location changes only its
-reverse-video emphasis, preserving the planner's existing marker side and
-neighbouring callouts.
+tropical system ranks first, followed by selected/active saved places and every
+canonical storm. Ordinary saved-place candidates use one deterministic
+pseudo-random sample capped from the available map-cell budget, so a smaller
+wide map does not fill with labels and an unchanged size does not flicker
+between samples. Dashboard `r` advances that sample only while the cell-derived
+cap is below its full-size maximum and actually excludes places; no terminal
+dimension is special-cased. Sampling changes presentation only: every saved
+place remains mounted and available to the full World Locations screen.
+Selecting a location changes only its reverse-video emphasis, preserving the
+planner's existing marker side and neighbouring callouts.
 
 Canonical storm map labels use an accent-coloured, classification-first
 formatter, including their `★` marker. Their native tooltip contains only
@@ -681,7 +690,13 @@ workspace behind both columns retains the application hatch. NHC and CPHC
 observations with a useful discovery headline or summary receive a `Forecast`
 tab; other tabs come only from lazy `get_tropical_products()` results. Product
 content uses literal plain text, explicit Markdown, and restrained tables for
-the structured forecast point shapes supplied by `wevva-warnings`. The
+the structured forecast point shapes supplied by `wevva-warnings`. The shared
+structured renderer keeps analysis separate from forecast fixes, preserves
+display-ready provider classifications, and presents explicit lead/valid time,
+location, movement, wind/gust, pressure, alternate official measurements, and
+published probability-circle or wind-area extents when those fields exist. It
+selects these optional sections from the product shape rather than the source
+ID, so Dashboard and the full workspace expose the same provider detail. The
 workspace fills its full-height stage. Its frame has no internal padding; the
 stage supplies the only `1 2` outer inset.
 Product tabs begin directly with retrieved provider content; the UI does not

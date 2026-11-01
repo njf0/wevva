@@ -11,27 +11,16 @@ from wevva.messages import WeatherUpdated
 from wevva.widgets.daily_summary import DailySummaryTable
 
 
-_COMPACT_COLUMNS = (
+_DASHBOARD_COLUMNS = (
     DailyColumn.DATE,
     DailyColumn.CONDITION,
     DailyColumn.TEMPERATURE,
     DailyColumn.RAIN,
     DailyColumn.WIND,
 )
-_COMPACT_MINIMUM_WIDTHS = (3, 3, 7, 7, 9)
-_COMPACT_PREFERRED_WIDTHS = (6, 4, 9, 11, 14)
-_SEPARATE_COLUMNS = (
-    DailyColumn.DATE,
-    DailyColumn.CONDITION,
-    DailyColumn.TEMPERATURE,
-    DailyColumn.RAIN,
-    DailyColumn.PRECIPITATION,
-    DailyColumn.WIND,
-    DailyColumn.GUST,
-    DailyColumn.WIND_DIRECTION,
-)
-_SEPARATE_MINIMUM_WIDTHS = (7, 3, 7, 5, 7, 7, 5, 5)
-_SEPARATE_PREFERRED_WIDTHS = _SEPARATE_MINIMUM_WIDTHS
+_DASHBOARD_MINIMUM_WIDTHS = (3, 2, 7, 4, 9)
+_DASHBOARD_PREFERRED_WIDTHS = (6, 4, 9, 6, 14)
+_COLUMN_COUNT = len(_DASHBOARD_COLUMNS)
 
 
 class DashboardDailyForecast(Container):
@@ -65,7 +54,11 @@ class DashboardDailyForecast(Container):
         self._layout_pending = False
 
     def compose(self) -> ComposeResult:
-        yield DailySummaryTable(id='dashboard-daily-table')
+        yield DailySummaryTable(
+            id='dashboard-daily-table',
+            show_compact_precipitation=False,
+            show_compact_gust=False,
+        )
 
     @property
     def table(self) -> DailySummaryTable:
@@ -106,7 +99,15 @@ class DashboardDailyForecast(Container):
         if not self.is_mounted:
             return
         available = max(1, self.content_size.width - 1)
-        columns, widths = _fitted_layout(available)
+        padding = (
+            1
+            if available
+            >= sum(_DASHBOARD_MINIMUM_WIDTHS) + 2 * _COLUMN_COUNT
+            else 0
+        )
+        self.table.cell_padding = padding
+        content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
+        columns, widths = _fitted_layout(content_width)
         self.table.set_layout(
             columns,
             self._row_count,
@@ -117,19 +118,12 @@ class DashboardDailyForecast(Container):
 def _fitted_layout(
     available: int,
 ) -> tuple[tuple[DailyColumn, ...], tuple[int, ...]]:
-    """Use separate standard fields when the widened rail can hold them."""
+    """Fit the dashboard's five useful daily fields without scrolling."""
 
-    if available >= sum(_SEPARATE_MINIMUM_WIDTHS):
-        return _SEPARATE_COLUMNS, _fitted_widths(
-            available,
-            _SEPARATE_MINIMUM_WIDTHS,
-            _SEPARATE_PREFERRED_WIDTHS,
-            (4, 5, 6, 7, 0, 3, 2, 1),
-        )
-    return _COMPACT_COLUMNS, _fitted_widths(
+    return _DASHBOARD_COLUMNS, _fitted_widths(
         available,
-        _COMPACT_MINIMUM_WIDTHS,
-        _COMPACT_PREFERRED_WIDTHS,
+        _DASHBOARD_MINIMUM_WIDTHS,
+        _DASHBOARD_PREFERRED_WIDTHS,
         (4, 3, 2, 0, 1),
     )
 

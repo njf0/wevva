@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -37,6 +38,9 @@ from wevva.widgets.tropical_systems import (
 )
 from wevva.widgets.weather_alerts import alert_condition_name, alert_severity_color
 from wevva.widgets.world_locations_map import WorldLocationLabel, WorldLocationsMap
+
+
+_MAX_PLACE_LABELS = 24
 
 
 class DashboardLocationLabel(WorldLocationLabel):
@@ -322,6 +326,7 @@ class DashboardWorldMap(WorldLocationsMap):
         self._incoming_alert_markers: list[DashboardIncomingAlertMarker] = []
         self._incoming_alert_pulse_task: asyncio.Task[None] | None = None
         self._incoming_alert_pulse_generation = 0
+        self._place_sample_generation = 0
 
     def compose(self) -> ComposeResult:
         yield from super().compose()
@@ -413,6 +418,21 @@ class DashboardWorldMap(WorldLocationsMap):
 
         self._update_alert_marker()
         self._sync_incoming_alert_markers()
+
+    def resample_places_if_limited(self) -> bool:
+        """Cycle the compact place sample while retaining priority features."""
+
+        frame = self._current_frame
+        place_limit = _place_label_limit(frame) if frame is not None else None
+        if (
+            place_limit is None
+            or place_limit >= _MAX_PLACE_LABELS
+            or len(self._labels) <= place_limit
+        ):
+            return False
+        self._place_sample_generation += 1
+        self._schedule_reflow()
+        return True
 
     def set_active_location(self, location: LocationMetadata | None) -> None:
         """Update the active-place emphasis without changing selection."""
@@ -694,7 +714,20 @@ class DashboardWorldMap(WorldLocationsMap):
                 for candidate in location_candidates
             ]
         by_key = {candidate.key: candidate for candidate in location_candidates}
-        active_location = by_key.pop(self._active_location_key, None)
+        priority_locations: list[DirectionalCalloutCandidate[str]] = []
+        for key in dict.fromkeys(
+            (self._selected_location_key, self._active_location_key)
+        ):
+            candidate = by_key.pop(key, None)
+            if candidate is not None:
+                priority_locations.append(candidate)
+
+        place_limit = _place_label_limit(frame)
+        sampled_locations = _sample_place_candidates(
+            list(by_key.values()),
+            max(0, place_limit - len(priority_locations)),
+            generation=self._place_sample_generation,
+        )
 
         tropical_candidates: list[DirectionalCalloutCandidate[str]] = []
         for system in self._tropical_systems:
@@ -747,10 +780,9 @@ class DashboardWorldMap(WorldLocationsMap):
         ordered: list[DirectionalCalloutCandidate[str]] = []
         if selected_tropical is not None:
             ordered.append(selected_tropical)
-        if active_location is not None:
-            ordered.append(active_location)
+        ordered.extend(priority_locations)
         ordered.extend(tropical_candidates)
-        ordered.extend(by_key.values())
+        ordered.extend(sampled_locations)
         return ordered
 
     def _selected_alert_marker_cell(
@@ -780,6 +812,46 @@ class DashboardWorldMap(WorldLocationsMap):
 
 def _tropical_callout_key(key: str | None) -> str:
     return f'tropical:{key or ""}'
+
+
+def _place_label_limit(frame: GeographicFrame) -> int:
+    """Bound ordinary place labels to the useful map-cell budget."""
+
+    return max(
+        6,
+        min(
+            _MAX_PLACE_LABELS,
+            frame.canvas.width // 7,
+            frame.canvas.height // 2,
+        ),
+    )
+
+
+def _sample_place_candidates(
+    candidates: Sequence[DirectionalCalloutCandidate[str]],
+    count: int,
+    *,
+    generation: int,
+) -> list[DirectionalCalloutCandidate[str]]:
+    """Return one stable pseudo-random subset without reordering its members."""
+
+    count = max(0, min(int(count), len(candidates)))
+    if count == len(candidates):
+        return list(candidates)
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: hashlib.blake2b(
+            f'{generation}\0{candidate.key}'.encode(),
+            digest_size=8,
+            person=b'wevva-map',
+        ).digest(),
+    )
+    selected = {candidate.key for candidate in ranked[:count]}
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.key in selected
+    ]
 
 
 def _bulletin_identity(row: BulletinAlert | None) -> tuple[str, str] | None:

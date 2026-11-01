@@ -393,7 +393,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(hourly.table.rows), 24)
             self.assertEqual(hourly.table.max_scroll_x, 0)
             hourly_row = hourly.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05:00')
+            self.assertEqual(hourly_row[0].plain, '05:00 ')
             self.assertEqual(hourly_row[1].plain, 'OC')
             self.assertEqual(hourly_row[2].plain, '13°C')
             self.assertEqual(hourly_row[3].plain, '0%')
@@ -425,6 +425,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 ['date', 'condition', 'temperature', 'rain', 'wind'],
             )
             self.assertEqual(daily.table.max_scroll_x, 0)
+            daily_row = daily.table.get_row_at(0)
+            self.assertNotIn('/', daily_row[3].plain)
+            self.assertNotIn('(', daily_row[4].plain)
             self.assertIsNotNone(
                 hourly.table.get_component_rich_style(
                     'datatable--even-row'
@@ -1231,7 +1234,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 1,
             )
             self.assertEqual(len(screen.forecast_panel.daily_forecast.table.rows), 6)
-            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 8)
+            self.assertEqual(len(screen.forecast_panel.daily_forecast.table.columns), 5)
             self.assertEqual(
                 [
                     key.value
@@ -1242,15 +1245,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     'condition',
                     'temperature',
                     'rain',
-                    'precipitation',
                     'wind',
-                    'gust',
-                    'wind_direction',
                 ],
             )
             self.assertEqual(screen.forecast_panel.daily_forecast.table.max_scroll_x, 0)
             daily_row = screen.forecast_panel.daily_forecast.table.get_row_at(0)
-            self.assertEqual(daily_row[6].plain, '(19)')
+            self.assertNotIn('/', daily_row[3].plain)
+            self.assertNotIn('(', daily_row[4].plain)
             hourly = screen.forecast_panel.hourly_forecast
             daily = screen.forecast_panel.daily_forecast
             separators = list(screen.forecast_panel.query('.dashboard-forecast-separator'))
@@ -1267,6 +1268,103 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             )
+
+    async def test_157_wide_layout_spaces_tables_and_caps_only_places(self) -> None:
+        app = self._app()
+        app.saved_locations = [
+            BERLIN,
+            *(
+                LocationMetadata(
+                    name=f'Place {index:02}',
+                    country='Test',
+                    country_code='GB',
+                    latitude=-50.0 + (index % 10) * 10.0,
+                    longitude=-160.0 + index * 15.0,
+                )
+                for index in range(20)
+            ),
+        ]
+        systems = tuple(
+            CanonicalTropicalSystem(
+                name,
+                [
+                    _tropical_observation(
+                        f'{name.casefold()}-fixture',
+                        'jma_tropical',
+                        name,
+                        classification='Tropical Storm',
+                        latitude=latitude,
+                        longitude=longitude,
+                    )
+                ],
+            )
+            for name, latitude, longitude in (
+                ('ALPHA', 15.0, 130.0),
+                ('BETA', -18.0, 70.0),
+            )
+        )
+        app._tropical_system_cache = (
+            app._tropical_system_cache_clock(),
+            systems,
+        )
+
+        async with app.run_test(size=(157, 49)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            screen = app.screen
+
+            hourly_row = screen.forecast_panel.hourly_forecast.table.get_row_at(0)
+            self.assertEqual(hourly_row[0].plain, '05:00 ')
+            daily = screen.forecast_panel.daily_forecast.table
+            self.assertEqual(daily.cell_padding, 1)
+            self.assertEqual(
+                [column.value for column in daily.columns],
+                ['date', 'condition', 'temperature', 'rain', 'wind'],
+            )
+            daily_row = daily.get_row_at(0)
+            self.assertNotIn('/', daily_row[3].plain)
+            self.assertNotIn('(', daily_row[4].plain)
+
+            frame = screen.world_map._current_frame
+            assert frame is not None
+            candidates = screen.world_map._callout_candidates(frame)
+            place_candidates = [
+                candidate
+                for candidate in candidates
+                if not str(candidate.key).startswith('tropical:')
+            ]
+            tropical_candidates = [
+                candidate
+                for candidate in candidates
+                if str(candidate.key).startswith('tropical:')
+            ]
+            self.assertEqual(len(place_candidates), 9)
+            self.assertIn(
+                location_key(BERLIN),
+                {candidate.key for candidate in place_candidates},
+            )
+            self.assertEqual(len(tropical_candidates), len(systems))
+
+            first_place_keys = {candidate.key for candidate in place_candidates}
+            self.assertTrue(screen.world_map.resample_places_if_limited())
+            await _settle(pilot)
+            next_candidates = screen.world_map._callout_candidates(frame)
+            next_place_keys = {
+                candidate.key
+                for candidate in next_candidates
+                if not str(candidate.key).startswith('tropical:')
+            }
+            self.assertNotEqual(first_place_keys, next_place_keys)
+            self.assertEqual(len(next_place_keys), len(first_place_keys))
+            self.assertIn(location_key(BERLIN), next_place_keys)
+
+            screen.world_map.resample_places_if_limited = Mock(return_value=True)
+            screen._ensure_persistent_forecast = Mock()
+            screen._ensure_persistent_alerts = Mock()
+            screen._refresh_dashboard_tropical_systems = Mock()
+            screen.action_refresh_dashboard()
+            screen.world_map.resample_places_if_limited.assert_called_once_with()
 
     async def test_tropical_overlay_uses_source_anchor_and_deep_links(self) -> None:
         app = self._app()

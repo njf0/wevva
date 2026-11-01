@@ -20,7 +20,13 @@ class DailySummaryTable(DataTable):
     # Reactive property (set by parent DailyForecast)
     daily_model: reactive[Any | None] = reactive(None)
 
-    def __init__(self, *, id: str = 'min-max-spread-table') -> None:
+    def __init__(
+        self,
+        *,
+        id: str = 'min-max-spread-table',
+        show_compact_precipitation: bool = True,
+        show_compact_gust: bool = True,
+    ) -> None:
         super().__init__(
             show_header=False,
             cursor_type='row',
@@ -35,6 +41,8 @@ class DailySummaryTable(DataTable):
         )
         self._row_count = 6
         self._column_widths: tuple[int, ...] | None = None
+        self._show_compact_precipitation = show_compact_precipitation
+        self._show_compact_gust = show_compact_gust
 
     def set_layout(
         self,
@@ -208,7 +216,10 @@ class DailySummaryTable(DataTable):
         )
         wind_speed_cell = Text('', justify='right')
         wind_speed_cell.append(f'{wind_speed:.0f}{wind_unit}', style=f'bold {wind_col}')
-        if DailyColumn.GUST not in self._visible_columns:
+        if (
+            DailyColumn.GUST not in self._visible_columns
+            and self._show_compact_gust
+        ):
             wind_speed_cell.append(' (')
             wind_speed_cell.append(f'{wind_gust:.0f}', style=wind_col)
             wind_speed_cell.append(')')
@@ -239,7 +250,10 @@ class DailySummaryTable(DataTable):
             DailyColumn.TEMPERATURE: min_max_cell,
             DailyColumn.RAIN: (
                 rain_prob_cell
-                if DailyColumn.PRECIPITATION in self._visible_columns
+                if (
+                    DailyColumn.PRECIPITATION in self._visible_columns
+                    or not self._show_compact_precipitation
+                )
                 else combined_rain_cell
             ),
             DailyColumn.WIND: wind_speed_cell,

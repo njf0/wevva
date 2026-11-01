@@ -1469,6 +1469,7 @@ class DashboardScreen(Screen[None]):
     def action_refresh_dashboard(self) -> None:
         """Refresh visible Dashboard data without touching the bulletin."""
 
+        self.world_map.resample_places_if_limited()
         self._ensure_persistent_forecast(refresh=True)
         self._ensure_persistent_alerts(refresh=True)
         self._refresh_dashboard_tropical_systems()
