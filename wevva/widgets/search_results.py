@@ -13,6 +13,7 @@ from wevva.location_metadata import LocationMetadata, location_metadata_from_pla
 
 # Status message option IDs
 _STATUS_SEARCHING = 'status-searching'
+_STATUS_COORDINATE_ERROR = 'status-coordinate-error'
 _STATUS_ERROR = 'status-error'
 _STATUS_NO_RESULTS = 'status-no-results'
 
@@ -26,6 +27,14 @@ class SearchResultsList(OptionList):
         max-height: 16;
         width: 100%;
         scrollbar-size-vertical: 1;
+        border: tall $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold reverse;
+    }
+
+    SearchResultsList:focus {
+        border: tall $accent;
     }
 
     SearchResultsList > .option-list--separator {
@@ -35,11 +44,16 @@ class SearchResultsList(OptionList):
 
     def __init__(self):
         super().__init__(id='place-search-results')
+        self.border_title = 'Results'
         self._place_cache: dict[str, dict] = {}  # Maps option ID to place metadata
 
     def show_searching(self) -> None:
         """Display 'Searching...' status message."""
         self._update_status(_STATUS_SEARCHING, 'Searching…')
+
+    def show_coordinate_error(self, message: str) -> None:
+        """Display coordinate validation guidance."""
+        self._update_status(_STATUS_COORDINATE_ERROR, message)
 
     def show_error(self, error: Exception) -> None:
         """Display error message."""
@@ -121,10 +135,11 @@ class SearchResultsList(OptionList):
                 break
         admin_parts.reverse()
 
-        label = f'[bold]{name}[/]\n'
+        label = f'[bold]{name}[/]'
         if admin_parts:
-            label += f'[dim italic]{", ".join(admin_parts)}[/]\n'
-        label += country
+            label += f'\n[dim italic]{", ".join(admin_parts)}[/]'
+        if country and country != name:
+            label += f'\n{country}'
         coordinates = self._format_coordinates(place)
         elevation = self._format_elevation(place)
         if coordinates or elevation:
@@ -135,6 +150,10 @@ class SearchResultsList(OptionList):
                 label += '[dim] · [/]'
             if elevation:
                 label += f'[bold dim]{elevation}[/]'
+
+        attribution = place.get('attribution')
+        if isinstance(attribution, str) and attribution:
+            label += f'\n[dim]{attribution}[/]'
 
         return label
 

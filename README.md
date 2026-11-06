@@ -8,7 +8,7 @@
 
 ## Highlights
 
-- Place search using Open-Meteo geocoding
+- Place-name search using Open-Meteo geocoding, plus latitude/longitude search
 - Current, hourly, and daily forecasts with detailed weather parameters and keyboard navigation
 - Current and upcoming weather alerts (normalized provider data)
 - Global active tropical-system investigation with source-specific tracks and official products
@@ -76,6 +76,9 @@ uvx wevva
 
 # Start directly at a location (picks first geocoding match, might not be what you expect!)
 uvx wevva --location "Edinburgh"
+
+# Coordinates are latitude first; quote negative longitudes
+uvx wevva --location "55.9533, -3.1883"
 
 # One-run overrides
 uvx wevva --theme dracula --emoji

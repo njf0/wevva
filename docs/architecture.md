@@ -13,6 +13,8 @@ wevva command / python -m wevva
      -> WeatherScreen under installed DashboardScreen + refresh otherwise
 
 place search -> SearchDialog -> SearchScreen -> services.geocoding.search_places()
+                                           -> Open-Meteo name search or
+                                              Nominatim coordinate reverse lookup
              -> PlaceSelected -> Wevva.action_refresh()
              -> WeatherController.fetch() -> weather + air quality -> WeatherUpdated
              -> WeatherScreen -> child widgets
@@ -74,8 +76,17 @@ the same values and accept later results without issuing their own queries.
 
 ## Data and external boundaries
 
-- `wevva/services/geocoding.py` calls Open-Meteo geocoding and normalizes its
-  response to small dictionaries. The TUI, CLI, and public API turn these into
+- `wevva/services/geocoding.py` calls Open-Meteo for place-name geocoding and
+  uses Nominatim for explicit decimal-coordinate reverse lookups. Coordinate
+  lookups retain the exact requested point and try progressively broader
+  village, city, county, state, and country address levels when a detailed
+  lookup has no name. Each attempt remains inside the provider's request-rate
+  limit. If no level resolves, the result is labelled `No place name found`
+  while retaining and displaying the submitted coordinates. Coordinate
+  searches are submitted explicitly rather than used as autocomplete requests.
+  The reverse endpoint can be changed through `WEVVA_REVERSE_GEOCODING_URL`.
+  The service normalizes both responses to small dictionaries. The TUI, CLI,
+  and public API turn these into
   `LocationMetadata` through the shared `location_metadata_from_place()`
   conversion.
 - `wevva/services/weather.py` delegates to `OpenMeteoForecast.fetch_all()` in

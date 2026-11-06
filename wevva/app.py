@@ -1258,6 +1258,8 @@ class Wevva(App, inherit_bindings=False):
         # Merge API-provided fields into app location
         if event.metadata.elevation is not None:
             self.location.elevation = event.metadata.elevation
+        if event.metadata.timezone:
+            self.location.timezone = event.metadata.timezone
         if event.metadata.timezone_abbreviation:
             self.location.timezone_abbreviation = event.metadata.timezone_abbreviation
         self._has_successful_fetch = True

@@ -565,7 +565,7 @@ def main(
         None,
         '--location',
         '-l',
-        help='Location name to start at, bypassing search screen.',
+        help='Location name or decimal latitude,longitude to start at, bypassing search screen.',
     ),
     set_default_location: str | None = typer.Option(
         None,

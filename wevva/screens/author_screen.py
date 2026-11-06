@@ -11,7 +11,7 @@ CREDITS = """
 
 Created by **Nick Ferguson** — <nick.ferguson@ed.ac.uk>
 
-Weather, geocoding, and air-quality data are provided by [Open-Meteo](https://open-meteo.com/). Weather warnings and tropical products are normalised by [wevva-warnings](https://github.com/njf0/wevva-warnings) from participating official providers.
+Weather, place-name geocoding, and air-quality data are provided by [Open-Meteo](https://open-meteo.com/). Coordinate searches use [OpenStreetMap](https://www.openstreetmap.org/copyright) data through Nominatim for best-effort place names. Weather warnings and tropical products are normalised by [wevva-warnings](https://github.com/njf0/wevva-warnings) from participating official providers.
 
 Maps use public-domain [Natural Earth](https://www.naturalearthdata.com/) data. The terminal interface is built with [Textual](https://textual.textualize.io/).
 """
