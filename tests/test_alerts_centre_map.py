@@ -9,7 +9,12 @@ from unittest.mock import patch
 from textual.app import App, ComposeResult
 from wevva_warnings import Alert
 
-from wevva.geography import map_unit
+from wevva.geography import (
+    GeographicViewport,
+    PopulatedPlace,
+    ProjectedPoint,
+    map_unit,
+)
 from wevva.screens.alerts_centre_screen import AlertsCentreScreen
 from wevva.services.country_alerts import SupportedAlertCountry, country_alert_identity
 from wevva.widgets import country_alerts_map
@@ -22,6 +27,7 @@ from wevva.widgets.country_alerts_map import (
     build_country_alerts_map_geometry,
     build_country_alerts_map_view,
     country_alert_city_label_budget,
+    country_alert_region_label_budget,
     render_country_alerts_map,
 )
 from wevva.widgets.geographic_scope import GeographicCanvas
@@ -62,6 +68,29 @@ EAST_GERMANY = {
     'type': 'Polygon',
     'coordinates': [[[11.0, 50.5], [14.5, 50.5], [14.5, 53.2], [11.0, 53.2], [11.0, 50.5]]],
 }
+
+
+def _place(
+    name: str,
+    *,
+    country_code: str,
+    longitude: float = 0.0,
+    latitude: float = 0.0,
+    region_name: str = '',
+    scale_rank: int = 4,
+    label_rank: int = 4,
+    population: int = 10_000,
+) -> PopulatedPlace:
+    return PopulatedPlace(
+        name=name,
+        longitude=longitude,
+        latitude=latitude,
+        scale_rank=scale_rank,
+        label_rank=label_rank,
+        population=population,
+        country_code=country_code,
+        region_name=region_name,
+    )
 
 
 class CountryAlertsMapGeometryTests(unittest.TestCase):
@@ -351,11 +380,213 @@ class CountryAlertsMapGeometryTests(unittest.TestCase):
         self.assertNotIn('North district', region_names)
         self.assertNotIn('South district', region_names)
 
+    def test_focused_policy_filters_country_for_representative_systems(self) -> None:
+        viewport = GeographicViewport(0.0, 0.0, -5.0, -5.0, 5.0, 5.0)
+        selected_polygons = country_alerts_map.geojson_polygons(
+            {
+                'type': 'Polygon',
+                'coordinates': [[
+                    [-4.0, -4.0],
+                    [4.0, -4.0],
+                    [4.0, 4.0],
+                    [-4.0, 4.0],
+                    [-4.0, -4.0],
+                ]],
+            }
+        )
+        for country_code, neighbour_code in (
+            ('FR', 'GB'),
+            ('GB', 'FR'),
+            ('BR', 'AR'),
+            ('US', 'MX'),
+        ):
+            with self.subTest(country_code=country_code):
+                ranked = country_alerts_map._rank_visible_places(
+                    (
+                        _place('Local', country_code=country_code),
+                        _place(
+                            'Foreign',
+                            country_code=neighbour_code,
+                            longitude=1.0,
+                        ),
+                    ),
+                    country_code=country_code,
+                    viewport=viewport,
+                    selected_polygons=selected_polygons,
+                    focused=True,
+                )
+
+                self.assertEqual(
+                    [place.name for _inside, place, _point in ranked],
+                    ['Local'],
+                )
+
+    def test_packaged_border_views_keep_only_selected_country_context(self) -> None:
+        fixtures = {
+            'FR': (-2.0, 48.0, 3.0, 51.0),
+            'GB': (-1.0, 50.0, 2.0, 52.0),
+            'BR': (-58.0, -34.0, -50.0, -22.0),
+            'US': (-125.0, 31.0, -114.0, 34.0),
+        }
+        for country_code, (west, south, east, north) in fixtures.items():
+            with self.subTest(country_code=country_code):
+                geometry = {
+                    'type': 'Polygon',
+                    'coordinates': [[
+                        [west, south],
+                        [east, south],
+                        [east, north],
+                        [west, north],
+                        [west, south],
+                    ]],
+                }
+                alert = _alert('border', severity='Moderate', geometry=geometry)
+                focused = build_country_alerts_map_view(
+                    country_code,
+                    [alert],
+                    ('fixture', 'border'),
+                )
+
+                assert focused is not None
+                self.assertTrue(
+                    all(
+                        place.country_code == country_code
+                        for place, _point in focused.places
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        annotation.key[0] == country_code
+                        for annotation in focused.region_annotations
+                    )
+                )
+
+    def test_focused_policy_deduplicates_repeated_settlement_names(self) -> None:
+        viewport = GeographicViewport(0.0, 0.0, -5.0, -5.0, 5.0, 5.0)
+        ranked = country_alerts_map._rank_visible_places(
+            (
+                _place(
+                    'Springfield',
+                    country_code='US',
+                    longitude=1.0,
+                    scale_rank=5,
+                ),
+                _place(
+                    ' Springfield ',
+                    country_code='US',
+                    longitude=2.0,
+                    scale_rank=8,
+                ),
+            ),
+            country_code='US',
+            viewport=viewport,
+            selected_polygons=(),
+            focused=True,
+        )
+
+        self.assertEqual(len(ranked), 1)
+        self.assertEqual(ranked[0][1].longitude, 1.0)
+
+    def test_region_policy_prefers_inside_context_and_city_name(self) -> None:
+        ranked = [
+            (
+                False,
+                _place('Outside', country_code='FR', region_name='Outer Region'),
+                ProjectedPoint(3.0, 0.0),
+            ),
+            (
+                True,
+                _place('Inside', country_code='FR', region_name='Inner Region'),
+                ProjectedPoint(0.0, 0.0),
+            ),
+            (
+                True,
+                _place(
+                    'Priority town',
+                    country_code='FR',
+                    region_name='Priority Region',
+                ),
+                ProjectedPoint(0.25, 0.0),
+            ),
+            (
+                True,
+                _place('Inner Region', country_code='FR', region_name='Inner Region'),
+                ProjectedPoint(0.5, 0.0),
+            ),
+        ]
+
+        annotations = country_alerts_map._region_annotations(ranked)
+
+        self.assertEqual(
+            [annotation.text for annotation in annotations],
+            ['Priority Region', 'Outer Region'],
+        )
+
+    def test_wrapped_focused_policy_keeps_only_selected_country(self) -> None:
+        viewport = GeographicViewport(10.0, 180.0, -2.0, -1.0, 2.0, 1.0)
+        ranked = country_alerts_map._rank_visible_places(
+            (
+                _place(
+                    'West side',
+                    country_code='FJ',
+                    longitude=179.5,
+                    latitude=10.0,
+                ),
+                _place(
+                    'East side',
+                    country_code='FJ',
+                    longitude=-179.5,
+                    latitude=10.0,
+                ),
+                _place(
+                    'Foreign side',
+                    country_code='TO',
+                    longitude=-179.6,
+                    latitude=10.0,
+                ),
+            ),
+            country_code='FJ',
+            viewport=viewport,
+            selected_polygons=(),
+            focused=True,
+        )
+
+        self.assertEqual(
+            {place.name for _inside, place, _point in ranked},
+            {'West side', 'East side'},
+        )
+
+    def test_unplaceable_region_label_is_omitted(self) -> None:
+        occupied = {(column, row) for row in range(2) for column in range(8)}
+
+        self.assertIsNone(
+            country_alerts_map._plain_label_placement(
+                anchor=(4, 1),
+                label_width=6,
+                canvas_width=8,
+                canvas_height=2,
+                occupied=occupied,
+            )
+        )
+        self.assertIsNone(
+            country_alerts_map._plain_label_placement(
+                anchor=(4, 1),
+                label_width=12,
+                canvas_width=8,
+                canvas_height=2,
+                occupied=set(),
+            )
+        )
+
     def test_city_label_budget_scales_with_map_size_and_respects_ceiling(self) -> None:
         self.assertEqual(country_alert_city_label_budget(20, 8), 1)
         self.assertEqual(country_alert_city_label_budget(48, 24), 4)
         self.assertEqual(country_alert_city_label_budget(120, 40), 8)
         self.assertEqual(country_alert_city_label_budget(120, 40, maximum=2), 2)
+        self.assertEqual(country_alert_region_label_budget(20, 8), 1)
+        self.assertEqual(country_alert_region_label_budget(48, 24), 2)
+        self.assertEqual(country_alert_region_label_budget(120, 40), 3)
+        self.assertEqual(country_alert_region_label_budget(120, 40, maximum=1), 1)
 
 class _MapApp(App[None]):
     def __init__(self) -> None:
@@ -564,7 +795,34 @@ class CountryAlertsMapWidgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(annotations)
             self.assertTrue(all(not annotation.can_focus for annotation in annotations))
             self.assertTrue(all('•' not in annotation.render().plain for annotation in annotations))
-            self.assertTrue(all(annotation.display for annotation in annotations))
+            visible_annotations = [
+                annotation for annotation in annotations if annotation.display
+            ]
+            self.assertTrue(visible_annotations)
+            self.assertLessEqual(
+                len(visible_annotations),
+                country_alert_region_label_budget(
+                    widget.content_size.width,
+                    widget.content_size.height,
+                ),
+            )
+            self.assertTrue(widget.placements)
+            visible_labels = [
+                *visible_annotations,
+                *(
+                    label
+                    for label in widget.query(CountryAlertCityLabel)
+                    if label.display
+                ),
+            ]
+            occupied: set[tuple[int, int]] = set()
+            for label in visible_labels:
+                cells = {
+                    (column, label.region.y)
+                    for column in range(label.region.x, label.region.right)
+                }
+                self.assertFalse(cells & occupied)
+                occupied.update(cells)
 
     async def test_country_and_city_names_render_without_weather_enrichment(self) -> None:
         app = _MapApp()

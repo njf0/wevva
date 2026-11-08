@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed — problem and boundaries recorded; implementation not started
+In progress — bounded pre-1.0 label policy complete; gazetteer and explicit
+hierarchy expansion deferred
 
 ## Depends on
 
@@ -285,6 +286,16 @@ to add NWS-specific zone fetching or name/geometry guessing in Wevva.
 - Establish useful label-count/spacing targets from compact and wide maps. Keep
   exact thresholds local to the pure policy and covered by boundary tests.
 
+The pre-1.0 portion of this slice completed on 8 November 2026 using the
+existing Natural Earth artifact. Focused settlements and their region metadata
+are now country-scoped, stably ranked, normalized-name de-duplicated, and split
+across separate category budgets with one shared collision set. Up to two
+high-priority settlements are reserved before admitting at most three passive
+region labels; unplaceable or overlong political labels are omitted. Explicit
+administrative-depth selection is deliberately deferred until a source with
+real levels and parent identity is evaluated in Slice B rather than being
+invented from Natural Earth's inconsistent `region_name` field.
+
 ### Slice B — audit and compact artifact prototype
 
 - Add a reproducible, development-only GeoNames builder or extend the existing
@@ -445,3 +456,18 @@ proof of exhaustive global coverage.
 - The stopping rule is explicit: this task ends with useful contextual labels
   and density policy for a supplied warning viewport. It does not own viewport
   interaction or general-purpose mapping.
+
+## Pre-1.0 outcome
+
+The release-boundary policy is complete without closing the broader task.
+France, UK, Brazil, US, border, wrapped-longitude, rural, duplicate-name,
+category-balance, and collision-omission fixtures cover one country-neutral
+path. Existing passive administrative labels remain marker-free, settlement
+callouts remain interactive and source-neutral, and resize performs no label
+file or network work.
+
+Verification passed the 29-test focused alert-map module and a separate 42-test
+geography, shared-callout, Alerts Centre layout, and application-integration
+run. Slices B–D remain legitimate post-1.0 investigations: no GeoNames artifact,
+new administrative-level model, scale-band hierarchy, or physical/marine label
+layer is claimed here.

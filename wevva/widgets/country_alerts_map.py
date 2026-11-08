@@ -58,6 +58,8 @@ _ALERT_VIEWPORT_PADDING = 0.05
 _ALERT_VIEWPORT_MINIMUM_SPAN = 0.2
 _MAX_CITY_CANDIDATES = 32
 _MAX_CITY_LABELS = 8
+_MAX_REGION_LABELS = 3
+_RESERVED_CITY_LABELS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,25 +211,12 @@ def _build_country_alerts_map_view(
 ) -> CountryAlertsMapGeometry:
     viewport = _alert_viewport(selected_polygons) or source.viewport
     focused = bool(selected_polygons)
-    candidates = detailed_world_populated_places() if focused else source.places
-    ranked_places: list[tuple[bool, PopulatedPlace, ProjectedPoint]] = []
-    for place in candidates:
-        projected = viewport.project(place.longitude, place.latitude)
-        if not _point_in_viewport(projected, viewport):
-            continue
-        inside = any(
-            point_in_polygon(place.longitude, place.latitude, polygon)
-            for polygon in selected_polygons
-        )
-        ranked_places.append((inside, place, projected))
-    ranked_places.sort(
-        key=lambda candidate: (
-            not candidate[0],
-            candidate[1].scale_rank,
-            candidate[1].label_rank,
-            -candidate[1].population,
-            candidate[1].name.casefold(),
-        )
+    ranked_places = _rank_visible_places(
+        source.places,
+        country_code=source.country_code,
+        viewport=viewport,
+        selected_polygons=selected_polygons,
+        focused=focused,
     )
     alert_key = (
         country_alert_identity(selected_alert)
@@ -250,6 +239,42 @@ def _build_country_alerts_map_view(
             _region_annotations(ranked_places) if focused else ()
         ),
     )
+
+
+def _rank_visible_places(
+    candidates: Sequence[PopulatedPlace],
+    *,
+    country_code: str,
+    viewport: GeographicViewport,
+    selected_polygons: MultiPolygon,
+    focused: bool,
+) -> list[tuple[bool, PopulatedPlace, ProjectedPoint]]:
+    """Apply country relevance and stable focused-settlement ranking."""
+
+    ranked_places: list[tuple[bool, PopulatedPlace, ProjectedPoint]] = []
+    for place in candidates:
+        if focused and place.country_code != country_code:
+            continue
+        projected = viewport.project(place.longitude, place.latitude)
+        if not _point_in_viewport(projected, viewport):
+            continue
+        inside = any(
+            point_in_polygon(place.longitude, place.latitude, polygon)
+            for polygon in selected_polygons
+        )
+        ranked_places.append((inside, place, projected))
+    ranked_places.sort(
+        key=lambda candidate: (
+            not candidate[0],
+            candidate[1].scale_rank,
+            candidate[1].label_rank,
+            -candidate[1].population,
+            candidate[1].name.casefold(),
+        )
+    )
+    if focused:
+        ranked_places = _deduplicate_ranked_places(ranked_places)
+    return ranked_places
 
 
 def build_country_alert_polygon_layers(
@@ -860,44 +885,74 @@ class CountryAlertsMap(Container):
 
         canvas = frame.canvas
         occupied: set[tuple[int, int]] = set()
-        for annotation in self._scope.region_annotations:
-            label = self._region_labels.get(annotation.key)
-            if label is None:
-                continue
-            column, row = _plain_label_placement(
-                anchor=canvas.cell_position(annotation.point),
-                label_width=cell_len(annotation.text),
-                canvas_width=width,
-                canvas_height=height,
-                occupied=occupied,
-            )
-            label.styles.offset = (column, row)
-            label.display = True
         city_limit = country_alert_city_label_budget(
             width,
             height,
             maximum=self._max_city_labels,
         )
-        candidates = []
+        city_candidates = []
         for place, point in self._scope.places:
             key = _place_key(place)
             label = self._labels.get(key)
             if label is None:
                 continue
-            candidates.append(
+            city_candidates.append(
                 DirectionalCalloutCandidate(
                     key=key,
                     anchor=canvas.cell_position(point),
                     width=cell_len(label.label_text),
                 )
             )
-        planned = plan_directional_callouts(
-            candidates,
+
+        reserved = plan_directional_callouts(
+            city_candidates,
+            canvas_width=width,
+            canvas_height=height,
+            policy=DirectionalCalloutPolicy(allow_row_shift=False),
+        )[: min(city_limit, _RESERVED_CITY_LABELS)]
+        reserved_keys = {placement.key for placement in reserved}
+        occupied.update(
+            (placement.column + offset, placement.row)
+            for placement in reserved
+            for offset in range(placement.width)
+        )
+
+        for label in self._region_labels.values():
+            label.display = False
+        region_limit = country_alert_region_label_budget(width, height)
+        regions_placed = 0
+        for annotation in self._scope.region_annotations:
+            if regions_placed >= region_limit:
+                break
+            label = self._region_labels.get(annotation.key)
+            if label is None:
+                continue
+            placement = _plain_label_placement(
+                anchor=canvas.cell_position(annotation.point),
+                label_width=cell_len(annotation.text),
+                canvas_width=width,
+                canvas_height=height,
+                occupied=occupied,
+            )
+            if placement is None:
+                continue
+            column, row = placement
+            label.styles.offset = (column, row)
+            label.display = True
+            regions_placed += 1
+
+        additional = plan_directional_callouts(
+            [
+                candidate
+                for candidate in city_candidates
+                if candidate.key not in reserved_keys
+            ],
             canvas_width=width,
             canvas_height=height,
             occupied=occupied,
             policy=DirectionalCalloutPolicy(allow_row_shift=False),
-        )[:city_limit]
+        )[: max(0, city_limit - len(reserved))]
+        planned = (*reserved, *additional)
         placements = {placement.key: placement for placement in planned}
         for label in self._labels.values():
             label.display = False
@@ -920,6 +975,19 @@ def country_alert_city_label_budget(
     if width < 1 or height < 1 or maximum < 1:
         return 0
     return min(maximum, max(1, min(width // 12, height // 3)))
+
+
+def country_alert_region_label_budget(
+    width: int,
+    height: int,
+    *,
+    maximum: int = _MAX_REGION_LABELS,
+) -> int:
+    """Reserve a small administrative category without flooding the map."""
+
+    if width < 1 or height < 1 or maximum < 1:
+        return 0
+    return min(maximum, max(1, min(width // 24, height // 6)))
 
 
 def _alert_viewport(polygons: MultiPolygon) -> GeographicViewport | None:
@@ -951,29 +1019,64 @@ def _point_in_viewport(
 def _region_annotations(
     places: Sequence[tuple[bool, PopulatedPlace, ProjectedPoint]],
 ) -> tuple[CountryAlertRegionAnnotation, ...]:
-    grouped: dict[RegionKey, list[ProjectedPoint]] = {}
+    settlement_names = {
+        _normalized_label_name(place.name)
+        for _inside, place, _point in places
+    }
+    grouped: dict[
+        RegionKey,
+        list[tuple[bool, PopulatedPlace, ProjectedPoint]],
+    ] = {}
     display_names: dict[RegionKey, str] = {}
-    for _inside, place, point in places:
+    for inside, place, point in places:
         name = ' '.join(place.region_name.split())
-        if not name:
+        normalized_name = _normalized_label_name(name)
+        if not normalized_name or normalized_name in settlement_names:
             continue
-        key = (place.country_code, name.casefold())
-        grouped.setdefault(key, []).append(point)
+        key = (place.country_code, normalized_name)
+        grouped.setdefault(key, []).append((inside, place, point))
         display_names.setdefault(key, name)
     return tuple(
         CountryAlertRegionAnnotation(
             key=key,
             text=display_names[key],
             point=ProjectedPoint(
-                sum(point.x for point in points) / len(points),
-                sum(point.y for point in points) / len(points),
+                sum(item[2].x for item in members) / len(members),
+                sum(item[2].y for item in members) / len(members),
             ),
         )
-        for key, points in sorted(
+        for key, members in sorted(
             grouped.items(),
-            key=lambda item: (item[0][0], item[0][1]),
+            key=lambda item: (
+                not any(member[0] for member in item[1]),
+                min(member[1].scale_rank for member in item[1]),
+                min(member[1].label_rank for member in item[1]),
+                -max(member[1].population for member in item[1]),
+                item[0][0],
+                item[0][1],
+            ),
         )
     )
+
+
+def _deduplicate_ranked_places(
+    places: Sequence[tuple[bool, PopulatedPlace, ProjectedPoint]],
+) -> list[tuple[bool, PopulatedPlace, ProjectedPoint]]:
+    """Keep the highest-ranked occurrence of each focused settlement name."""
+
+    seen_names: set[str] = set()
+    unique = []
+    for candidate in places:
+        normalized_name = _normalized_label_name(candidate[1].name)
+        if normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        unique.append(candidate)
+    return unique
+
+
+def _normalized_label_name(value: str) -> str:
+    return ' '.join(value.split()).casefold()
 
 
 def _plain_label_placement(
@@ -983,8 +1086,10 @@ def _plain_label_placement(
     canvas_width: int,
     canvas_height: int,
     occupied: set[tuple[int, int]],
-) -> tuple[int, int]:
-    label_width = min(max(1, label_width), canvas_width)
+) -> tuple[int, int] | None:
+    if canvas_width < 1 or canvas_height < 1 or label_width > canvas_width:
+        return None
+    label_width = max(1, label_width)
     anchor_column, anchor_row = anchor
     preferred_column = min(
         max(0, anchor_column - label_width // 2),
@@ -1005,9 +1110,7 @@ def _plain_label_placement(
             continue
         occupied.update(cells)
         return preferred_column, row
-    # Preserve every contextual region label even in a pathologically dense
-    # viewport; overlap is preferable to silently losing administrative context.
-    return preferred_column, min(max(0, anchor_row), canvas_height - 1)
+    return None
 
 
 def _compact_longitude_origin(longitudes: Iterable[float]) -> float:
@@ -1049,5 +1152,6 @@ __all__ = [
     'build_country_alerts_map_geometry',
     'build_country_alerts_map_view',
     'country_alert_city_label_budget',
+    'country_alert_region_label_budget',
     'render_country_alerts_map',
 ]

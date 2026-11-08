@@ -594,11 +594,22 @@ restores the country overview and empty detail prompt.
 The Alerts Centre draws candidates from the complete, denser Natural Earth
 1:10m Populated Places layer, ranks points inside selected alert geometry first,
 and lets map size plus collision placement determine how many labels are shown.
-Its focused view also groups the place layer's worldwide Admin-1 metadata into
-plain italic state/province/region context labels. Every represented region is
-retained, including nearby and multi-alert-spanning regions; provider warning
-area prose is not used as map geography and the US receives no separate county
-label path.
+Focused settlement and region candidates are a hard match for the selected
+country, including border and wrapped-longitude views. Repeated normalized
+settlement names are collapsed after stable ranking. Region annotations are
+derived from the complete country-scoped visible candidate set rather than the
+32 surviving settlement callouts, prioritize regions represented inside the
+warning, and are suppressed when their normalized name duplicates a settlement.
+Natural Earth's `region_name` remains useful existing-data context, not a claim
+of globally equivalent administrative hierarchy.
+
+The focused map reserves space for up to two high-priority settlement callouts,
+then admits at most three passive italic region labels under a separate
+size-derived budget before filling the remaining settlement quota. Both
+categories share one occupied-cell set. A region label which is too long or
+cannot be placed collision-free is omitted; it is never truncated, overlapped,
+or concatenated merely to retain every candidate. Provider warning area prose
+is not used as map geography and the US receives no separate county-label path.
 Settlement callouts contain names only and use ordinary theme text. They are
 native focusable controls. Hovering lazily requests compact current conditions
 and updates a non-interactive Rich tooltip with condition, temperature, rain,
