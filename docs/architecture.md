@@ -522,10 +522,11 @@ accent-severity alert frames rather than the theme's distinct surface accent.
 Weather-warning presence is a bordered focusable summary card at compact
 heights. Once three additional rows are available after the standard current
 instruments, it upgrades to the classic alert tabs and a two-line preview.
-On wide layouts that still have unused vertical budget, the tabbed card may use
-up to three more rows to wrap the provider headline; fully-budgeted and compact
-layouts retain the abbreviated presentation. Activating the selected preview
-opens that warning. Mouse activation, Enter,
+On wide layouts that still have unused vertical budget, the tabbed card measures
+the longest current provider headline and uses only the extra rows it needs, up
+to three; fully-budgeted and compact layouts retain the abbreviated
+presentation. Activating the selected preview opens that warning. Mouse
+activation, Enter,
 or Space opens a modal where those tabs directly select the complete provider
 document in one independently scrolling, unframed detail body. Full alert
 documents share one Textual Markdown presentation containing the centred,

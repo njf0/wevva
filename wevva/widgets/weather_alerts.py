@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from rich.console import Group
+from rich.console import Console, Group
 from rich.markup import escape
 from rich.style import Style
 from rich.table import Table
@@ -36,6 +36,10 @@ SEVERITY_THEME_KEYS: dict[str, str] = {
 }
 
 ORANGE_SEVERITIES = {'severe', 'orange', 'amber'}
+
+_ALERT_PANEL_MAX_WIDTH = 98
+_ALERT_BODY_HORIZONTAL_CHROME = 4  # borders plus one-cell padding on each side
+_MEASUREMENT_CONSOLE = Console(color_system=None, force_terminal=False)
 
 _ALERT_LIST_ITEM = re.compile(
     r'^(?P<indent>[ \t]*)(?P<marker>[-+*]|\d+[.)]|●)\s+(?P<body>.*?)\s*$',
@@ -150,6 +154,33 @@ def alert_collection_title(alert_count: int) -> str:
     """Describe a collection of applicable severe-weather alerts."""
 
     return f'{alert_count} Severe Weather Alert{"s" if alert_count != 1 else ""}'
+
+
+def weather_alert_preview_extra_rows(
+    alerts: list[Alert],
+    panel_width: int,
+    *,
+    maximum: int = 3,
+) -> int:
+    """Return only the additional rows needed by the longest alert headline."""
+
+    if not alerts or panel_width <= 0 or maximum <= 0:
+        return 0
+    content_width = max(
+        1,
+        min(panel_width, _ALERT_PANEL_MAX_WIDTH) - _ALERT_BODY_HORIZONTAL_CHROME,
+    )
+    headline_rows = max(
+        len(
+            Text((alert.headline or alert_condition_name(alert)).strip()).wrap(
+                _MEASUREMENT_CONSOLE,
+                content_width,
+                overflow='fold',
+            )
+        )
+        for alert in alerts
+    )
+    return min(maximum, max(0, headline_rows - 1))
 
 
 def _alert_location_context(

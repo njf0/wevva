@@ -55,6 +55,7 @@ from wevva.widgets.weather_alerts import (
     WeatherAlertSummary,
     WeatherAlertsModal,
     WeatherAlertsPanel,
+    weather_alert_preview_extra_rows,
 )
 from wevva.widgets.weather_summary import WeatherSummary
 
@@ -464,7 +465,11 @@ class WeatherScreen(Screen[None]):
             return
         self._layout_budget = budget
         expanded_warning_rows = (
-            min(3, budget.remaining_rows)
+            weather_alert_preview_extra_rows(
+                self._alerts,
+                budget.usable_width,
+                maximum=min(3, budget.remaining_rows),
+            )
             if (
                 budget.warning_density is WarningDensity.TABBED
                 and budget.usable_width

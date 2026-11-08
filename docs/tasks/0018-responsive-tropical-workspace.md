@@ -2,7 +2,8 @@
 
 ## Status
 
-In progress — Slices A–C implemented; Slice D remains
+Delivered for 1.0 — Slices A–C complete; optional Slice D all-storm overview
+deferred
 
 ## Context
 
@@ -425,7 +426,16 @@ no suitable live system is available.
   `wevva-warnings` and must be recorded as a sibling task rather than inferred
   in this renderer.
 - Slice C renders only discrete provider-supplied forecast positions and uses
-  structured product `lead_hours` where supplied. NHC/CPHC cadence and HKO/JMA
-  valid times are not converted into leads; sources without explicit lead
-  hours remain unlabeled pending the sibling provider work recorded in task
-  0022.
+  structured product `lead_hours` where supplied. Completed Task 0022 now
+  supplies explicit NHC/CPHC leads; HKO/JMA valid times are not converted into
+  inferred leads, and sources without explicit lead hours remain unlabeled.
+
+## 1.0 outcome
+
+Slices A–C are the delivered responsive tropical workspace: the compact and
+split layouts, priority-based summary and information density, source-stable
+navigation, discrete provider fixes, contextual geography, and native city/fix
+callouts are implemented and covered by deterministic layout, screen, and map
+tests. Slice D remains a useful optional all-storm overview, but the Dashboard
+world map and the dedicated per-storm workspace provide the complete 1.0
+navigation path without it.

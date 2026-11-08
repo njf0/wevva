@@ -2,8 +2,8 @@
 
 ## Status
 
-Implemented in the sibling `wevva-warnings` checkout; live integration verified
-on 10 October 2026. Release remains a separate step.
+Complete — released in `wevva-warnings` 0.6.0 and consumed by Wevva's locked
+release dependency
 
 ## Context
 
@@ -63,3 +63,7 @@ watch/warning asset URLs. Its official track resolved to three discrete future
 fixes; Wevva retains the complete track and displays its daily fix as `24h`.
 The structured coordinate-only product is consumed by the map without adding
 a duplicate Forecast information tab.
+
+On 8 November 2026, the published `wevva-warnings==0.6.0` wheel was resolved by
+Wevva's ordinary locked environment without a sibling checkout or editable
+override. The dependency handoff and release gate are therefore complete.

@@ -916,9 +916,9 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.weather_alert_panel.body.styles.text_wrap,
                 'wrap',
             )
-            self.assertEqual(screen.warnings_row.region.height, 10)
-            self.assertEqual(screen.weather_alert_panel.region.height, 9)
-            self.assertEqual(screen.weather_alert_panel.body.region.height, 5)
+            self.assertEqual(screen.warnings_row.region.height, 8)
+            self.assertEqual(screen.weather_alert_panel.region.height, 7)
+            self.assertEqual(screen.weather_alert_panel.body.region.height, 3)
             self.assertGreaterEqual(
                 screen.weather_alert_panel.body.content_size.height,
                 3,
@@ -934,6 +934,22 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.weather_alert_panel.body.styles.text_wrap,
                 'nowrap',
             )
+            self.assertEqual(screen.warnings_row.region.height, 7)
+            self.assertEqual(screen.weather_alert_panel.region.height, 6)
+            self.assertEqual(screen.weather_alert_panel.body.region.height, 2)
+
+    async def test_roomy_short_warning_does_not_spend_unused_headline_rows(
+        self,
+    ) -> None:
+        app = _ResponsiveWeatherApp()
+        async with app.run_test(size=(160, 60)) as pilot:
+            screen = await _load_weather(app, pilot, warnings=True)
+            budget = screen._layout_budget
+            assert budget is not None
+
+            self.assertEqual(budget.warning_density, WarningDensity.TABBED)
+            self.assertGreaterEqual(budget.remaining_rows, 3)
+            self.assertFalse(screen.weather_alert_panel.has_class('-wrap-headline'))
             self.assertEqual(screen.warnings_row.region.height, 7)
             self.assertEqual(screen.weather_alert_panel.region.height, 6)
             self.assertEqual(screen.weather_alert_panel.body.region.height, 2)

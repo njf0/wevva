@@ -6,6 +6,11 @@
   <img src="docs/assets/wevva-main.png" alt="wevva weather TUI screenshot" width="900">
 </p>
 
+The Dashboard is the navigation hub for forecasts, saved locations, active
+tropical systems, and weather alerts. See the [Wevva 1.0 release
+notes](docs/releases/1.0.0.md) for the lifecycle milestone and its deliberate
+post-1.0 deferrals.
+
 ## Highlights
 
 - Place-name search using Open-Meteo geocoding, plus latitude/longitude search
@@ -20,14 +25,10 @@
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - The primary forecast has a compact, non-scrolling 80x24 mode. When height
->   permits, its existing location, astronomy, air-quality, and country-map
->   widgets return as a density-aware context matrix. Once the forecast reaches
->   its full width, wider layouts can move location and astronomy above a
->   larger, lower-density country map in a right-hand column to save rows.
->   Full-height windows restore the complete bottom matrix, including air
->   quality, while still admitting saved-location and warning-detail rails. The
->   tropical workspace has not yet received the same redesign.
+> - The Weather and Tropical Systems workspaces both have compact,
+>   non-scrolling 80x24 modes. Larger terminals progressively restore complete
+>   context regions, maps, centre weather, and richer information panes without
+>   rebuilding the selected screen or losing its navigation state.
 
 ## Quick Start
 
@@ -98,10 +99,6 @@ first.
 > - Colour support also varies. Try `export COLORTERM=truecolor` if colours display strangely.
 
 ## Weather Alerts
-
-<p align="center">
-  <img src="docs/assets/warning.PNG" alt="wevva weather alert panel screenshot" width="900">
-</p>
 
 - Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
