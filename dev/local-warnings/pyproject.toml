@@ -1,0 +1,13 @@
+[project]
+name = "wevva-local-warnings-dev"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = ["wevva", "wevva-warnings"]
+
+[tool.uv]
+package = false
+override-dependencies = ["wevva-warnings"]
+
+[tool.uv.sources]
+wevva = { path = "../..", editable = true }
+wevva-warnings = { path = "../../../wevva-warnings", editable = true }

@@ -58,6 +58,7 @@ from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 from wevva.widgets.tropical_products import (
     tropical_forecast_summary,
     tropical_product_tab_specs,
+    tropical_product_tab_target,
     tropical_product_widgets,
 )
 from wevva.widgets.tropical_systems import canonical_storm_key
@@ -877,7 +878,6 @@ class DashboardTropicalPanel(Container):
         super().__init__(*args, **kwargs)
         self._observation: TropicalSystem | None = None
         self._products: tuple[TropicalProduct, ...] = ()
-        self._product_indices: dict[str, int] = {}
         self._updating_tabs = False
         self._overview_state: tuple[str, bool] | None = None
 
@@ -948,7 +948,6 @@ class DashboardTropicalPanel(Container):
         )
         self._observation = observation
         self._products = ()
-        self._product_indices.clear()
         self.query_one('#dashboard-tropical-detail-state', Static).display = False
         self.tabs.display = True
         self.tabs.active = 'dashboard-tropical-track-tab'
@@ -996,12 +995,8 @@ class DashboardTropicalPanel(Container):
             await self.tabs.add_tab(
                 Tab('Track and Cone', id='dashboard-tropical-track-tab')
             )
-            self._product_indices.clear()
             for tab_id, label in specs:
                 await self.tabs.add_tab(Tab(label, id=tab_id))
-                suffix = tab_id.rsplit('-', 1)[-1]
-                if suffix.isdigit():
-                    self._product_indices[tab_id] = int(suffix)
             self.tabs.active = 'dashboard-tropical-track-tab'
         finally:
             self._updating_tabs = False
@@ -1052,11 +1047,20 @@ class DashboardTropicalPanel(Container):
         if tab_id == 'dashboard-tropical-product-forecast':
             await body.mount(Static(tropical_forecast_summary(observation)))
             return
-        index = self._product_indices.get(tab_id)
-        if index is None or not 0 <= index < len(self._products):
+        target = tropical_product_tab_target(
+            tab_id,
+            id_prefix='dashboard-tropical-product',
+        )
+        if target is None:
             await body.mount(Static('Product unavailable'))
             return
-        await body.mount(*tropical_product_widgets(self._products[index]))
+        index, view = target
+        if not 0 <= index < len(self._products):
+            await body.mount(Static('Product unavailable'))
+            return
+        await body.mount(
+            *tropical_product_widgets(self._products[index], view=view)
+        )
 
     def _show_state(self, message: str) -> None:
         self._observation = None

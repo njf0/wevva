@@ -10,20 +10,48 @@ uv sync --locked
 ```
 
 Warning progress, the dedicated canonical tropical workspace, and country-level
-warning caching use `wevva-warnings`. This development checkout currently resolves the declared
-`wevva-warnings==0.5.3` dependency from the editable sibling path
-`../wevva-warnings` through `[tool.uv.sources]`; `uv.lock` records the same path.
-This allows both projects to be developed and tested together. Remove the
-source override and regenerate the lockfile when switching back to a published
-release.
+warning caching use `wevva-warnings`. The normal project environment resolves
+the exact published version recorded in `pyproject.toml` and `uv.lock`. This is
+the default even when a sibling `../wevva-warnings` checkout exists, so an
+ordinary sync, run, test, or build exercises the reproducible release
+dependency rather than unpublished local code.
 
-The sibling checkout is therefore part of the current development state. When
-moving this work between machines, commit or otherwise transfer both
-repositories: first `wevva-warnings`, then `wevva`, recording the warning
-library commit in the application handoff. Place the clones alongside one
-another so the editable path remains `../wevva-warnings`. A commit containing
-only this repository is not sufficient to reproduce the tropical APIs until a
-compatible warning-library release exists.
+For coordinated development across both repositories, use the opt-in helper:
+
+```bash
+# Launch Wevva with both repositories installed in editable mode.
+./scripts/with-local-warnings
+
+# Run any command in the same joint-development environment.
+./scripts/with-local-warnings python -m unittest \
+    tests.test_warning_cache tests.test_warning_textual_smoke
+```
+
+The helper runs the separately locked uv project in `dev/local-warnings`.
+That development project installs both Wevva and the adjacent warning-library
+checkout as editable sources in its own `dev/local-warnings/.venv`; changes in
+either source tree are therefore visible on the next import. Its narrow
+`wevva-warnings` dependency override intentionally permits joint development
+when the sibling has already moved to its next version but Wevva's release
+metadata still pins the last published version.
+
+The development project has its own `uv.lock` and environment. It does not
+change the root `pyproject.toml`, root `uv.lock`, or published-package
+installation in the root `.venv`. The helper prints the selected checkout
+before running so local mode is not silent. It expects the repositories to be
+adjacent and exits with an explanation if the sibling checkout is missing.
+
+When dependency metadata changes in either checkout, refresh only the
+development lock:
+
+```bash
+uv lock --project dev/local-warnings
+```
+
+Keep the two modes deliberate: use the helper while changing both projects,
+then repeat relevant checks with ordinary `uv run` before release. Do not add a
+local `[tool.uv.sources]` entry merely to enable joint development, because it
+would make the standard lock and environment depend on the sibling checkout.
 
 The following local commands have been checked in this repository:
 

@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eu
+
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+warnings_dir="$project_dir/../wevva-warnings"
+dev_project="$project_dir/dev/local-warnings"
+
+if [ ! -f "$warnings_dir/pyproject.toml" ]; then
+    printf '%s\n' \
+        "wevva: no wevva-warnings checkout found at $warnings_dir" \
+        "Place the repositories beside one another and try again." >&2
+    exit 2
+fi
+
+printf 'wevva: using editable wevva-warnings from %s\n' "$warnings_dir" >&2
+
+if [ "$#" -eq 0 ]; then
+    set -- wevva
+fi
+
+cd "$project_dir"
+exec uv run --project "$dev_project" --locked "$@"

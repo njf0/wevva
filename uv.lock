@@ -312,22 +312,19 @@ requires-dist = [
     { name = "textual", specifier = ">=3.1.0" },
     { name = "typer", specifier = ">=0.21.1" },
     { name = "wcwidth", specifier = ">=0.2.13" },
-    { name = "wevva-warnings", editable = "../wevva-warnings" },
+    { name = "wevva-warnings", specifier = "==0.6.0" },
 ]
 
 [[package]]
 name = "wevva-warnings"
-version = "0.5.3"
-source = { editable = "../wevva-warnings" }
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyshp" },
     { name = "rich" },
     { name = "typer" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyshp", specifier = ">=3.0.3" },
-    { name = "rich", specifier = ">=14.3.3" },
-    { name = "typer", specifier = ">=0.24.1" },
+sdist = { url = "https://files.pythonhosted.org/packages/7e/12/58fdc56aaf4858efa4fe68727aaaf5bba4d67bcb09a56766cc6f0f0c6fc8/wevva_warnings-0.6.0.tar.gz", hash = "sha256:81c6568212359a010accea383d30ad4cb2f69a00e5fb224ebd738a3c225c62e6", size = 14499655, upload-time = "2026-11-07T23:22:18.867Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/14/0a1b828962bbf40d891ffb09e9112ec077c4f4829a8740294de5dd221242/wevva_warnings-0.6.0-py3-none-any.whl", hash = "sha256:91ef54dc6fa0c48821a61f3c5c6ede0e3c720b6f1ebc9c151f262f0da91ceeaf", size = 15617949, upload-time = "2026-11-07T23:22:01.337Z" },
 ]

@@ -39,6 +39,7 @@ from wevva.widgets.tropical_products import (
     structured_tropical_product as _structured_product,
     tropical_forecast_summary,
     tropical_product_tab_specs,
+    tropical_product_tab_target,
     tropical_product_widgets as _product_widgets,
 )
 from wevva.widgets.tropical_track import LargeTropicalStormTrackScope
@@ -841,13 +842,17 @@ class TropicalSystemsScreen(Screen[None]):
                 )
             )
             return
-        try:
-            index = int(active.rsplit('-', 1)[-1])
-            product = self._products[key][index]
-        except (KeyError, IndexError, ValueError):
+        target = tropical_product_tab_target(active)
+        if target is None:
             await body.mount(Static('Product unavailable'))
             return
-        await body.mount(*_product_widgets(product))
+        index, view = target
+        try:
+            product = self._products[key][index]
+        except (KeyError, IndexError):
+            await body.mount(Static('Product unavailable'))
+            return
+        await body.mount(*_product_widgets(product, view=view))
 
     def _summary(
         self,

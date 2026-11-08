@@ -27,7 +27,11 @@ from wevva.screens.weather_screen import WeatherScreen
 from wevva.tropical_layout import TropicalTopology
 from wevva.widgets.tropical_centre_weather import TropicalCentreWeather
 from wevva.widgets.tropical_info_table import TropicalInfoTable
-from wevva.widgets.tropical_products import TropicalProductMarkdown
+from wevva.widgets.tropical_products import (
+    TropicalProductMarkdown,
+    tropical_product_tab_specs,
+    tropical_product_tab_target,
+)
 from wevva.widgets.tropical_summary import TropicalStormSummary
 from wevva.widgets.tropical_systems import canonical_storm_key
 from wevva.widgets.tropical_track import (
@@ -316,7 +320,7 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             product_tabs = screen.query_one('#tropical-product-tabs', Tabs)
             first_scope = track._scope
             self.assertFalse(product_tabs.display)
-            self.assertEqual(product_tabs.active, 'tropical-product-0')
+            self.assertEqual(product_tabs.active, 'tropical-product-0-forecast')
             self.assertIn('970 hPa', _data_table_text(summary))
             self.assertNotIn('990 hPa', _data_table_text(summary))
             assert first_scope is not None
@@ -766,6 +770,40 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(widgets), 1)
         self.assertEqual(_rendered(widgets[0]), 'THE OFFICIAL MESSAGE STARTS HERE\n')
 
+    def test_prose_and_structured_forecast_use_separate_tabs(self) -> None:
+        product = TropicalProduct(
+            kind='advisory',
+            label='Provider Advisory',
+            content='OFFICIAL PROVIDER MESSAGE',
+            content_format='plain',
+            data={
+                'points': [
+                    {
+                        'lead_hours': 12,
+                        'valid_at': '2026-08-11T18:00:00+08:00',
+                        'latitude': 20.5,
+                        'longitude': 119.5,
+                    }
+                ]
+            },
+        )
+
+        self.assertEqual(
+            tropical_product_tab_specs(self.jma, [product]),
+            [
+                ('tropical-product-0', 'Provider Advisory'),
+                ('tropical-product-0-forecast', 'Forecast'),
+            ],
+        )
+        prose = _product_widgets(product, view='product')
+        forecast = _product_widgets(product, view='forecast')
+        self.assertEqual(len(prose), 1)
+        self.assertIn('OFFICIAL PROVIDER MESSAGE', _rendered(prose[0]))
+        self.assertNotIn('12h', _rendered(prose[0]))
+        self.assertEqual(len(forecast), 1)
+        self.assertIn('12h', _rendered(forecast[0]))
+        self.assertNotIn('OFFICIAL PROVIDER MESSAGE', _rendered(forecast[0]))
+
     def test_actual_forecast_point_shape_renders_only_available_fields(self) -> None:
         rendered = _renderable_text(
             _structured_product(
@@ -773,6 +811,8 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                     'agency': 'BABJ',
                     'points': [
                         {
+                            'lead_hours': 12,
+                            'forecast_base_at': '2026-08-11T06:00:00+08:00',
                             'valid_at': '2026-08-11T18:00:00+08:00',
                             'latitude': 20.5,
                             'longitude': 119.5,
@@ -785,7 +825,13 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertIn('Valid', rendered)
+        self.assertIn('Lead', rendered)
+        self.assertIn('12h', rendered)
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('11 Aug 18:00 +08:00', rendered)
+        self.assertNotIn('2026-08-11T18:00:00+08:00', rendered)
+        self.assertIn('BABJ forecast', rendered)
+        self.assertIn('base 11 Aug 06:00 +08:00', rendered)
         self.assertIn('Typhoon', rendered)
         self.assertIn('20.5°N 119.5°E', rendered)
         self.assertIn('38 m/s', rendered)
@@ -796,10 +842,8 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Wind', centre_only)
         self.assertNotIn('Pressure', centre_only)
 
-    def test_enriched_provider_forecast_renders_analysis_fixes_and_extents(self) -> None:
-        rendered = _renderable_text(
-            _structured_product(
-                {
+    def test_enriched_provider_forecast_separates_fixes_and_extents(self) -> None:
+        data = {
                     'analysis': {
                         'valid_at': '2026-08-11T22:00:00+09:00',
                         'classification': '台風(TS) / 強い',
@@ -829,7 +873,15 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                                             {'value': '45', 'unit': '海里'},
                                             {'value': '85', 'unit': 'km'},
                                         ],
-                                    }
+                                    },
+                                    {
+                                        'direction': '西側',
+                                        'radius_type': '半径',
+                                        'radii': [
+                                            {'value': '30', 'unit': '海里'},
+                                            {'value': '55', 'unit': 'km'},
+                                        ],
+                                    },
                                 ],
                             }
                         ],
@@ -894,25 +946,313 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
                         },
                     ],
                 }
-            ),
+        rendered = _renderable_text(
+            _structured_product(data, view='forecast'),
             width=220,
         )
 
-        self.assertIn('Analysis', rendered)
-        self.assertIn('Forecast', rendered)
-        self.assertIn('Official extents', rendered)
-        self.assertIn('台風(TS) / 強い', rendered)
-        self.assertIn('日本の南', rendered)
-        self.assertIn('中心付近 · 23 m/s; gust 35 m/s', rendered)
+        self.assertIn('Lead', rendered)
+        self.assertIn('Type', rendered)
+        self.assertIn('Centre', rendered)
+        self.assertIn('Location', rendered)
+        self.assertIn('Movement', rendered)
+        self.assertIn('Wind', rendered)
+        self.assertIn('Pressure', rendered)
+        self.assertNotIn('Product details', rendered)
+        self.assertNotIn('Official extents', rendered)
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('12 Aug 22:00 +09:00', rendered)
+        self.assertNotIn('2026-08-12T22:00:00+09:00', rendered)
+        self.assertNotIn('台風(TS) / 強い', rendered)
+        self.assertNotIn('日本の南', rendered)
         self.assertIn('24h', rendered)
         self.assertNotIn('+24 h', rendered)
         self.assertIn('台風(TY) / 非常に強い · 大型', rendered)
         self.assertIn('北東 at 10 ノット / 20 km/h', rendered)
         self.assertIn('中心付近 · 80 ノット / 40 m/s; gust 115 ノット / 60 m/s', rendered)
         self.assertIn('予報　翌日夕方', rendered)
-        self.assertIn('暴風域', rendered)
-        self.assertIn('以上 · 50 ノット / 25 m/s', rendered)
-        self.assertIn('７０パーセント確率半径: 55 海里 / 100 km', rendered)
+        self.assertNotIn('13 Aug 18:00 +09:00', rendered)
+
+        analysis = _renderable_text(
+            _structured_product(data, view='analysis'),
+            width=120,
+        )
+        self.assertNotIn('Valid', analysis)
+        self.assertNotIn('11 Aug 22:00 +09:00', analysis)
+        self.assertIn('Type', analysis)
+        self.assertIn('台風(TS) / 強い', analysis)
+        self.assertIn('Location', analysis)
+        self.assertIn('日本の南', analysis)
+        self.assertIn('Wind', analysis)
+        self.assertIn('中心付近 · 23 m/s; gust 35 m/s', analysis)
+        self.assertNotIn('24h', analysis)
+
+        extents = _renderable_text(
+            _structured_product(data, view='extents'),
+            width=220,
+        )
+        self.assertIn('Lead', extents)
+        self.assertIn('Type', extents)
+        self.assertIn('Threshold', extents)
+        self.assertIn('Extent', extents)
+        self.assertIn('Current', extents)
+        self.assertNotIn('Valid', extents)
+        self.assertNotIn('11 Aug 22:00 +09:00', extents)
+        self.assertNotIn('12 Aug 22:00 +09:00', extents)
+        self.assertIn('暴風域', extents)
+        self.assertIn('以上 · 50 ノット / 25 m/s', extents)
+        self.assertIn('西側 · 半径: 30 海里 / 55 km', extents)
+        self.assertIn('予報円', extents)
+        self.assertIn('７０パーセント確率半径: 55 海里 / 100 km', extents)
+        self.assertNotIn('台風(TY)', extents)
+
+    def test_cma_quadrant_radii_render_as_current_extents(self) -> None:
+        rendered = _renderable_text(
+            _structured_product(
+                {
+                    'analysis': {
+                        'valid_at': '2026-11-07T06:00:00+08:00',
+                        'wind_radii': [
+                            {
+                                'threshold': {'value': 30, 'unit': 'KTS'},
+                                'radii': {
+                                    'unit': 'km',
+                                    'northeast': 200,
+                                    'southeast': 150,
+                                    'southwest': 150,
+                                    'northwest': 250,
+                                },
+                            }
+                        ],
+                    },
+                    'points': [],
+                },
+                view='extents',
+            )
+        )
+
+        self.assertIn('Current', rendered)
+        self.assertIn('Wind radius', rendered)
+        self.assertIn('30 KTS', rendered)
+        self.assertIn('NE 200 km · SE 150 km · SW 150 km · NW 250 km', rendered)
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('07 Nov 06:00 +08:00', rendered)
+        self.assertNotIn('2026-11-07T06:00:00+08:00', rendered)
+
+    def test_structured_product_tabs_split_analysis_forecast_and_extents(self) -> None:
+        product = TropicalProduct(
+            kind='forecast',
+            label='Forecast',
+            data={
+                'analysis': {
+                    'classification': 'Typhoon',
+                    'wind_radii': [
+                        {
+                            'threshold': {'value': 30, 'unit': 'KTS'},
+                            'radii': {'unit': 'km', 'northeast': 200},
+                        }
+                    ]
+                },
+                'points': [
+                    {
+                        'lead_hours': 24,
+                        'latitude': 20.0,
+                        'longitude': 140.0,
+                    }
+                ],
+            },
+        )
+        specs = tropical_product_tab_specs(self.jma, [product])
+
+        self.assertEqual(
+            specs,
+            [
+                ('tropical-product-0-analysis', 'Analysis'),
+                ('tropical-product-0-forecast', 'Forecast'),
+                ('tropical-product-0-extents', 'Extents'),
+            ],
+        )
+        self.assertEqual(
+            tropical_product_tab_target('tropical-product-0-analysis'),
+            (0, 'analysis'),
+        )
+        self.assertEqual(
+            tropical_product_tab_target('tropical-product-0-forecast'),
+            (0, 'forecast'),
+        )
+        self.assertEqual(
+            tropical_product_tab_target('tropical-product-0-extents'),
+            (0, 'extents'),
+        )
+        self.assertEqual(
+            tropical_product_tab_target(
+                'dashboard-tropical-product-0-extents',
+                id_prefix='dashboard-tropical-product',
+            ),
+            (0, 'extents'),
+        )
+        self.assertEqual(
+            tropical_product_tab_target(
+                'dashboard-tropical-product-0-analysis',
+                id_prefix='dashboard-tropical-product',
+            ),
+            (0, 'analysis'),
+        )
+
+        extents_only = TropicalProduct(
+            kind='forecast',
+            label='Forecast',
+            data={
+                'analysis': {
+                    'wind_radii': [
+                        {
+                            'threshold': {'value': 30, 'unit': 'KTS'},
+                            'radii': {'unit': 'km', 'northeast': 200},
+                        }
+                    ]
+                }
+            },
+        )
+        self.assertEqual(
+            tropical_product_tab_specs(self.jma, [extents_only]),
+            [('tropical-product-0-extents', 'Extents')],
+        )
+
+        analysis_only = TropicalProduct(
+            kind='analysis',
+            label='Analysis',
+            data={
+                'analysis': {
+                    'valid_at': '2026-11-07T06:00:00+08:00',
+                    'location': '日本の南',
+                }
+            },
+        )
+        self.assertEqual(
+            tropical_product_tab_specs(self.jma, [analysis_only]),
+            [('tropical-product-0-analysis', 'Analysis')],
+        )
+
+        valid_only = TropicalProduct(
+            kind='analysis',
+            label='Analysis',
+            data={'analysis': {'valid_at': '2026-11-07T06:00:00+08:00'}},
+        )
+        self.assertEqual(tropical_product_tab_specs(self.jma, [valid_only]), [])
+
+    def test_reunion_analysis_uses_common_facts_without_flattening_provider_data(
+        self,
+    ) -> None:
+        data = {
+            'latitude': -15.0,
+            'longitude': 60.0,
+            'time': '2026-12-14T12:00:00Z',
+            'data_type': 'analysis',
+            'position_accuracy': 30,
+            'cyclone_data': {
+                'development': 'severe_tropical_storm',
+                'minimum_pressure': 975,
+                'storm_motion': {'speed_kt': 12, 'direction_toward': 280},
+                'maximum_wind': {
+                    'wind_speed_kt': 60,
+                    'wind_speed_gust_kt': 75,
+                },
+                'wind_contours': [
+                    {'wind_speed_kt': 34, 'radius_nm': {'NE': 80}}
+                ],
+            },
+        }
+        product = TropicalProduct(kind='analysis', label='Analysis', data=data)
+
+        self.assertEqual(
+            tropical_product_tab_specs(self.jma, [product]),
+            [
+                ('tropical-product-0-analysis', 'Analysis'),
+                ('tropical-product-0-extents', 'Extents'),
+            ],
+        )
+        rendered = _renderable_text(
+            _structured_product(data, view='analysis'),
+            width=120,
+        )
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('14 Dec 12:00 +00:00', rendered)
+        self.assertIn('severe tropical storm', rendered)
+        self.assertIn('15.0°S 60.0°E', rendered)
+        self.assertIn('toward 280° at 12 kt', rendered)
+        self.assertIn('60 kt; gust 75 kt', rendered)
+        self.assertIn('975 hPa', rendered)
+        self.assertIn('Position accuracy', rendered)
+        self.assertNotIn('Data Type', rendered)
+        self.assertNotIn('Wind Contours', rendered)
+
+        extents = _renderable_text(
+            _structured_product(data, view='extents'),
+            width=120,
+        )
+        self.assertIn('Current', extents)
+        self.assertNotIn('Valid', extents)
+        self.assertNotIn('14 Dec 12:00 +00:00', extents)
+        self.assertIn('Wind contour', extents)
+        self.assertIn('34 kt', extents)
+        self.assertIn('NE 80 nm', extents)
+
+    def test_hko_forecast_keeps_explicit_lead_and_native_intensity(
+        self,
+    ) -> None:
+        data = {
+            'points': [
+                {
+                    'lead_hours': 12,
+                    'valid_at': '2026-12-15T00:00:00Z',
+                    'latitude': 16.0,
+                    'longitude': 118.0,
+                    'intensity': 'Severe Tropical Storm',
+                    'maximum_wind': '105 km/h',
+                }
+            ]
+        }
+        rendered = _renderable_text(
+            _structured_product(data, view='forecast'),
+            width=160,
+        )
+
+        self.assertIn('12h', rendered)
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('15 Dec 00:00 +00:00', rendered)
+        self.assertIn('Severe Tropical Storm', rendered)
+        self.assertIn('16.0°N 118.0°E', rendered)
+        self.assertIn('105 km/h', rendered)
+
+    def test_structured_forecast_wraps_within_compact_reader_width(self) -> None:
+        rendered = _renderable_text(
+            _structured_product(
+                {
+                    'points': [
+                        {
+                            'lead_hours': 24,
+                            'valid_at': '2026-08-12T22:00:00+09:00',
+                            'latitude': 36.5,
+                            'longitude': 141.0,
+                            'classification': '台風(TY) / 非常に強い · 大型',
+                            'location': '日本の東の非常に広い海域',
+                            'movement': '北東 at 10 ノット / 20 km/h',
+                            'maximum_wind': '80 ノット / 40 m/s',
+                            'maximum_gust': '115 ノット / 60 m/s',
+                            'minimum_pressure': '970 hPa',
+                        }
+                    ]
+                },
+                view='forecast',
+            ),
+            width=80,
+        )
+
+        self.assertLessEqual(max(map(len, rendered.splitlines())), 80)
+        self.assertIn('24h', rendered)
+        self.assertNotIn('Valid', rendered)
+        self.assertNotIn('12 Aug', rendered)
+        self.assertIn('970 hPa', rendered)
 
     async def test_product_failure_and_missing_track_leave_clear_status(self) -> None:
         no_track = _observation(

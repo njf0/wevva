@@ -53,6 +53,10 @@ uv run wevva
 # Equivalent module entry point
 uv run python -m wevva
 
+# Opt-in joint development with an editable sibling wevva-warnings checkout
+./scripts/with-local-warnings
+./scripts/with-local-warnings python -m unittest tests.test_warning_cache tests.test_warning_textual_smoke
+
 # Basic source syntax check
 uv run python -m compileall -q wevva
 

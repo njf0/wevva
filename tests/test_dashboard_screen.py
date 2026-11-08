@@ -1429,11 +1429,35 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     kind='forecast',
                     label='Forecast',
                     data={
+                        'analysis': {
+                            'valid_at': '2026-08-15T12:00:00+09:00',
+                            'classification': 'Typhoon',
+                            'location': '日本の南',
+                            'wind_areas': [
+                                {
+                                    'type': '暴風域',
+                                    'threshold': {
+                                        'value': 50,
+                                        'unit': 'ノット',
+                                    },
+                                    'axes': [
+                                        {
+                                            'radius_type': '半径',
+                                            'radii': [
+                                                {'value': 85, 'unit': 'km'}
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
                         'points': [
                             {
                                 'latitude': 30.0,
                                 'longitude': 137.0,
                                 'lead_hours': 24,
+                                'valid_at': '2026-08-16T12:00:00+09:00',
+                                'classification': 'Typhoon',
                             }
                         ]
                     },
@@ -1498,7 +1522,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             detail_tabs = dashboard.tropical_panel.tabs
             self.assertEqual(
                 [tab.label.plain for tab in detail_tabs.query('Tab')],
-                ['Track and Cone', 'Public Advisory', 'Forecast Discussion'],
+                [
+                    'Track and Cone',
+                    'Public Advisory',
+                    'Forecast Discussion',
+                    'Analysis',
+                    'Forecast',
+                    'Extents',
+                ],
             )
             self.assertTrue(dashboard.tropical_panel.track.available)
             self.assertEqual(
@@ -1530,6 +1561,28 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 product_body.query_one('MarkdownH1').render().plain,
                 '...TYPHOON NANGKA CONTINUES...',
             )
+
+            detail_tabs.active = 'dashboard-tropical-product-2-analysis'
+            await _settle(pilot)
+            analysis = _rendered(product_body.query_one(Static))
+            self.assertIn('Typhoon', analysis)
+            self.assertIn('日本の南', analysis)
+            self.assertNotIn('Valid', analysis)
+            self.assertNotIn('15 Aug 12:00 +09:00', analysis)
+
+            detail_tabs.active = 'dashboard-tropical-product-2-forecast'
+            await _settle(pilot)
+            forecast = _rendered(product_body.query_one(Static))
+            self.assertIn('24h', forecast)
+            self.assertNotIn('Valid', forecast)
+            self.assertNotIn('16 Aug 12:00 +09:00', forecast)
+
+            detail_tabs.active = 'dashboard-tropical-product-2-extents'
+            await _settle(pilot)
+            extents = _rendered(product_body.query_one(Static))
+            self.assertIn('暴風域', extents)
+            self.assertIn('50 ノット', extents)
+            self.assertIn('半径: 85 km', extents)
 
             label.action_activate()
             await _settle(pilot)

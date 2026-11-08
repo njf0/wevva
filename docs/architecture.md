@@ -701,12 +701,19 @@ workspace behind both columns retains the application hatch. NHC and CPHC
 observations with a useful discovery headline or summary receive a `Forecast`
 tab; other tabs come only from lazy `get_tropical_products()` results. Product
 content uses literal plain text, explicit Markdown, and restrained tables for
-the structured forecast point shapes supplied by `wevva-warnings`. The shared
-structured renderer keeps analysis separate from forecast fixes, preserves
-display-ready provider classifications, and presents explicit lead/valid time,
-location, movement, wind/gust, pressure, alternate official measurements, and
-published probability-circle or wind-area extents when those fields exist. It
-selects these optional sections from the product shape rather than the source
+the structured product shapes supplied by `wevva-warnings`. The shared
+structured renderer divides those shapes into content-backed `Analysis`,
+`Forecast`, and `Extents` tabs rather than stacking unrelated sections in one
+long reader. Analysis retains additive current classification, centre,
+location, movement, wind/gust, pressure, and accuracy facts. Forecast fixes use
+the explicit lead alongside the fields actually present in the provider data;
+validity timestamps are omitted to keep the table useful at compact widths.
+Official JMA probability/wind areas, CMA
+quadrant wind radii, and Météo-France La Réunion scalar wind contours remain in
+`Extents`, with their current or forecast horizon. Paired native units,
+conditions, and asymmetric axes remain source-faithful; missing optional fields
+do not create generic detail dumps.
+The renderer selects these optional views from product shape rather than source
 ID, so Dashboard and the full workspace expose the same provider detail. The
 workspace fills its full-height stage. Its frame has no internal padding; the
 stage supplies the only `1 2` outer inset.
