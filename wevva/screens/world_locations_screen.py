@@ -76,6 +76,8 @@ class WorldLocationsScreen(Screen[None]):
         return self.query_one('#world-locations-map', WorldLocationsMap)
 
     def on_mount(self) -> None:
+        self.title = 'Map View'
+        self.sub_title = 'View saved locations on the world map'
         self.call_after_refresh(self._focus_initial_location)
 
     def _focus_initial_location(self) -> None:

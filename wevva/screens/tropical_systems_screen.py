@@ -298,8 +298,8 @@ class TropicalSystemsScreen(Screen[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
-        self.title = 'Tropical Systems'
-        self.sub_title = 'Active systems and official issuing-centre products'
+        self.title = 'Tropical Systems Warnings Center'
+        self.sub_title = 'View active tropical systems and official warnings'
         if self.systems:
             # Populate the first view as part of mounting. Relying on a later
             # tab activation leaves a real app susceptible to showing only the

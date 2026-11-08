@@ -331,20 +331,25 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(hourly.scroll_indicator.render().plain, '')
             self.assertEqual(hourly.border_subtitle, '')
 
-    async def test_warning_check_uses_header_subtitle_then_restores_credit(self) -> None:
+    async def test_warning_check_uses_header_subtitle_then_restores_default(self) -> None:
         app = _ResponsiveWeatherApp(emoji_enabled=True)
         async with app.run_test(size=(80, 24)) as pilot:
             screen = await _load_weather(app, pilot, warnings=False)
             weather_icon = screen.header.icon
             self.assertTrue(weather_icon)
-            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+            self.assertEqual(screen.title, 'Weather Forecast')
+            self.assertEqual(
+                app.sub_title, 'View the forecast for your selected location'
+            )
 
             screen.set_warning_checking(True)
             self.assertEqual(app.sub_title, 'Checking warnings…')
             self.assertEqual(screen.header.icon, weather_icon)
 
             screen.set_warning_checking(False)
-            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+            self.assertEqual(
+                app.sub_title, 'View the forecast for your selected location'
+            )
             self.assertEqual(screen.header.icon, weather_icon)
 
     async def test_forecast_loading_covers_workspace_and_precedes_warning_status(self) -> None:
@@ -365,7 +370,9 @@ class ResponsiveWeatherScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.sub_title, 'Checking warnings…')
 
             screen.set_warning_checking(False)
-            self.assertEqual(app.sub_title, 'Powered by Open-Meteo')
+            self.assertEqual(
+                app.sub_title, 'View the forecast for your selected location'
+            )
 
     async def test_very_wide_hourly_columns_stop_at_readable_width(self) -> None:
         app = _ResponsiveWeatherApp()

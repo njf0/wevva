@@ -359,6 +359,10 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsInstance(app.screen, WorldLocationsScreen)
             world_screen = app.screen
+            self.assertEqual(world_screen.title, 'Map View')
+            self.assertEqual(
+                world_screen.sub_title, 'View saved locations on the world map'
+            )
             stage = world_screen.query_one('#world-locations-stage')
             self.assertEqual(stage.styles.padding.top, 1)
             self.assertEqual(stage.styles.padding.right, 2)

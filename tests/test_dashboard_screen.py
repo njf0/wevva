@@ -171,6 +171,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
             screen = app.screen
             self.assertIsInstance(screen, DashboardScreen)
+            self.assertEqual(screen.title, 'Dashboard')
+            self.assertEqual(
+                screen.sub_title, 'View weather for your saved locations'
+            )
             warning_panel = screen.query_one(DashboardWeatherAlertsPanel)
             self.assertTrue(warning_panel.display)
             self.assertEqual(len(warning_panel.tabs.query(Tab)), 2)

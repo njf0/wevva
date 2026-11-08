@@ -207,6 +207,11 @@ class TropicalSystemsScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await pilot.pause()
 
+            self.assertEqual(screen.title, 'Tropical Systems Warnings Center')
+            self.assertEqual(
+                screen.sub_title,
+                'View active tropical systems and official warnings',
+            )
             storm_tabs = list(screen.query('#tropical-storm-tabs Tab'))
             labels = [tab.label.plain for tab in storm_tabs]
             sources = screen.query_one('#tropical-source-tabs', Tabs)

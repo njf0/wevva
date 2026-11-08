@@ -646,8 +646,8 @@ class AlertsCentreScreen(Screen[None]):
 
     async def on_mount(self) -> None:
         self._ui_thread_id = threading.get_ident()
-        self.title = 'Alerts Centre'
-        self.sub_title = 'Country weather warnings'
+        self.title = 'Global Weather Alerts Center'
+        self.sub_title = 'View weather alerts for supported countries'
         self._apply_responsive_layout(self.size.width, self.size.height)
         country_code = self._initial_country()
         if country_code is None:

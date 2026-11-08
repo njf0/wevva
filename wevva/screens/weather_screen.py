@@ -354,6 +354,7 @@ class WeatherScreen(Screen[None]):
         return self.query_one(HourlyForecast)
 
     def on_mount(self) -> None:
+        self.title = 'Weather Forecast'
         # Hide empty content unless the initial request is already loading.
         self.main_panel.display = self._forecast_loading
         self.weather_workspace.loading = self._forecast_loading
@@ -392,7 +393,7 @@ class WeatherScreen(Screen[None]):
         elif self._warning_checking:
             subtitle = 'Checking warnings…'
         else:
-            subtitle = 'Powered by Open-Meteo'
+            subtitle = 'View the forecast for your selected location'
         self.sub_title = subtitle
         self.app.sub_title = subtitle
 

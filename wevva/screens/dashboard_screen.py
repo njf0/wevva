@@ -1480,7 +1480,7 @@ class DashboardScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self.title = 'Dashboard'
-        self.sub_title = 'Weather, locations, storms, and alerts'
+        self.sub_title = 'View weather for your saved locations'
         self.sync_from_app()
         self._apply_layout(self.size.width, self.size.height)
         self._time_refresh_timer = self.set_interval(

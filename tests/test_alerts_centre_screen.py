@@ -211,6 +211,10 @@ class AlertsCentreScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await pilot.pause()
 
+            self.assertEqual(screen.title, 'Global Weather Alerts Center')
+            self.assertEqual(
+                screen.sub_title, 'View weather alerts for supported countries'
+            )
             self.assertEqual(screen.selected_country_code, 'DE')
             self.assertEqual(screen.selected_alert_key, (german.source, german.id))
             self.assertTrue(screen.details.display)
