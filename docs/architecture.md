@@ -686,10 +686,16 @@ backdrop. Native direction-aware `◆ Now`/daily forecast-fix and
 and click, Enter, or Space sends the ordinary `PlaceSelected` message. A city
 callout first searches for collision-free cells outside the forecast cone,
 then falls back to ordinary collision placement when the map is too constrained.
-A minimum projected span expands short tracks to reveal nearby land and prominent
-cities without cropping longer tracks or breaking dateline wrapping. The map
-shows discrete provider-supplied fixes instead of joining them into a
-continuous path. A fix receives a lead label only when a loaded structured
+A minimum projected span expands short tracks to reveal nearby land and
+prominent cities without adding the same excess padding to longer tracks or
+breaking dateline wrapping. For each canvas size, the required padded track and
+cone bounds are expanded to the exact Braille aspect. A bounded set of legal
+translations places only that surplus extent toward the nearest prominent
+context; every candidate retains the complete required bounds. This final
+geographic viewport is selected before land, cone, fixes, places, and callouts
+are projected, and the tropical renderer does not apply a later pixel-centering
+offset. The map shows discrete provider-supplied fixes instead of joining them
+into a continuous path. A fix receives a lead label only when a loaded structured
 product supplies `lead_hours` at matching coordinates; vertex order and valid
 timestamps do not imply a lead. Resize only reflows the existing callout
 widgets and does not request products or weather. Product tabs appear only

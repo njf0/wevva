@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned — implementation deferred to a fresh chat
+Complete — implemented and deterministically qualified on 8 November 2026
 
 ## Context
 
@@ -189,7 +189,7 @@ context-aware north/south positioning.
 
 ## Proposed slices
 
-### Slice A — characterize the current framing
+### Slice A — characterize the current framing (complete)
 
 Add pure representative fixtures for:
 
@@ -204,7 +204,7 @@ Record required geometry bounds, output canvas aspect, current fitted viewport,
 and which nearby land/place anchors are visible. These tests should demonstrate
 the framing defect without depending on live providers or screenshot pixels.
 
-### Slice B — one aspect-correct viewport decision
+### Slice B — one aspect-correct viewport decision (complete)
 
 Implement one pure framing step which expands required storm bounds to the
 canvas aspect and selects a legal cross-axis translation using the smallest
@@ -212,14 +212,14 @@ deterministic useful-context rule supported by Slice A's evidence. Remove any
 storm-specific reliance on post-render centering once the final viewport owns
 that decision.
 
-### Slice C — shared native integration
+### Slice C — shared native integration (complete)
 
 Route both Dashboard and Tropical Systems through the same final viewport.
 Ensure backdrop projection, fix/cone placement, city eligibility, and callouts
 all consume it. Retain current immutable-frame caching with final viewport and
 canvas dimensions represented in the cache key.
 
-### Slice D — responsive qualification
+### Slice D — responsive qualification (complete)
 
 Exercise the representative fixtures in both surfaces at compact, ordinary,
 and very large pane dimensions. Tune only the small margin and bounded context
@@ -266,7 +266,7 @@ same live or captured source observation at several pane sizes. Record the
 terminal dimensions when assessing framing. Do not claim provider availability,
 font geometry, or visual quality from deterministic tests alone.
 
-## Decisions for the next chat
+## Implementation decisions
 
 - Preserve the full supplied track and cone; improve context by positioning
   expanded viewport extent, not by cropping meteorological data.
@@ -276,3 +276,28 @@ font geometry, or visual quality from deterministic tests alone.
   geographic data, and the existing shared renderer should be sufficient.
 - Treat the current Vance/Mexico and Josephine screenshots as visual evidence,
   while keeping regression fixtures synthetic and deterministic.
+
+## Outcome
+
+Completed on 8 November 2026. Short tracks now retain an approximately
+14.4-degree padded context floor while long tracks keep the tighter five-percent
+inset. Rendering derives one aspect-correct final viewport from the complete
+padded track and official cone. Only the axis enlarged for the Braille canvas
+may move, and five bounded candidate translations are scored using the nearest
+prominent checked-in places. Every candidate contains the complete required
+storm bounds, so useful context can move into surplus space without cropping or
+stretching meteorological geometry.
+
+Land, cone, fixes, visible-place eligibility, and native callouts consume that
+same final viewport. The tropical path no longer applies a post-render raster
+centering offset. Dashboard and Tropical Systems continue to share
+`LargeTropicalStormTrackScope`, and the immutable native-frame cache remains
+keyed by required viewport, canvas dimensions, palette, and context mode.
+
+The Hawaii, Bermuda, JMA/Tokyo, Réunion, and dateline regressions pass, alongside
+new pure checks for context-directed surplus placement, exact canvas aspect,
+required-bounds containment, and single-viewport rendering. Deterministic
+verification passed 37 tropical-track/sidebar tests, 31 geography/layout tests,
+35 Tropical Systems screen tests, and 22 Dashboard screen tests. Live-provider
+availability and subjective terminal inspection remain part of final release
+qualification rather than this task's deterministic claim.

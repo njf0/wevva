@@ -47,7 +47,10 @@ _MIN_CONTENT_HEIGHT = 7
 _MAX_CONTENT_HEIGHT = 16
 _BORDER_ROWS = 0
 _TRACK_VIEWPORT_PADDING = 0.05
-_TRACK_VIEWPORT_MINIMUM_SPAN = 12.0
+# Keep short tracks at roughly the former 14.4-degree context floor after the
+# five-percent inset is applied, without restoring excessive padding to long
+# tracks and cones.
+_TRACK_VIEWPORT_MINIMUM_SPAN = 13.1
 _MAX_PLACE_LABELS = 3
 _MAX_PLACE_CANDIDATES = 12
 _FIX_MARKER = '◆'
@@ -299,7 +302,109 @@ def _scope_frame(
         palette=palette,
         show_track=show_track,
         show_cone=show_cone,
+        contextual=bool(scope.places),
     )
+
+
+def _final_storm_viewport(
+    required: GeographicViewport,
+    storm: tuple[ProjectedPoint, ...],
+    places: tuple[PopulatedPlace, ...],
+    *,
+    width: int,
+    height: int,
+) -> GeographicViewport:
+    """Fit one canvas-shaped viewport and place surplus extent near context."""
+
+    pixel_aspect = max(1, width) * 2.0 / (max(1, height) * 4.0)
+    fitted = required.fitted(pixel_aspect)
+    if not places or (
+        math.isclose(fitted.width, required.width)
+        and math.isclose(fitted.height, required.height)
+    ):
+        return fitted
+
+    candidates = _viewport_translation_candidates(required, fitted)
+    return max(
+        candidates,
+        key=lambda candidate: _viewport_context_score(candidate, storm, places),
+    )
+
+
+def _viewport_translation_candidates(
+    required: GeographicViewport,
+    fitted: GeographicViewport,
+) -> tuple[GeographicViewport, ...]:
+    """Return bounded translations which all contain the required storm area."""
+
+    fractions = (0.5, 0.0, 1.0, 0.25, 0.75)
+    if fitted.width > required.width:
+        low = required.max_x - fitted.width
+        high = required.min_x
+        candidates = []
+        for fraction in fractions:
+            min_x = low + (high - low) * fraction
+            candidates.append(
+                GeographicViewport(
+                    required.origin_latitude,
+                    required.origin_longitude,
+                    min_x,
+                    fitted.min_y,
+                    min_x + fitted.width,
+                    fitted.max_y,
+                )
+            )
+        return tuple(candidates)
+    low = required.max_y - fitted.height
+    high = required.min_y
+    candidates = []
+    for fraction in fractions:
+        min_y = low + (high - low) * fraction
+        candidates.append(
+            GeographicViewport(
+                required.origin_latitude,
+                required.origin_longitude,
+                fitted.min_x,
+                min_y,
+                fitted.max_x,
+                min_y + fitted.height,
+            )
+        )
+    return tuple(candidates)
+
+
+def _viewport_context_score(
+    viewport: GeographicViewport,
+    storm: tuple[ProjectedPoint, ...],
+    places: tuple[PopulatedPlace, ...],
+) -> float:
+    """Score nearby prominent places without making labels drive the camera."""
+
+    utilities = []
+    centre = ProjectedPoint(
+        (viewport.min_x + viewport.max_x) / 2.0,
+        (viewport.min_y + viewport.max_y) / 2.0,
+    )
+    anchors = storm or (centre,)
+    for place in places:
+        point = viewport.project(place.longitude, place.latitude)
+        if not (
+            viewport.min_x <= point.x <= viewport.max_x
+            and viewport.min_y <= point.y <= viewport.max_y
+        ):
+            continue
+        distance = min(
+            math.hypot(point.x - anchor.x, point.y - anchor.y)
+            for anchor in anchors
+        )
+        prominence = (
+            1.0 / (1.0 + place.scale_rank)
+            + 1.0 / (1.0 + place.label_rank)
+            + math.log10(max(1, place.population)) / 10.0
+        )
+        utilities.append(prominence / (1.0 + distance) ** 2)
+    utilities.sort(reverse=True)
+    return sum(utilities[:_MAX_PLACE_LABELS])
 
 
 def _build_scope_frame(
@@ -312,12 +417,21 @@ def _build_scope_frame(
     palette: ScopePalette,
     show_track: bool,
     show_cone: bool,
+    contextual: bool,
 ) -> GeographicFrame:
     """Build a tropical backdrop from its immutable rendering inputs."""
-    canvas = GeographicCanvas(max(1, width), max(1, height), viewport)
+    places = world_populated_places() if contextual else ()
+    final_viewport = _final_storm_viewport(
+        viewport,
+        storm,
+        places,
+        width=width,
+        height=height,
+    )
+    canvas = GeographicCanvas(max(1, width), max(1, height), final_viewport)
     canvas.fill_polygons(_visible_world_polygons(canvas.viewport), layer='land')
     canvas.fill_polygons(cone, layer='cone')
-    # Keep supplied fixes in the fitted/centred extent without joining them
+    # Keep supplied fixes in the final geographic extent without joining them
     # into an inferred continuous path. Native and legacy renderers add the
     # discrete markers after the backdrop has been composed.
     for point in storm:
@@ -327,7 +441,7 @@ def _build_scope_frame(
         layers.append(('cone', palette.cone))
     return canvas.frame(
         layers,
-        centering_layers=('land', 'cone', 'track-positions'),
+        centering_layers=(),
     )
 
 
@@ -339,6 +453,7 @@ def _native_scope_frame(
     width: int,
     height: int,
     palette: ScopePalette,
+    contextual: bool,
 ) -> GeographicFrame:
     """Reuse an immutable native backdrop across reflows and fresh screens."""
     return _build_scope_frame(
@@ -350,6 +465,7 @@ def _native_scope_frame(
         palette=palette,
         show_track=True,
         show_cone=True,
+        contextual=contextual,
     )
 
 
@@ -617,9 +733,22 @@ class TropicalStormTrackScope(Container):
     def _city_specs(self) -> tuple[tuple[PopulatedPlace, ProjectedPoint], ...]:
         if self._scope is None:
             return ()
+        width = self.content_size.width
+        height = self.content_size.height
+        viewport = (
+            _final_storm_viewport(
+                self._scope.viewport,
+                self._scope.storm,
+                self._scope.places,
+                width=width,
+                height=height,
+            )
+            if width > 0 and height > 0
+            else self._scope.viewport
+        )
         return _visible_place_candidates(
             self._scope.places,
-            self._scope.viewport,
+            viewport,
             self._scope.storm,
         )
 
@@ -675,6 +804,7 @@ class TropicalStormTrackScope(Container):
             width,
             height,
             palette,
+            bool(self._scope.places),
         )
         self.query_one('.tropical-track-backdrop', Static).update(
             frame.to_text(),

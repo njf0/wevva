@@ -11,7 +11,7 @@ from textual.color import Color
 from textual.widgets import Static
 from wevva_warnings import TropicalProduct
 
-from wevva.geography import GeographicViewport, ProjectedPoint
+from wevva.geography import GeographicViewport, PopulatedPlace, ProjectedPoint
 from wevva.messages import PlaceSelected
 from wevva.widgets.geographic_scope import preferred_geographic_height
 from wevva.widgets.map_callouts import place_directional_callout
@@ -24,6 +24,7 @@ from wevva.widgets.tropical_track import (
     TropicalFixLabel,
     build_storm_scope_geometry,
     extract_storm_track,
+    _final_storm_viewport,
     project_track_locally,
     render_braille_scope,
     _native_scope_frame,
@@ -343,6 +344,80 @@ class TropicalTrackGeometryTests(unittest.TestCase):
         self.assertGreaterEqual(scope.viewport.height, 14.39)
         rendered = render_braille_scope(scope, width=60, height=16)
         self.assertTrue(any(0x2801 <= ord(character) <= 0x28FF for character in rendered.plain))
+
+    def test_final_viewport_places_surplus_extent_toward_nearby_context(self) -> None:
+        required = GeographicViewport(0.0, 0.0, -2.0, -10.0, 2.0, 10.0)
+        storm = (ProjectedPoint(0.0, -8.0), ProjectedPoint(0.0, 8.0))
+        context = (
+            PopulatedPlace(
+                name='Useful coast',
+                longitude=30.0,
+                latitude=0.0,
+                scale_rank=1,
+                label_rank=1,
+                population=1_000_000,
+            ),
+        )
+
+        viewport = _final_storm_viewport(
+            required,
+            storm,
+            context,
+            width=60,
+            height=16,
+        )
+        symmetric = required.fitted(60 * 2 / (16 * 4))
+
+        self.assertGreater(viewport.max_x, symmetric.max_x)
+        self.assertAlmostEqual(
+            viewport.width / viewport.height,
+            60 * 2 / (16 * 4),
+        )
+        self.assertLessEqual(viewport.min_x, required.min_x)
+        self.assertGreaterEqual(viewport.max_x, required.max_x)
+        self.assertLessEqual(viewport.min_y, required.min_y)
+        self.assertGreaterEqual(viewport.max_y, required.max_y)
+
+    def test_scope_frame_uses_one_final_aspect_correct_viewport(self) -> None:
+        scope = build_storm_scope_geometry(_cphc_system())
+        assert scope is not None
+
+        frame = _scope_frame(
+            scope,
+            width=60,
+            height=16,
+            palette=ScopePalette(),
+        )
+        expected = _final_storm_viewport(
+            scope.viewport,
+            scope.storm,
+            scope.places,
+            width=60,
+            height=16,
+        )
+
+        for actual, target in zip(
+            (
+                frame.canvas.viewport.min_x,
+                frame.canvas.viewport.min_y,
+                frame.canvas.viewport.max_x,
+                frame.canvas.viewport.max_y,
+            ),
+            (expected.min_x, expected.min_y, expected.max_x, expected.max_y),
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual, target)
+        self.assertAlmostEqual(
+            frame.canvas.viewport.width / frame.canvas.viewport.height,
+            60 * 2 / (16 * 4),
+        )
+        self.assertTrue(
+            all(
+                frame.canvas.viewport.min_x <= point.x <= frame.canvas.viewport.max_x
+                and frame.canvas.viewport.min_y <= point.y <= frame.canvas.viewport.max_y
+                for point in scope.storm
+            )
+        )
 
     def test_authoritative_cone_expands_scope_and_is_projected(self) -> None:
         system = _system(
