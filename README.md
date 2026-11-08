@@ -3,7 +3,7 @@
 `wevva` is a weather TUI built with [Textual](https://textual.textualize.io/) and powered by [Open-Meteo](https://open-meteo.com/).
 
 <p align="center">
-  <img src="docs/assets/wevva-main.png" alt="wevva weather TUI screenshot" width="900">
+  <img src="docs/assets/wevva-dashboard.png" alt="wevva Dashboard showing forecasts, global weather, tropical systems, and active alerts" width="900">
 </p>
 
 The Dashboard is the navigation hub for forecasts, saved locations, active
@@ -25,7 +25,7 @@ post-1.0 deferrals.
 - Reusable Python API (async + sync helpers)
 
 > [!NOTE]
-> - The Weather and Tropical Systems workspaces both have compact,
+> - The Weather Forecast and Tropical Systems workspaces both have compact,
 >   non-scrolling 80x24 modes. Larger terminals progressively restore complete
 >   context regions, maps, centre weather, and richer information panes without
 >   rebuilding the selected screen or losing its navigation state.
@@ -91,8 +91,8 @@ uvx wevva --clear-default-location
 ```
 
 When a startup location is available, wevva opens on the Dashboard; press `w`
-for the full Weather screen. With no configured location it opens place search
-first.
+for the full Weather Forecast screen. With no configured location it opens
+place search first.
 
 > [!WARNING]
 > - Emoji rendering support varies depending on terminal support and is disabled by default. Enable it with `--emoji` (or via `wevva setup`).
@@ -103,12 +103,12 @@ first.
 - Weather alerts use my [`wevva-warnings`](https://github.com/njf0/wevva-warnings) library.
   - Because we fetch all alerts for the searched location's country, then filter them by the forecast location coordinates, this may take a minute or two if there are many alerts in the country.
 - A bordered alert summary upgrades to the classic tabbed preview when height permits. Activating either form opens a modal where those tabs directly select the full, independently scrolling provider document; wide layouts retain the automatic detail/map sidebar.
-- During a background warning check, the header subtitle briefly reads `Checking warnings…` and then returns to `Powered by Open-Meteo`; warning status does not create toast notifications.
+- During a background warning check, the header subtitle briefly reads `Checking warnings…` and then returns to `View the forecast for your selected location`; warning status does not create toast notifications.
 - Where a provider includes an official alert URL, `wevva` shows it directly on the alert panel so you can jump out to the source document.
 - We use the latitude and longitude coordinates of the forecast location in combination with the warning provider-issued polygon data. Some countries/providers don't issue polygon data, so we are unable to show alerts for those locations.
 - Warning maps use Unicode Braille, with full Braille cells for filled interiors and partial cells along geographic edges.
 
-Press `g` from the Dashboard to open the country Alerts Centre. It keeps
+Press `g` from the Dashboard to open the Global Weather Alerts Center. It keeps
 country discovery separate from alerts applicable to the current forecast
 point, and combines a searchable active-alert list, complete provider
 documents, issued warning polygons, and locally selectable settlement labels.
@@ -116,14 +116,18 @@ Hovering or keyboard-highlighting a warning row previews its polygon at full
 severity without selecting or zooming it. Activate a selected warning again to
 return to the full-country overview.
 Hovering a settlement shows compact current conditions; clicking it opens that
-place's complete forecast on the main Weather screen. Returning through the
-Dashboard restores the previous Alerts Centre context. Use `r` to refresh its
-independent alert data and `b` to return to the Dashboard.
+place's complete forecast on the Weather Forecast screen. Returning through the
+Dashboard restores the previous Global Weather Alerts Center context. Use `r`
+to refresh its independent alert data and `b` to return to the Dashboard.
 
-## Tropical Systems
+<p align="center">
+  <img src="docs/assets/global-weather-alerts.png" alt="Global Weather Alerts Center showing active warning areas across Australia" width="900">
+</p>
 
-Press `t` from the Dashboard to open the global Active Tropical Systems
-workspace. Canonical storm names are shown once, while each issuing centre's
+## Tropical Systems Warnings Center
+
+Press `t` from the Dashboard to open the Tropical Systems Warnings Center.
+Canonical storm names are shown once, while each issuing centre's
 meteorology, track, and lazily retrieved official products remain separate.
 The main weather screen retains only nearby-storm awareness and
 location-specific alert detail.
@@ -131,6 +135,10 @@ location-specific alert detail.
 The track uses a fitted global Natural Earth backdrop, centred position dots,
 and a provider cone when available. On this screen, `r` refreshes the tropical
 data and `b` returns to the Dashboard.
+
+<p align="center">
+  <img src="docs/assets/tropical-systems.png" alt="Tropical Systems Warnings Center showing a storm track and official advisory" width="900">
+</p>
 
 ## Library Usage
 
@@ -190,13 +198,13 @@ for alert in alerts:
 
 Dashboard is the navigation hub:
 
-- `w` open the full Weather screen
+- `w` open the full Weather Forecast screen
 - `m` open the interactive saved-locations world map
 - `t` investigate active tropical systems
-- `g` open the country Alerts Centre
+- `g` open the Global Weather Alerts Center
 - `r` refresh the selected forecast, its point alerts, and tropical systems
 
-On the Weather screen:
+On the Weather Forecast screen:
 
 - `s` search for place
 - `r` refresh weather
@@ -213,14 +221,15 @@ Shared throughout the application:
 - `c` credits
 - `q` quit
 
-The World Map, Tropical Systems, and Alerts Centre screens use `b` to return
-to the Dashboard. Press `h` in the application for the complete shortcut guide.
+The Map View, Tropical Systems Warnings Center, and Global Weather Alerts
+Center screens use `b` to return to the Dashboard. Press `h` in the application
+for the complete shortcut guide.
 On the saved-locations world map, use left/right to move between city labels,
 then Enter or Space to open the focused forecast; mouse selection works too.
 Location-map city labels can likewise be clicked or focused and activated to
-open their ordinary weather forecast. Activating an Alerts Centre settlement
-also opens its ordinary full forecast; hovering first shows a compact current-
-weather tooltip without leaving the warning map.
+open their ordinary weather forecast. Activating a Global Weather Alerts Center
+settlement also opens its ordinary full forecast; hovering first shows a compact
+current-weather tooltip without leaving the warning map.
 
 ## Config
 

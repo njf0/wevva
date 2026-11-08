@@ -1361,7 +1361,7 @@ class DashboardScreen(Screen[None]):
     }
 
     #dashboard-tropical-panel {
-        margin-right: 1;
+        margin-right: 2;
     }
 
     #dashboard-alerts-panel {
@@ -2514,7 +2514,7 @@ class DashboardScreen(Screen[None]):
             self.tropical_panel.styles.height = '100%'
             self.tropical_panel.styles.margin = (
                 0,
-                budget.detail_gutter,
+                budget.gutter,
                 0,
                 0,
             )

@@ -1198,6 +1198,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.alerts_panel.region.width, 32)
             self.assertEqual(screen.world_map.region.height, 17)
             self.assertEqual(screen.tropical_panel.region.height, 18)
+            self.assertEqual(
+                screen.alert_detail_panel.region.x
+                - screen.tropical_panel.region.right,
+                2,
+            )
             self.assertEqual(len(compact_daily.table.rows), 6)
             self.assertTrue(screen.forecast_panel.context_bar.display)
 
