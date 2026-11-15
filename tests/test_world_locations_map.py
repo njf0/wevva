@@ -120,6 +120,24 @@ class WorldLocationsMapTests(unittest.IsolatedAsyncioTestCase):
                 any(placement.marker_on_right for placement in world_map.placements)
             )
 
+            world_map.set_warning_locations({location_key(LONDON)})
+            await pilot.pause()
+            london = next(
+                label for label in labels if label.location == LONDON
+            )
+            self.assertTrue(
+                london.label_text.startswith('! ')
+                or london.label_text.endswith(' !')
+            )
+            self.assertTrue(
+                all(
+                    label.label_text.startswith('• ')
+                    or label.label_text.endswith(' •')
+                    for label in labels
+                    if label is not london
+                )
+            )
+
             occupied = set()
             frame = _world_frame(
                 world_map.content_size.width,
@@ -336,6 +354,9 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
         app.action_refresh = AsyncMock()
         app.load_dashboard_forecast = AsyncMock(return_value=None)
         app.load_dashboard_alerts = AsyncMock(return_value=[])
+        app.cached_warning_location_keys = AsyncMock(
+            return_value=frozenset({location_key(NEW_YORK)})
+        )
 
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause()
@@ -374,6 +395,15 @@ class WorldLocationsScreenTests(unittest.IsolatedAsyncioTestCase):
 
             labels = list(world_screen.world_map.query(WorldLocationLabel))
             self.assertEqual(len(labels), 3)
+            new_york_label = next(
+                label
+                for label in labels
+                if location_key(label.location) == location_key(NEW_YORK)
+            )
+            self.assertTrue(
+                new_york_label.label_text.startswith('! ')
+                or new_york_label.label_text.endswith(' !')
+            )
             self.assertEqual(app.focused.location, LONDON)
             first_focused = app.focused
             await pilot.press('right')

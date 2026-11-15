@@ -1741,7 +1741,7 @@ class DashboardScreen(Screen[None]):
     ) -> None:
         task = asyncio.current_task()
         try:
-            keys = await self.app.cached_dashboard_warning_location_keys(
+            keys = await self.app.cached_warning_location_keys(
                 locations
             )
         except asyncio.CancelledError:

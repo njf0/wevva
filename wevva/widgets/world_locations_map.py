@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import astuple
 from functools import lru_cache
 import math
@@ -139,6 +139,11 @@ class WorldLocationLabel(Static, can_focus=True):
         self._marker = marker
         self.set_marker_on_right(self._marker_on_right)
 
+    def set_warning(self, warning: bool) -> None:
+        """Use an alert marker when cached warnings cover this location."""
+
+        self.set_marker('!' if warning else '•')
+
     def on_click(self, event: Click) -> None:
         event.stop()
         self.focus()
@@ -196,6 +201,7 @@ class WorldLocationsMap(Container):
         self._location_state = _location_state(self._locations)
         self._summary_state = _summary_state(self._summaries)
         self._temperature_unit = temperature_unit
+        self._warning_location_keys: frozenset[str] = frozenset()
         self._labels: dict[str, WorldLocationLabel] = {}
         self._placements: dict[str, WorldLocationPlacement] = {}
         self._current_frame: GeographicFrame | None = None
@@ -234,6 +240,7 @@ class WorldLocationsMap(Container):
         self._location_keys = {
             location_key(location) for location in new_locations
         }
+        self._warning_location_keys &= self._location_keys
         if summaries is not None:
             self._summaries = new_summaries
         self._location_state = new_location_state
@@ -241,6 +248,17 @@ class WorldLocationsMap(Container):
         if self.is_mounted and (changed or force):
             self._sync_label_widgets()
             self._schedule_reflow()
+
+    def set_warning_locations(self, location_keys: Iterable[str]) -> bool:
+        """Mark locations matched by fresh cached warning catalogues."""
+
+        keys = frozenset(location_keys) & self._location_keys
+        if keys == self._warning_location_keys:
+            return False
+        self._warning_location_keys = keys
+        for key, label in self._labels.items():
+            label.set_warning(key in keys)
+        return True
 
     def update_weather_summary(
         self,
@@ -356,6 +374,7 @@ class WorldLocationsMap(Container):
                 self._summaries.get(key),
                 temperature_unit=self._temperature_unit,
             )
+            label.set_warning(key in self._warning_location_keys)
 
     def _reflow(self) -> None:
         self._reflow_pending = False

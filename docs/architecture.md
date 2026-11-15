@@ -30,6 +30,7 @@ Dashboard g key -> AlertsCentreScreen -> country-alert service/cache
 
 Dashboard m key -> WorldLocationsScreen -> checked-in global map-unit geometry
                                        -> cached saved-location summaries
+                                       -> fresh bulletin-cache warning markers
                                        -> SavedLocationSelected -> WeatherScreen + refresh
 
 b key / configured startup -> installed DashboardScreen

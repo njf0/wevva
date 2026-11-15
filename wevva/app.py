@@ -579,11 +579,11 @@ class Wevva(App, inherit_bindings=False):
             if not native_task.done():
                 native_task.cancel()
 
-    async def cached_dashboard_warning_location_keys(
+    async def cached_warning_location_keys(
         self,
         locations: Sequence[LocationMetadata],
     ) -> frozenset[str]:
-        """Point-match saved places against fresh bulletin catalogues only."""
+        """Point-match places against fresh bulletin catalogues only."""
 
         now = self._warning_cache_clock()
         ttl = self.country_alerts_service.ttl_seconds
@@ -753,7 +753,10 @@ class Wevva(App, inherit_bindings=False):
         self.alert_bulletin.set_priority_countries(countries)
 
     def _on_bulletin_updated(self, generation: int) -> None:
-        """Publish coordinator state without giving Dashboard fetch ownership."""
+        """Publish coordinator state without giving map screens fetch ownership."""
+
+        if isinstance(self.screen, WorldLocationsScreen):
+            self.screen.refresh_warning_locations()
 
         if (
             self._dashboard_screen is None
@@ -915,6 +918,7 @@ class Wevva(App, inherit_bindings=False):
                 summaries=summaries,
                 current_location=self.location,
                 temperature_unit=self.temperature_unit,
+                warning_location_loader=self.cached_warning_location_keys,
             )
         )
 

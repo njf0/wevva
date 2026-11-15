@@ -383,6 +383,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 {label.location.name for label in map_locations},
                 {'London', 'Tokyo'},
             )
+            self.assertTrue(all(label.tooltip is None for label in map_locations))
             self.assertEqual(
                 screen.query_one(
                     '#dashboard-forecast-place',

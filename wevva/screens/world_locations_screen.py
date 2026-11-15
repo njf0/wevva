@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import ClassVar
 
 from textual.app import ComposeResult
@@ -14,6 +15,12 @@ from textual.widgets import Footer, Header
 from wevva.location_metadata import LocationMetadata
 from wevva.widgets.saved_locations import SavedLocationWeatherSummary
 from wevva.widgets.world_locations_map import WorldLocationsMap
+
+
+WarningLocationLoader = Callable[
+    [Sequence[LocationMetadata]],
+    Awaitable[Iterable[str]],
+]
 
 
 class WorldLocationsScreen(Screen[None]):
@@ -53,12 +60,16 @@ class WorldLocationsScreen(Screen[None]):
         summaries: Mapping[str, SavedLocationWeatherSummary] | None = None,
         current_location: LocationMetadata | None = None,
         temperature_unit: str = 'celsius',
+        warning_location_loader: WarningLocationLoader | None = None,
     ) -> None:
         super().__init__()
         self._locations = list(locations)
         self._summaries = dict(summaries or {})
         self._current_location = current_location
         self._temperature_unit = temperature_unit
+        self._warning_location_loader = warning_location_loader
+        self._warning_generation = 0
+        self._warning_task: asyncio.Task[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -78,7 +89,43 @@ class WorldLocationsScreen(Screen[None]):
     def on_mount(self) -> None:
         self.title = 'Map View'
         self.sub_title = 'View saved locations on the world map'
+        self.refresh_warning_locations()
         self.call_after_refresh(self._focus_initial_location)
+
+    def on_unmount(self) -> None:
+        self._warning_generation += 1
+        if self._warning_task is not None and not self._warning_task.done():
+            self._warning_task.cancel()
+        self._warning_task = None
+
+    def refresh_warning_locations(self) -> None:
+        """Reclassify visible places from the current bulletin cache."""
+
+        if self._warning_location_loader is None:
+            return
+        self._warning_generation += 1
+        generation = self._warning_generation
+        if self._warning_task is not None and not self._warning_task.done():
+            self._warning_task.cancel()
+        self._warning_task = asyncio.create_task(
+            self._load_warning_locations(generation)
+        )
+
+    async def _load_warning_locations(self, generation: int) -> None:
+        task = asyncio.current_task()
+        try:
+            assert self._warning_location_loader is not None
+            keys = await self._warning_location_loader(tuple(self._locations))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        finally:
+            if self._warning_task is task:
+                self._warning_task = None
+        if generation != self._warning_generation or not self.is_mounted:
+            return
+        self.world_map.set_warning_locations(keys)
 
     def _focus_initial_location(self) -> None:
         if not self.world_map.focus_location(self._current_location):

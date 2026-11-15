@@ -17,7 +17,7 @@ from textual.message import Message
 from textual.widgets import Static
 from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
 
-from wevva.config import location_key, location_label
+from wevva.config import location_key
 from wevva.geography import representative_polygon_point
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import (
@@ -62,15 +62,6 @@ class DashboardLocationLabel(WorldLocationLabel):
         text-style: bold reverse;
     }
     """
-
-    def __init__(self, location: LocationMetadata) -> None:
-        super().__init__(location)
-        self.tooltip = location_label(location)
-
-    def set_warning(self, warning: bool) -> None:
-        """Use an alert marker for a location matched by cached warnings."""
-
-        self.set_marker('!' if warning else '•')
 
     def action_select_location(self) -> None:
         """Use one message path for click, Enter, and Space."""
@@ -320,7 +311,6 @@ class DashboardWorldMap(WorldLocationsMap):
             location_key(active_location) if active_location is not None else None
         )
         self._selected_location_key: str | None = None
-        self._warning_location_keys: frozenset[str] = frozenset()
         self._tropical_systems: list[CanonicalTropicalSystem] = []
         self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
         self._selected_tropical_key: str | None = None
@@ -464,14 +454,10 @@ class DashboardWorldMap(WorldLocationsMap):
         self._apply_label_state()
 
     def set_warning_locations(self, location_keys: Iterable[str]) -> None:
-        """Prioritize and mark locations matched by fresh cached warnings."""
+        """Mark warnings and reconsider the compact place sample."""
 
-        keys = frozenset(location_keys)
-        if keys == self._warning_location_keys:
-            return
-        self._warning_location_keys = keys
-        self._apply_label_state()
-        self._schedule_reflow()
+        if super().set_warning_locations(location_keys):
+            self._schedule_reflow()
 
     def set_tropical_systems(
         self,
