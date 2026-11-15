@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 from rich.console import Console
 from wevva_warnings import CanonicalTropicalSystem, TropicalSystem
+from wevva_warnings.backends.base import BackendError
 
 from wevva.app import Wevva
 from wevva.location_metadata import LocationMetadata
@@ -103,7 +104,7 @@ class TropicalServiceTests(unittest.TestCase):
 
         self.assertEqual(systems, [])
         self.assertTrue(completed)
-        lookup.assert_called_once_with()
+        lookup.assert_called_once_with(strict=True)
 
     def test_provider_failure_is_quiet(self) -> None:
         with patch('wevva.services.tropical.get_canonical_tropical_systems', side_effect=RuntimeError('offline')):
@@ -111,6 +112,29 @@ class TropicalServiceTests(unittest.TestCase):
 
         self.assertEqual(systems, [])
         self.assertFalse(completed)
+
+    def test_strict_discovery_rejects_provider_failure(self) -> None:
+        def discovery(*, strict=False):
+            self.assertTrue(strict)
+            raise RuntimeError('required provider unavailable')
+
+        with patch('wevva.services.tropical.get_canonical_tropical_systems', new=discovery):
+            self.assertEqual(get_tropical_system_candidates(), ([], False))
+
+    def test_successful_strict_empty_discovery_is_cacheable(self) -> None:
+        def discovery(*, strict=False):
+            self.assertTrue(strict)
+            return []
+
+        with patch('wevva.services.tropical.get_canonical_tropical_systems', new=discovery):
+            self.assertEqual(get_tropical_system_candidates(), ([], True))
+
+    def test_real_strict_provider_failure_is_inconclusive(self) -> None:
+        with patch(
+            'wevva_warnings.backends._cap_feed.fetch_text',
+            side_effect=BackendError('offline'),
+        ):
+            self.assertEqual(get_tropical_system_candidates(), ([], False))
 
     def test_same_country_issuer_report_hides_same_named_foreign_equivalents(self) -> None:
         japanese_report = _system(

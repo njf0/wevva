@@ -290,7 +290,7 @@ wheels = [
 
 [[package]]
 name = "wevva"
-version = "0.4.4"
+version = "1.0.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "httpx" },
@@ -308,7 +308,7 @@ requires-dist = [
     { name = "textual", specifier = ">=3.1.0" },
     { name = "typer", specifier = ">=0.21.1" },
     { name = "wcwidth", specifier = ">=0.2.13" },
-    { name = "wevva-warnings", specifier = "==0.6.0" },
+    { name = "wevva-warnings", specifier = "==0.6.1" },
 ]
 
 [[package]]
@@ -328,7 +328,7 @@ requires-dist = [
 
 [[package]]
 name = "wevva-warnings"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "../../../wevva-warnings" }
 dependencies = [
     { name = "pyshp" },

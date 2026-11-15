@@ -118,7 +118,7 @@ def get_tropical_system_candidates() -> tuple[list[CanonicalTropicalSystem], boo
     proximity query, but must not synthesize group meteorology.
     """
     try:
-        return get_canonical_tropical_systems(), True
+        return get_canonical_tropical_systems(strict=True), True
     except Exception:
         # An incomplete global source refresh is inconclusive.  Do not cache
         # this empty fallback or use it as evidence of no tropical activity.

@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prioritize saved locations covered by fresh cached weather warnings on the
   compact Dashboard world map and mark them with `!`.
 
+### Changed
+
+- Update `wevva-warnings` to 0.6.1 for strict tropical discovery that distinguishes
+  required provider failures from successful empty results.
+
 ### Fixed
 
 - Preserve complete abbreviated dates and their separation from condition
