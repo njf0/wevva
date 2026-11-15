@@ -355,6 +355,15 @@ load products, tracks, centre weather, or nearby-location matches. Each
 canonical group chooses one real source observation with a valid centre as its
 anchor, ordered by declared classification strength, newest issue time, then
 source and ID. This is a display choice only and does not merge observations.
+The Dashboard retains its last completed tropical snapshot independently of
+cache freshness. A completed empty result hides the tropical detail frame and
+compact Tropical tab, allowing the selected alert to fill the detail row; new
+activity restores both. An active Tropical tab returns to Map when hidden.
+Refreshes and failures preserve this layout and retained content, with a
+Dashboard header status for unavailable data. Discovery requests use the
+warning library's `strict=True` mode, so required provider failures cannot
+masquerade as quiet conditions. The pinned published dependency supports this
+distinction for ordinary runs as well as the opt-in sibling checkout.
 The world-map base exposes narrow candidate and label hooks so the Dashboard
 can send locations and storms through the same callout planner. A selected
 tropical system ranks first, followed by selected/active saved places and every

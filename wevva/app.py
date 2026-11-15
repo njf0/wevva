@@ -434,7 +434,12 @@ class Wevva(App, inherit_bindings=False):
             < self.BACKGROUND_REFRESH_INTERVAL_SECONDS
         ):
             return
-        systems = await self.refresh_tropical_systems()
+        try:
+            systems = await self.refresh_tropical_systems()
+        except Exception:
+            if self._dashboard_screen is not None and self._dashboard_screen.is_attached:
+                self._dashboard_screen.tropical_systems_failed()
+            return
         if self._dashboard_screen is not None and self._dashboard_screen.is_attached:
             self._dashboard_screen.update_tropical_systems(systems)
         if self.is_running and isinstance(self.screen, TropicalSystemsScreen):

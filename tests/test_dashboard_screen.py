@@ -335,10 +335,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(screen.query_one('#dashboard-pane-tabs', Tabs).display)
             self.assertTrue(screen.forecast_panel.display)
             self.assertTrue(screen.world_map.display)
-            self.assertTrue(screen.tropical_panel.display)
+            self.assertFalse(screen.tropical_panel.display)
             self.assertTrue(screen.alert_detail_panel.display)
             self.assertTrue(screen.alerts_panel.display)
             self.assertIsNotNone(screen._time_refresh_timer)
+            self.assertEqual(
+                screen.alert_detail_panel.region.width,
+                screen.query_one('#dashboard-detail-row').region.width,
+            )
             self.assertIn(
                 'No active tropical systems',
                 screen.query_one(
@@ -659,9 +663,13 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     VerticalScroll,
                 ).display
             )
-            self.assertGreater(
+            self.assertGreaterEqual(
                 detail.query_one('MarkdownH1').region.height,
                 1,
+            )
+            self.assertEqual(
+                detail.region.width,
+                screen.query_one('#dashboard-detail-row').region.width,
             )
             document_text = _rendered(
                 detail.query_one('#dashboard-alert-document-body', Markdown)
@@ -1129,6 +1137,14 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_resize_reuses_panels_and_compact_tabs(self) -> None:
         app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma', 'jma_tropical', 'NANGKA',
+            classification='Typhoon', latitude=28.0, longitude=135.0,
+        )
+        app._tropical_system_cache = (
+            app._tropical_system_cache_clock(),
+            (CanonicalTropicalSystem('NANGKA', [observation]),),
+        )
         async with app.run_test(size=(120, 30)) as pilot:
             await _settle(pilot)
             await pilot.press('b')
@@ -1231,6 +1247,11 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_very_large_layout_widens_rails_and_shortens_map(self) -> None:
         app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma', 'jma_tropical', 'NANGKA',
+            classification='Typhoon', latitude=28.0, longitude=135.0,
+        )
+        app._cache_tropical_systems([CanonicalTropicalSystem('NANGKA', [observation])])
         async with app.run_test(size=(250, 70)) as pilot:
             await _settle(pilot)
             await pilot.press('b')
@@ -1740,6 +1761,157 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                     for place in dashboard.world_map.query(DashboardLocationLabel)
                 },
             )
+
+    async def test_tropical_activity_reflows_details_and_compact_tabs(self) -> None:
+        app = self._app()
+        # A system without a map centre still counts as returned activity.
+        observation = TropicalSystem(
+            id='unnamed', source='jma_tropical', name='',
+            classification='Tropical Depression', headline='Tropical Depression',
+        )
+        system = CanonicalTropicalSystem('', [observation])
+        app.load_tropical_products = AsyncMock(return_value=[])
+        async with app.run_test(size=(180, 45)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            tropical_panel = dashboard.tropical_panel
+            alert_panel = dashboard.alert_detail_panel
+            row = dashboard.query_one('#dashboard-detail-row')
+            self.assertFalse(tropical_panel.display)
+            self.assertEqual(alert_panel.region.width, row.region.width)
+
+            dashboard.update_tropical_systems([system])
+            await _settle(pilot)
+            self.assertTrue(tropical_panel.display)
+            self.assertLess(alert_panel.region.width, row.region.width)
+            self.assertEqual(list(dashboard.world_map.query(DashboardTropicalLabel)), [])
+
+            await pilot.resize_terminal(80, 24)
+            await _settle(pilot)
+            tabs = dashboard.query_one('#dashboard-pane-tabs', Tabs)
+            tropical_tab = tabs.query_one('#dashboard-tab-tropical', Tab)
+            self.assertTrue(tropical_tab.display)
+            tabs.active = 'dashboard-tab-tropical'
+            await _settle(pilot)
+            self.assertTrue(tropical_panel.display)
+            tabs.focus()
+            await _settle(pilot)
+            self.assertTrue(tabs.has_focus)
+
+            dashboard.update_tropical_systems([])
+            await _settle(pilot)
+            self.assertFalse(tropical_tab.display)
+            self.assertEqual(tabs.active, 'dashboard-tab-map')
+            self.assertTrue(dashboard.world_map.display)
+            self.assertFalse(tropical_panel.display)
+            self.assertFalse(tropical_panel.has_focus_within)
+            self.assertTrue(dashboard.world_map.has_focus_within)
+
+            await pilot.resize_terminal(180, 45)
+            await _settle(pilot)
+            self.assertEqual(alert_panel.region.width, row.region.width)
+            dashboard.update_tropical_systems([system])
+            await _settle(pilot)
+            self.assertTrue(tropical_panel.display)
+            self.assertIs(dashboard.tropical_panel, tropical_panel)
+            self.assertIs(dashboard.alert_detail_panel, alert_panel)
+            self.assertLess(alert_panel.region.width, row.region.width)
+            app.load_tropical_products.assert_not_awaited()
+            self.assertIn('t', {binding.key for binding in dashboard.BINDINGS})
+
+    async def test_tropical_refresh_preserves_empty_layout_until_activity_returns(self) -> None:
+        app = self._app()
+        release = asyncio.Event()
+        observation = _tropical_observation(
+            'nangka-jma', 'jma_tropical', 'NANGKA',
+            classification='Typhoon', latitude=28.0, longitude=135.0,
+        )
+        system = CanonicalTropicalSystem('NANGKA', [observation])
+
+        async def refresh():
+            await release.wait()
+            raise RuntimeError('offline')
+
+        app.refresh_tropical_systems = AsyncMock(side_effect=refresh)
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            dashboard._refresh_dashboard_tropical_systems()
+            await _settle(pilot)
+            self.assertFalse(dashboard.tropical_panel.display)
+            self.assertEqual(
+                dashboard.alert_detail_panel.region.width,
+                dashboard.query_one('#dashboard-detail-row').region.width,
+            )
+            release.set()
+            await _settle(pilot)
+            self.assertFalse(dashboard.tropical_panel.display)
+            self.assertIn('unavailable', dashboard.sub_title)
+
+            app.refresh_tropical_systems = AsyncMock(return_value=[system])
+            dashboard._refresh_dashboard_tropical_systems()
+            await _settle(pilot, 8)
+            self.assertTrue(dashboard.tropical_panel.display)
+            self.assertNotIn('unavailable', dashboard.sub_title)
+            self.assertEqual(len(dashboard.world_map.query(DashboardTropicalLabel)), 1)
+
+            app._tropical_system_cache = None
+            app.load_tropical_systems = AsyncMock(side_effect=RuntimeError('offline'))
+            dashboard.sync_from_app()
+            await _settle(pilot)
+            self.assertTrue(dashboard.tropical_panel.display)
+            self.assertEqual(len(dashboard.world_map.query(DashboardTropicalLabel)), 1)
+            self.assertIn('showing last result', dashboard.sub_title)
+
+    async def test_cached_empty_result_clears_storm_selection_on_resume(self) -> None:
+        app = self._app()
+        observation = _tropical_observation(
+            'nangka-jma', 'jma_tropical', 'NANGKA',
+            classification='Typhoon', latitude=28.0, longitude=135.0,
+        )
+        app._cache_tropical_systems([CanonicalTropicalSystem('NANGKA', [observation])])
+        app.load_tropical_products = AsyncMock(return_value=[])
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            dashboard.world_map.query_one(DashboardTropicalLabel).action_activate()
+            await _settle(pilot)
+            self.assertIs(dashboard._selected_tropical_observation, observation)
+
+            # A dedicated-workspace refresh can change the shared cache while
+            # the installed Dashboard is suspended.
+            app._cache_tropical_systems([])
+            app.load_tropical_products.reset_mock()
+            dashboard.on_screen_resume()
+            await _settle(pilot)
+            self.assertIsNone(dashboard._selected_tropical_observation)
+            self.assertIsNone(dashboard.tropical_panel._observation)
+            self.assertFalse(dashboard.tropical_panel.display)
+            app.load_tropical_products.assert_not_awaited()
+
+    async def test_initial_tropical_failure_keeps_unavailable_panel(self) -> None:
+        app = self._app()
+        app._tropical_system_cache = None
+        app.load_tropical_systems = AsyncMock(side_effect=RuntimeError('offline'))
+        async with app.run_test(size=(120, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            dashboard = app.screen
+            self.assertTrue(dashboard.tropical_panel.display)
+            self.assertIn('temporarily unavailable', _rendered(
+                dashboard.query_one('#dashboard-tropical-detail-state', Static)
+            ))
+            dashboard.update_tropical_systems([])
+            await _settle(pilot)
+            self.assertFalse(dashboard.tropical_panel.display)
+            self.assertNotIn('unavailable', dashboard.sub_title)
 
     async def test_uncached_tropical_discovery_uses_detail_panel_status(self) -> None:
         app = self._app()

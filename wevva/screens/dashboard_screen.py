@@ -1388,6 +1388,7 @@ class DashboardScreen(Screen[None]):
         self._selected_location: LocationMetadata | None = None
         self._selected_tropical_system: CanonicalTropicalSystem | None = None
         self._selected_tropical_observation: TropicalSystem | None = None
+        self._tropical_snapshot: tuple[CanonicalTropicalSystem, ...] | None = None
         self._forecast_request_generation = 0
         self._forecast_request_key: tuple[str, str, str, str] | None = None
         self._forecast_wait_task: asyncio.Task[None] | None = None
@@ -1562,14 +1563,6 @@ class DashboardScreen(Screen[None]):
             self._selected_location or self.app.location
         )
         self._sync_tropical_systems()
-        if (
-            self._selected_tropical_system is not None
-            and self._selected_tropical_observation is not None
-        ):
-            self._select_tropical_detail(
-                self._selected_tropical_system,
-                self._selected_tropical_observation,
-            )
         self.update_bulletin(
             self.app.alert_bulletin.generation,
             self.app.alert_bulletin.recent_alerts_snapshot(),
@@ -1947,11 +1940,12 @@ class DashboardScreen(Screen[None]):
     def _sync_tropical_systems(self) -> None:
         snapshot = self.app.tropical_systems_snapshot()
         if snapshot is not None:
-            self.world_map.set_tropical_systems(snapshot)
-            if self._selected_tropical_observation is None:
-                self.tropical_panel.show_overview(snapshot)
+            self.update_tropical_systems(list(snapshot))
             return
-        if self._selected_tropical_observation is None:
+        if (
+            self._tropical_snapshot is None
+            and self._selected_tropical_observation is None
+        ):
             self.tropical_panel.show_overview(None)
         if self._tropical_wait_task is None or self._tropical_wait_task.done():
             self._tropical_wait_task = asyncio.create_task(
@@ -1966,7 +1960,7 @@ class DashboardScreen(Screen[None]):
 
         if not self.is_mounted:
             return
-        self.world_map.set_tropical_systems(systems)
+        self._set_tropical_snapshot(tuple(systems))
         selected_system = self._selected_tropical_system
         selected_observation = self._selected_tropical_observation
         if selected_system is None or selected_observation is None:
@@ -1992,6 +1986,35 @@ class DashboardScreen(Screen[None]):
         if _tropical_observation_key(observation) != self._tropical_detail_key:
             self._refresh_tropical_products_from_snapshot(system, observation)
 
+    def _set_tropical_snapshot(
+        self,
+        systems: tuple[CanonicalTropicalSystem, ...],
+    ) -> None:
+        """Change layout only after a completed discovery result."""
+
+        self._tropical_snapshot = systems
+        self.sub_title = 'View weather for your saved locations'
+        self.world_map.set_tropical_systems(systems)
+        self._update_visibility()
+
+    def tropical_systems_failed(self) -> None:
+        """Retain the last layout and content when discovery is inconclusive."""
+
+        if not self.is_mounted:
+            return
+        self.sub_title = (
+            'Tropical systems unavailable; showing last result'
+            if self._tropical_snapshot is not None
+            else 'Tropical systems temporarily unavailable'
+        )
+        if (
+            self._tropical_snapshot is None
+            and self._selected_tropical_observation is None
+        ):
+            self.tropical_panel.show_error()
+        else:
+            self.tropical_panel.set_loading(False)
+
     def _refresh_dashboard_tropical_systems(self) -> None:
         """Force the Dashboard storm snapshot without opening its workspace."""
 
@@ -2013,7 +2036,8 @@ class DashboardScreen(Screen[None]):
                 refresh=True,
             )
             return
-        self.tropical_panel.show_overview(None)
+        if self._tropical_snapshot is None:
+            self.tropical_panel.show_overview(None)
         self._tropical_wait_task = asyncio.create_task(
             self._load_tropical_systems(refresh=True)
         )
@@ -2027,14 +2051,10 @@ class DashboardScreen(Screen[None]):
         except asyncio.CancelledError:
             raise
         except Exception:
-            if self.is_mounted:
-                if self._selected_tropical_observation is None:
-                    self.tropical_panel.show_error()
+            self.tropical_systems_failed()
         else:
             if self.is_mounted:
-                self.world_map.set_tropical_systems(systems)
-                if self._selected_tropical_observation is None:
-                    self.tropical_panel.show_overview(tuple(systems))
+                self.update_tropical_systems(systems)
         finally:
             if self._tropical_wait_task is asyncio.current_task():
                 self._tropical_wait_task = None
@@ -2173,7 +2193,7 @@ class DashboardScreen(Screen[None]):
                 self.is_mounted
                 and generation == self._tropical_detail_generation
             ):
-                self.tropical_panel.set_loading(False)
+                self.tropical_systems_failed()
             return
         finally:
             if self._tropical_selection_refresh_task is task:
@@ -2185,7 +2205,7 @@ class DashboardScreen(Screen[None]):
             or generation != self._tropical_detail_generation
         ):
             return
-        self.world_map.set_tropical_systems(systems)
+        self._set_tropical_snapshot(tuple(systems))
         if refreshed is None:
             self._selected_tropical_system = None
             self._selected_tropical_observation = None
@@ -2586,13 +2606,25 @@ class DashboardScreen(Screen[None]):
         tabs = self.query_one('#dashboard-pane-tabs', Tabs)
         centre = self.query_one('#dashboard-center-column', Container)
         detail_row = self.query_one('#dashboard-detail-row', Container)
+        show_tropical = self._tropical_snapshot != ()
+        tropical_tab = tabs.query_one('#dashboard-tab-tropical', Tab)
+        if show_tropical:
+            if not tropical_tab.display:
+                tabs.show('dashboard-tab-tropical')
+        else:
+            if self._active_pane == 'tropical':
+                self._active_pane = 'map'
+                tabs.active = 'dashboard-tab-map'
+                self.call_after_refresh(self.world_map.focus_preferred_location)
+            if tropical_tab.display:
+                tabs.hide('dashboard-tab-tropical')
         tabs.display = not self._layout_budget.simultaneous
         if self._layout_budget.simultaneous:
             self.forecast_panel.display = True
             centre.display = True
             self.world_map.display = True
             detail_row.display = True
-            self.tropical_panel.display = True
+            self.tropical_panel.display = show_tropical
             self.alert_detail_panel.display = True
             self.alerts_panel.display = True
             return

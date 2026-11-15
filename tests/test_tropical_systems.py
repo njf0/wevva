@@ -433,6 +433,18 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
 
         refresh.assert_awaited_once_with()
 
+    async def test_failed_automatic_refresh_reports_unavailable_without_an_empty_update(self) -> None:
+        dashboard = Mock(is_attached=True)
+        self.app._dashboard_screen = dashboard
+        with patch.object(
+            self.app, 'refresh_tropical_systems',
+            new=AsyncMock(side_effect=RuntimeError('provider unavailable')),
+        ):
+            await self.app._automatic_tropical_refresh()
+
+        dashboard.tropical_systems_failed.assert_called_once_with()
+        dashboard.update_tropical_systems.assert_not_called()
+
     async def test_weather_alert_refresh_does_not_fetch_tropical_systems(self) -> None:
         tropical_lookup = AsyncMock(return_value=([], True))
         with (
