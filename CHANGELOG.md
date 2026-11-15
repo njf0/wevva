@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve complete abbreviated dates and their separation from condition
+  codes in cramped Dashboard daily forecasts.
+
 ## [1.0.0] - 2026-11-08
 
 Initial stable release. See the [1.0.0 release notes](docs/releases/1.0.0.md)

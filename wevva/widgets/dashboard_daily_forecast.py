@@ -18,8 +18,10 @@ _DASHBOARD_COLUMNS = (
     DailyColumn.RAIN,
     DailyColumn.WIND,
 )
-_DASHBOARD_MINIMUM_WIDTHS = (3, 2, 7, 4, 9)
-_DASHBOARD_PREFERRED_WIDTHS = (6, 4, 9, 6, 14)
+# Keep the complete abbreviated date plus a separating cell. The compact rain
+# and wind forms need less spare width, so they yield space first in the rail.
+_DASHBOARD_MINIMUM_WIDTHS = (7, 2, 7, 3, 9)
+_DASHBOARD_PREFERRED_WIDTHS = (7, 4, 9, 6, 14)
 _COLUMN_COUNT = len(_DASHBOARD_COLUMNS)
 
 

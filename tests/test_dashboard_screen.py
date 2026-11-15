@@ -429,7 +429,16 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
                 ['date', 'condition', 'temperature', 'rain', 'wind'],
             )
             self.assertEqual(daily.table.max_scroll_x, 0)
+            self.assertGreaterEqual(
+                next(iter(daily.table.columns.values())).width,
+                7,
+            )
             daily_row = daily.table.get_row_at(0)
+            self.assertTrue(
+                daily.table.render_line(0).text.startswith(
+                    f'{daily_row[0].plain} {daily_row[1].plain}'
+                )
+            )
             self.assertNotIn('/', daily_row[3].plain)
             self.assertNotIn('(', daily_row[4].plain)
             self.assertIsNotNone(
@@ -1326,7 +1335,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             hourly_row = screen.forecast_panel.hourly_forecast.table.get_row_at(0)
             self.assertEqual(hourly_row[0].plain, '05:00 ')
             daily = screen.forecast_panel.daily_forecast.table
-            self.assertEqual(daily.cell_padding, 1)
+            # Complete dates use the spare cell at this rail width; padding
+            # returns only once all five columns still fit with it.
+            self.assertEqual(daily.cell_padding, 0)
             self.assertEqual(
                 [column.value for column in daily.columns],
                 ['date', 'condition', 'temperature', 'rain', 'wind'],
