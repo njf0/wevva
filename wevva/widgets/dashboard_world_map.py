@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 
 from rich.cells import cell_len
@@ -66,6 +66,11 @@ class DashboardLocationLabel(WorldLocationLabel):
     def __init__(self, location: LocationMetadata) -> None:
         super().__init__(location)
         self.tooltip = location_label(location)
+
+    def set_warning(self, warning: bool) -> None:
+        """Use an alert marker for a location matched by cached warnings."""
+
+        self.set_marker('!' if warning else '•')
 
     def action_select_location(self) -> None:
         """Use one message path for click, Enter, and Space."""
@@ -315,6 +320,7 @@ class DashboardWorldMap(WorldLocationsMap):
             location_key(active_location) if active_location is not None else None
         )
         self._selected_location_key: str | None = None
+        self._warning_location_keys: frozenset[str] = frozenset()
         self._tropical_systems: list[CanonicalTropicalSystem] = []
         self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
         self._selected_tropical_key: str | None = None
@@ -456,6 +462,16 @@ class DashboardWorldMap(WorldLocationsMap):
             return
         self._selected_location_key = key
         self._apply_label_state()
+
+    def set_warning_locations(self, location_keys: Iterable[str]) -> None:
+        """Prioritize and mark locations matched by fresh cached warnings."""
+
+        keys = frozenset(location_keys)
+        if keys == self._warning_location_keys:
+            return
+        self._warning_location_keys = keys
+        self._apply_label_state()
+        self._schedule_reflow()
 
     def set_tropical_systems(
         self,
@@ -679,6 +695,7 @@ class DashboardWorldMap(WorldLocationsMap):
         for key, label in self._labels.items():
             label.set_class(key == self._active_location_key, 'active-place')
             label.set_class(key == self._selected_location_key, 'selected-place')
+            label.set_warning(key in self._warning_location_keys)
         for key, label in self._tropical_labels.items():
             label.set_class(
                 key == self._selected_tropical_key and not label.disappeared,
@@ -723,9 +740,27 @@ class DashboardWorldMap(WorldLocationsMap):
                 priority_locations.append(candidate)
 
         place_limit = _place_label_limit(frame)
+        warning_locations = [
+            candidate
+            for candidate in location_candidates
+            if candidate.key in self._warning_location_keys
+            and candidate.key in by_key
+        ]
+        for candidate in warning_locations:
+            by_key.pop(candidate.key, None)
+        sampled_warnings = _sample_place_candidates(
+            warning_locations,
+            max(0, place_limit - len(priority_locations)),
+            generation=self._place_sample_generation,
+        )
         sampled_locations = _sample_place_candidates(
             list(by_key.values()),
-            max(0, place_limit - len(priority_locations)),
+            max(
+                0,
+                place_limit
+                - len(priority_locations)
+                - len(sampled_warnings),
+            ),
             generation=self._place_sample_generation,
         )
 
@@ -782,6 +817,7 @@ class DashboardWorldMap(WorldLocationsMap):
             ordered.append(selected_tropical)
         ordered.extend(priority_locations)
         ordered.extend(tropical_candidates)
+        ordered.extend(sampled_warnings)
         ordered.extend(sampled_locations)
         return ordered
 

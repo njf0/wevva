@@ -1395,6 +1395,8 @@ class DashboardScreen(Screen[None]):
         self._location_alert_key: tuple[str, str] | None = None
         self._location_alert_loaded_at: float | None = None
         self._location_alert_task: asyncio.Task[None] | None = None
+        self._map_warning_generation = 0
+        self._map_warning_task: asyncio.Task[None] | None = None
         self._tropical_wait_task: asyncio.Task[None] | None = None
         self._tropical_product_task: asyncio.Task[None] | None = None
         self._tropical_detail_generation = 0
@@ -1511,6 +1513,7 @@ class DashboardScreen(Screen[None]):
             self._time_refresh_timer = None
         self._cancel_forecast_wait()
         self._cancel_location_alert_wait()
+        self._cancel_map_warning_wait()
         if self._tropical_wait_task is not None:
             self._tropical_wait_task.cancel()
             self._tropical_wait_task = None
@@ -1724,7 +1727,49 @@ class DashboardScreen(Screen[None]):
             self._show_selected_alert(selected_row, is_bulletin=True)
         if arrived_while_open and unflashed_rows:
             world_map.flash_new_alerts(unflashed_rows)
+        self._refresh_map_warning_locations()
         self._ensure_persistent_alerts()
+
+    def _refresh_map_warning_locations(self) -> None:
+        """Classify saved places from current cache without hiding the sample."""
+
+        self._cancel_map_warning_wait()
+        self._map_warning_generation += 1
+        generation = self._map_warning_generation
+        locations = tuple(self.app.locations_for_dashboard())
+        self._map_warning_task = asyncio.create_task(
+            self._load_map_warning_locations(locations, generation)
+        )
+
+    async def _load_map_warning_locations(
+        self,
+        locations: tuple[LocationMetadata, ...],
+        generation: int,
+    ) -> None:
+        task = asyncio.current_task()
+        try:
+            keys = await self.app.cached_dashboard_warning_location_keys(
+                locations
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+        finally:
+            if self._map_warning_task is task:
+                self._map_warning_task = None
+        if generation != self._map_warning_generation or not self.is_mounted:
+            return
+        self.world_map.set_warning_locations(keys)
+
+    def _cancel_map_warning_wait(self) -> None:
+        self._map_warning_generation += 1
+        if (
+            self._map_warning_task is not None
+            and not self._map_warning_task.done()
+        ):
+            self._map_warning_task.cancel()
+        self._map_warning_task = None
 
     def on_dashboard_alerts_panel_selected(
         self,

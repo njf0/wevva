@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prioritize saved locations covered by fresh cached weather warnings on the
+  compact Dashboard world map and mark them with `!`.
+
 ### Fixed
 
 - Preserve complete abbreviated dates and their separation from condition

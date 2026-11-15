@@ -83,6 +83,7 @@ class WorldLocationLabel(Static, can_focus=True):
         self.location = location
         self._body_text = ''
         self._marker_on_right = False
+        self._marker = '•'
         self.label_text = ''
 
     def update_weather(
@@ -121,13 +122,22 @@ class WorldLocationLabel(Static, can_focus=True):
 
         self._marker_on_right = marker_on_right
         label_text = (
-            f'{self._body_text} •'
+            f'{self._body_text} {self._marker}'
             if marker_on_right
-            else f'• {self._body_text}'
+            else f'{self._marker} {self._body_text}'
         )
         if label_text != self.label_text:
             self.label_text = label_text
             self.update(label_text)
+
+    def set_marker(self, marker: str) -> None:
+        """Replace the geographic marker without disturbing its direction."""
+
+        marker = marker.strip() or '•'
+        if marker == self._marker:
+            return
+        self._marker = marker
+        self.set_marker_on_right(self._marker_on_right)
 
     def on_click(self, event: Click) -> None:
         event.stop()

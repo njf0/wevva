@@ -31,7 +31,7 @@ from wevva.screens.dashboard_screen import (
     DashboardScreen,
     DashboardWeatherAlertsPanel,
 )
-from wevva.services.alert_bulletin import BulletinAlert
+from wevva.services.alert_bulletin import BulletinAlert, BulletinCatalogue
 from wevva.screens.weather_screen import WeatherScreen
 from wevva.widgets.dashboard_daily_forecast import DashboardDailyForecast
 from wevva.widgets.dashboard_world_map import (
@@ -1385,6 +1385,97 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             screen._refresh_dashboard_tropical_systems = Mock()
             screen.action_refresh_dashboard()
             screen.world_map.resample_places_if_limited.assert_called_once_with()
+
+    async def test_compact_map_prioritizes_cached_warning_locations(self) -> None:
+        app = self._app()
+        app.saved_locations = [
+            BERLIN,
+            *(
+                LocationMetadata(
+                    name=f'Place {index:02}',
+                    country='United Kingdom',
+                    country_code='GB',
+                    latitude=-45.0 + (index % 10) * 9.0,
+                    longitude=-150.0 + index * 14.0,
+                )
+                for index in range(20)
+            ),
+        ]
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await _settle(pilot)
+            await pilot.press('b')
+            await _settle(pilot)
+            screen = app.screen
+            frame = screen.world_map._current_frame
+            assert frame is not None
+            initial_keys = {
+                candidate.key
+                for candidate in screen.world_map._callout_candidates(frame)
+                if not str(candidate.key).startswith('tropical:')
+            }
+            warning_location = next(
+                location
+                for location in app.saved_locations
+                if location_key(location) not in initial_keys
+            )
+            assert warning_location.latitude is not None
+            assert warning_location.longitude is not None
+            latitude = warning_location.latitude
+            longitude = warning_location.longitude
+            alert = Alert(
+                id='saved-place-warning',
+                source='fixture',
+                event='Rain',
+                headline='Heavy rain',
+                geometry={
+                    'type': 'Polygon',
+                    'coordinates': [[
+                        [longitude - 1, latitude - 1],
+                        [longitude + 1, latitude - 1],
+                        [longitude + 1, latitude + 1],
+                        [longitude - 1, latitude + 1],
+                        [longitude - 1, latitude - 1],
+                    ]],
+                },
+            )
+            app.alert_bulletin.catalogues_snapshot = Mock(return_value=(
+                BulletinCatalogue(
+                    'GB',
+                    'auto',
+                    (alert,),
+                    app._warning_cache_clock(),
+                ),
+            ))
+
+            screen.update_bulletin(screen._bulletin_generation + 1, ())
+            await _settle(pilot, cycles=8)
+
+            warning_key = location_key(warning_location)
+            refreshed_keys = {
+                candidate.key
+                for candidate in screen.world_map._callout_candidates(frame)
+                if not str(candidate.key).startswith('tropical:')
+            }
+            self.assertIn(warning_key, refreshed_keys)
+            warning_label = next(
+                label
+                for label in screen.world_map.query(DashboardLocationLabel)
+                if location_key(label.location) == warning_key
+            )
+            self.assertTrue(
+                warning_label.label_text.startswith('! ')
+                or warning_label.label_text.endswith(' !')
+            )
+
+            self.assertTrue(screen.world_map.resample_places_if_limited())
+            await _settle(pilot)
+            resampled_keys = {
+                candidate.key
+                for candidate in screen.world_map._callout_candidates(frame)
+                if not str(candidate.key).startswith('tropical:')
+            }
+            self.assertIn(warning_key, resampled_keys)
 
     async def test_tropical_overlay_uses_source_anchor_and_deep_links(self) -> None:
         app = self._app()

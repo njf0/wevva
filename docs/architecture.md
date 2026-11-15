@@ -358,7 +358,13 @@ source and ID. This is a display choice only and does not merge observations.
 The world-map base exposes narrow candidate and label hooks so the Dashboard
 can send locations and storms through the same callout planner. A selected
 tropical system ranks first, followed by selected/active saved places and every
-canonical storm. Ordinary saved-place candidates use one deterministic
+canonical storm. Fresh complete-country catalogues already owned by the alert
+bulletin are point-matched to saved locations in one worker pass, without
+starting location-specific provider requests. Matching locations use `!` and
+take the remaining place budget before ordinary locations; while that cache
+work is pending, the existing place sample remains visible. Native point-only
+sources therefore remain part of the selected-location warning path rather
+than this overview hint. Other saved-place candidates use one deterministic
 pseudo-random sample capped from the available map-cell budget, so a smaller
 wide map does not fill with labels and an unchanged size does not flicker
 between samples. Dashboard `r` advances that sample only while the cell-derived

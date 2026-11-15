@@ -48,6 +48,7 @@ from wevva.screens.world_locations_screen import WorldLocationsScreen
 from wevva.services.alerts import (
     get_alert_candidates_async,
     get_native_point_alerts_async,
+    match_alert_candidates,
     match_alert_candidates_async,
     normalize_country_code,
 )
@@ -79,6 +80,32 @@ TropicalProductCacheKey = tuple[str, str, str]
 AlertPlaceWeatherCacheKey = tuple[float, float, str, str, str]
 AlertPlaceWeatherCacheEntry = tuple[float, dict]
 _SAVED_WEATHER_RETRY_DELAY_SECONDS = 0.75
+
+
+def _match_cached_warning_locations(
+    locations: Sequence[LocationMetadata],
+    alerts_by_country: Mapping[str, Sequence[Alert]],
+) -> frozenset[str]:
+    """Return saved-location keys covered by cached country warnings."""
+
+    matched: set[str] = set()
+    for location in locations:
+        country_code = normalize_country_code(location.country_code)
+        if (
+            country_code is None
+            or location.latitude is None
+            or location.longitude is None
+        ):
+            continue
+        alerts = alerts_by_country.get(country_code)
+        if alerts and match_alert_candidates(
+            list(alerts),
+            [],
+            location.latitude,
+            location.longitude,
+        ):
+            matched.add(location_key(location))
+    return frozenset(matched)
 
 
 def _alert_place_weather_cache_key(
@@ -546,6 +573,27 @@ class Wevva(App, inherit_bindings=False):
         finally:
             if not native_task.done():
                 native_task.cancel()
+
+    async def cached_dashboard_warning_location_keys(
+        self,
+        locations: Sequence[LocationMetadata],
+    ) -> frozenset[str]:
+        """Point-match saved places against fresh bulletin catalogues only."""
+
+        now = self._warning_cache_clock()
+        ttl = self.country_alerts_service.ttl_seconds
+        alerts_by_country = {
+            catalogue.country_code: catalogue.alerts
+            for catalogue in self.alert_bulletin.catalogues_snapshot()
+            if max(0.0, (now - catalogue.fetched_at).total_seconds()) < ttl
+        }
+        if not alerts_by_country:
+            return frozenset()
+        return await asyncio.to_thread(
+            _match_cached_warning_locations,
+            tuple(locations),
+            alerts_by_country,
+        )
 
     def _discard_dashboard_forecast_task(
         self,
