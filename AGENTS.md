@@ -37,6 +37,8 @@ Read `docs/architecture.md` before changing a cross-cutting path, and
 - Treat sync and async public paths as separate compatibility surfaces.
 - Be cautious with Open-Meteo response assumptions, persisted configuration,
   background refresh tasks, warning-progress callbacks, and terminal layout.
+- Record notable user-facing changes in `CHANGELOG.md` under `Unreleased` as
+  they are developed; omit internal-only refactors and test changes.
 - Update these documents when commands or architectural boundaries change.
 
 ## Commands
