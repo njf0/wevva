@@ -448,6 +448,8 @@ class TropicalAppTests(unittest.IsolatedAsyncioTestCase):
     async def test_weather_alert_refresh_does_not_fetch_tropical_systems(self) -> None:
         tropical_lookup = AsyncMock(return_value=([], True))
         with (
+            patch.object(self.app.warning_cache, 'load', new=AsyncMock(return_value=None)),
+            patch.object(self.app.warning_cache, 'store', new=AsyncMock()),
             patch('wevva.app.get_alert_candidates_async', new=AsyncMock(return_value=([], True))),
             patch('wevva.app.get_native_point_alerts_async', new=AsyncMock(return_value=([], True))),
             patch('wevva.app.get_tropical_system_candidates_async', new=tropical_lookup),
