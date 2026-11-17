@@ -10,6 +10,7 @@ The Dashboard is the navigation hub for forecasts, saved locations, active
 tropical systems, and weather alerts. See the [Wevva 1.0 release
 notes](docs/releases/1.0.0.md) for the lifecycle milestone and its deliberate
 post-1.0 deferrals.
+Upcoming changes are tracked in the [Unreleased changelog](CHANGELOG.md#unreleased).
 
 ## Highlights
 
