@@ -21,7 +21,6 @@ from textual.theme import BUILTIN_THEMES
 from wevva.app import Wevva
 from wevva.config import (
     ConfigWriteError,
-    add_saved_location,
     load_preferences,
     location_metadata_from_config,
     save_default_location,
@@ -478,7 +477,6 @@ def _apply_default_location_mutations(
                     label,
                     default_location_metadata=_location_config_from_metadata(location_meta),
                 )
-                add_saved_location(location_meta)
                 typer.secho(f'Saved default location: {label}', fg=typer.colors.GREEN)
             else:
                 save_default_location(set_default_location, default_location_metadata=None)
@@ -541,6 +539,11 @@ def _launch_wevva(
     emoji_enabled = emoji if emoji is not None else bool(preferences.get('emoji_enabled', DEFAULT_EMOJI_ENABLED))
     warning_language = str(preferences.get('warning_language', DEFAULT_WARNING_LANGUAGE))
     initial_location = _resolve_initial_location(preferences, location)
+    default_location = _location_from_saved_metadata(
+        preferences.get('default_location_metadata')
+    )
+    if default_location is None and location is None and preferences.get('default_location'):
+        default_location = initial_location
     saved_locations = [
         location_metadata_from_config(item) for item in preferences.get('saved_locations', [])
     ]
@@ -555,6 +558,7 @@ def _launch_wevva(
         wind_speed_unit=final_wind,
         precipitation_unit=final_precip,
         saved_locations=saved_locations,
+        default_location=default_location,
     ).run()
 
 

@@ -310,6 +310,7 @@ class DashboardWorldMap(WorldLocationsMap):
         self._active_location_key = (
             location_key(active_location) if active_location is not None else None
         )
+        self._default_location_key: str | None = None
         self._selected_location_key: str | None = None
         self._tropical_systems: list[CanonicalTropicalSystem] = []
         self._tropical_labels: dict[str, DashboardTropicalLabel] = {}
@@ -440,6 +441,15 @@ class DashboardWorldMap(WorldLocationsMap):
             return
         self._active_location_key = key
         self._apply_label_state()
+        self._schedule_reflow()
+
+    def set_default_location(self, location: LocationMetadata | None) -> None:
+        """Keep the configured default in every compact place sample."""
+
+        key = location_key(location) if location is not None else None
+        if key == self._default_location_key:
+            return
+        self._default_location_key = key
         self._schedule_reflow()
 
     def set_selected_location(self, location: LocationMetadata | None) -> None:
@@ -719,7 +729,11 @@ class DashboardWorldMap(WorldLocationsMap):
         by_key = {candidate.key: candidate for candidate in location_candidates}
         priority_locations: list[DirectionalCalloutCandidate[str]] = []
         for key in dict.fromkeys(
-            (self._selected_location_key, self._active_location_key)
+            (
+                self._selected_location_key,
+                self._active_location_key,
+                self._default_location_key,
+            )
         ):
             candidate = by_key.pop(key, None)
             if candidate is not None:

@@ -294,12 +294,15 @@ the 120×30 baseline the pure budget assigns 14 rows to the map, one gutter, and
 map, tropical-detail, selected-alert-detail, and recent-alert panels through
 tabs. Its dashboard map subclasses the saved-locations map at narrow
 creation, ordering, and interaction hooks, retaining the shared projection,
-callout placement, temperature rendering, and resize behavior. Only saved
-locations receive world-map callouts; the active Weather location may still
-seed the forecast rail without being retained as an extra map label. When that
+callout placement, temperature rendering, and resize behavior. The configured
+default and distinct saved locations receive Dashboard world-map callouts;
+the active Weather location may still seed the forecast rail without being
+retained as an extra map label. When that
 location is already saved, its existing callout is also the initial reverse-
 styled selection on entry from Weather; an unsaved current place still gains no
-callout. Focus and hover are visual-only. Enter, Space, and click share one
+callout unless it is the configured default. The default remains pinned in
+compact place samples without being added to saved locations.
+Focus and hover are visual-only. Enter, Space, and click share one
 primary-action path which commits the place to the Dashboard forecast rail;
 repeating it leaves the selection in place. City selection in the lower
 tropical-track and alert maps uses that same rail-only path. `w` remains the explicit route back to Weather,

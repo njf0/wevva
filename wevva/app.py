@@ -210,6 +210,7 @@ class Wevva(App, inherit_bindings=False):
         wind_speed_unit: str = 'kmh',
         precipitation_unit: str = 'mm',
         saved_locations: list[LocationMetadata] | None = None,
+        default_location: LocationMetadata | None = None,
         start_on_dashboard: bool = True,
         **kwargs,
     ):
@@ -287,6 +288,7 @@ class Wevva(App, inherit_bindings=False):
         self.temperature_unit = temperature_unit
         self.wind_speed_unit = wind_speed_unit
         self.precipitation_unit = precipitation_unit
+        self.default_location = default_location
         self.saved_locations = sorted(saved_locations or [], key=lambda item: location_label(item).casefold())
         # Initialize main weather screen once
         self.weather_screen = WeatherScreen(
@@ -934,9 +936,23 @@ class Wevva(App, inherit_bindings=False):
         return locations
 
     def locations_for_dashboard(self) -> list[LocationMetadata]:
-        """Return only saved places for the persistent dashboard map."""
+        """Return the configured default followed by distinct saved places."""
 
-        return list(self.saved_locations)
+        locations: list[LocationMetadata] = []
+        if (
+            self.default_location is not None
+            and self.default_location.latitude is not None
+            and self.default_location.longitude is not None
+        ):
+            locations.append(self.default_location)
+        location_keys = {location_key(location) for location in locations}
+        for location in self.saved_locations:
+            key = location_key(location)
+            if key in location_keys:
+                continue
+            locations.append(location)
+            location_keys.add(key)
+        return locations
 
     def saved_location_weather_summary(
         self,
@@ -1183,6 +1199,15 @@ class Wevva(App, inherit_bindings=False):
             except ConfigWriteError as error:
                 self.notify(str(error), severity='error')
                 return
+            if default_location_action in {'use_current', 'clear'}:
+                preferences = load_preferences()
+                self.default_location = location_metadata_from_config(
+                    preferences.get('default_location_metadata')
+                )
+                self._set_saved_locations_from_config(
+                    preferences.get('saved_locations', [])
+                )
+                self._schedule_saved_weather_refresh()
             self.notify('Default settings saved.', severity='information')
 
     def _current_location_label(self) -> str | None:
@@ -1223,7 +1248,7 @@ class Wevva(App, inherit_bindings=False):
         self._saved_weather_tasks = {}
 
         current_key = location_key(self.location)
-        for index, location in enumerate(self.saved_locations):
+        for index, location in enumerate(self.locations_for_dashboard()):
             key = location_key(location)
             if key == current_key:
                 continue

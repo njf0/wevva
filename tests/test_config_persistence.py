@@ -33,6 +33,15 @@ LONDON = LocationMetadata(
     country_code='GB',
     timezone='Europe/London',
 )
+PARIS = LocationMetadata(
+    latitude=48.8566,
+    longitude=2.3522,
+    elevation=35,
+    name='Paris',
+    country='France',
+    country_code='FR',
+    timezone='Europe/Paris',
+)
 
 
 class ConfigPersistenceTests(unittest.TestCase):
@@ -72,7 +81,7 @@ class ConfigPersistenceTests(unittest.TestCase):
         self.assertFalse(preferences['emoji_enabled'])
         self.assertEqual(preferences['warning_language'], 'en')
 
-    def test_legacy_default_metadata_is_retained_and_migrated_to_saved_locations(self) -> None:
+    def test_default_metadata_does_not_implicitly_create_a_saved_location(self) -> None:
         config_path = get_config_path()
         config_path.parent.mkdir(parents=True)
         metadata = {
@@ -96,7 +105,48 @@ class ConfigPersistenceTests(unittest.TestCase):
         preferences = load_preferences()
 
         self.assertEqual(preferences['default_location'], 'London, United Kingdom')
-        self.assertEqual(preferences['default_location_metadata'], preferences['saved_locations'][0])
+        self.assertEqual(preferences['default_location_metadata']['name'], 'London')
+        self.assertEqual(preferences['default_location_metadata']['latitude'], LONDON.latitude)
+        self.assertEqual(preferences['saved_locations'], [])
+
+    def test_cli_default_location_does_not_create_a_saved_location(self) -> None:
+        place = {'name': 'London', 'country': 'United Kingdom'}
+
+        with patch('wevva.cli._resolve_first_location', return_value=(LONDON, place)):
+            preferences = _apply_default_location_mutations(
+                set_default_location='London',
+                clear_default_location=False,
+            )
+
+        self.assertEqual(preferences['default_location'], 'London, United Kingdom')
+        self.assertEqual(preferences['default_location_metadata']['name'], 'London')
+        self.assertEqual(preferences['saved_locations'], [])
+
+    def test_replacing_default_removes_its_legacy_saved_copy(self) -> None:
+        save_default_location(
+            'London, United Kingdom',
+            default_location_metadata={
+                'latitude': LONDON.latitude,
+                'longitude': LONDON.longitude,
+                'name': LONDON.name,
+                'country': LONDON.country,
+            },
+        )
+        add_saved_location(LONDON)
+
+        save_default_location(
+            'Paris, France',
+            default_location_metadata={
+                'latitude': PARIS.latitude,
+                'longitude': PARIS.longitude,
+                'name': PARIS.name,
+                'country': PARIS.country,
+            },
+        )
+
+        preferences = load_preferences()
+        self.assertEqual(preferences['default_location_metadata']['name'], 'Paris')
+        self.assertEqual(preferences['saved_locations'], [])
 
     def test_each_mutation_loads_preferences_once(self) -> None:
         save_preferences(

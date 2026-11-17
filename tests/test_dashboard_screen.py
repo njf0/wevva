@@ -127,6 +127,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
     def _app(self) -> Wevva:
         app = Wevva(
             initial_location=BERLIN,
+            default_location=BERLIN,
             saved_locations=[LONDON, TOKYO],
             emoji_enabled=False,
             start_on_dashboard=False,
@@ -152,6 +153,19 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
         )
         return app
 
+    def test_dashboard_locations_pin_default_without_duplicating_a_saved_copy(self) -> None:
+        app = Wevva(
+            initial_location=BERLIN,
+            default_location=LONDON,
+            saved_locations=[LONDON, TOKYO],
+            start_on_dashboard=False,
+        )
+
+        self.assertEqual(
+            [location.name for location in app.locations_for_dashboard()],
+            ['London', 'Tokyo'],
+        )
+
     async def test_location_warnings_reuse_tabs_with_only_a_top_rule(self) -> None:
         app = self._app()
         release_london_alerts = asyncio.Event()
@@ -173,7 +187,8 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(screen, DashboardScreen)
             self.assertEqual(screen.title, 'Dashboard')
             self.assertEqual(
-                screen.sub_title, 'View weather for your saved locations'
+                screen.sub_title,
+                'View weather for your default and saved locations',
             )
             warning_panel = screen.query_one(DashboardWeatherAlertsPanel)
             self.assertTrue(warning_panel.display)
@@ -381,7 +396,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             map_locations = list(screen.world_map.query(DashboardLocationLabel))
             self.assertEqual(
                 {label.location.name for label in map_locations},
-                {'London', 'Tokyo'},
+                {'Berlin', 'London', 'Tokyo'},
             )
             self.assertTrue(all(label.tooltip is None for label in map_locations))
             self.assertEqual(

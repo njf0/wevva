@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve complete abbreviated dates and their separation from condition
   codes in cramped Dashboard daily forecasts.
+- Keep the configured default pinned on the Dashboard map without treating it
+  as a saved location, and remove a former default's legacy saved copy when the
+  default changes.
 
 ## [1.0.0] - 2026-11-08
 

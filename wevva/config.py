@@ -277,8 +277,6 @@ def load_preferences() -> dict[str, Any]:
 
     default_location_metadata = _normalize_location_metadata(raw.get('default_location_metadata'))
     saved_locations = _normalize_saved_locations(raw.get('saved_locations'))
-    if not saved_locations and default_location_metadata is not None:
-        saved_locations = [default_location_metadata]
 
     # Normalize every persisted field so downstream code sees valid values.
     return {
@@ -331,6 +329,29 @@ def _write_preferences(preferences: dict[str, Any]) -> None:
             json.dump(preferences, f, indent=2)
     except OSError as error:
         raise ConfigWriteError(f'Could not save preferences to {config_path}: {error}') from error
+
+
+def _remove_replaced_default_from_saved_locations(
+    preferences: dict[str, Any],
+    replacement: dict[str, Any] | None,
+) -> None:
+    """Remove a former default's legacy saved-location entry."""
+
+    previous = _normalize_location_metadata(
+        preferences.get('default_location_metadata')
+    )
+    if previous is None:
+        return
+    if replacement is not None and location_key(previous) == location_key(replacement):
+        return
+    previous_key = location_key(previous)
+    preferences['saved_locations'] = _normalize_saved_locations(
+        [
+            item
+            for item in preferences.get('saved_locations', [])
+            if location_key(item) != previous_key
+        ]
+    )
 
 
 def save_preferences(
@@ -406,7 +427,12 @@ def save_preferences(
             default=DEFAULT_WARNING_LANGUAGE,
         )
     if default_location_metadata is not _UNSET:
-        preferences['default_location_metadata'] = _normalize_location_metadata(default_location_metadata)
+        normalized_default = _normalize_location_metadata(default_location_metadata)
+        _remove_replaced_default_from_saved_locations(
+            preferences,
+            normalized_default,
+        )
+        preferences['default_location_metadata'] = normalized_default
     if saved_locations is not _UNSET:
         preferences['saved_locations'] = _normalize_saved_locations(saved_locations)
 
@@ -471,5 +497,10 @@ def save_default_location(
     preferences = load_preferences()
     preferences['default_location'] = _normalize_location(default_location)
     if default_location_metadata is not _UNSET:
-        preferences['default_location_metadata'] = _normalize_location_metadata(default_location_metadata)
+        normalized_default = _normalize_location_metadata(default_location_metadata)
+        _remove_replaced_default_from_saved_locations(
+            preferences,
+            normalized_default,
+        )
+        preferences['default_location_metadata'] = normalized_default
     _write_preferences(preferences)

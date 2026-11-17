@@ -1483,7 +1483,7 @@ class DashboardScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self.title = 'Dashboard'
-        self.sub_title = 'View weather for your saved locations'
+        self.sub_title = 'View weather for your default and saved locations'
         self.sync_from_app()
         self._apply_layout(self.size.width, self.size.height)
         self._time_refresh_timer = self.set_interval(
@@ -1558,6 +1558,7 @@ class DashboardScreen(Screen[None]):
             )
         self.world_map.set_locations(locations, summaries=summaries)
         self.world_map.set_temperature_unit(self.app.temperature_unit)
+        self.world_map.set_default_location(self.app.default_location)
         self.world_map.set_active_location(self.app.location)
         self.world_map.set_selected_location(
             self._selected_location or self.app.location
@@ -1597,6 +1598,7 @@ class DashboardScreen(Screen[None]):
             force=True,
         )
         self.world_map.set_temperature_unit(self.app.temperature_unit)
+        self.world_map.set_default_location(self.app.default_location)
         if (systems := self.app.tropical_systems_snapshot()) is not None:
             self.world_map.set_tropical_systems(systems)
         self.update_bulletin(
