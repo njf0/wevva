@@ -60,6 +60,7 @@ class DashboardDailyForecast(Container):
             id='dashboard-daily-table',
             show_compact_precipitation=False,
             show_compact_gust=False,
+            align_wind_direction=True,
         )
 
     @property
@@ -110,6 +111,12 @@ class DashboardDailyForecast(Container):
         self.table.cell_padding = padding
         content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
         columns, widths = _fitted_layout(content_width)
+        if not padding and widths[1] == 2 and self.table.row_count:
+            wind_width = max(cell.cell_len for cell in self.table.get_column('wind'))
+            if widths[4] > wind_width:
+                # Spend spare wind-column space on a condition/range separator
+                # before growing the numeric fields' already roomy gaps.
+                widths = (widths[0], 3, widths[2], widths[3], widths[4] - 1)
         self.table.set_layout(
             columns,
             self._row_count,

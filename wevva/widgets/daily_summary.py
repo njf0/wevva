@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.reactive import reactive
 from textual.widgets import DataTable
@@ -26,6 +27,7 @@ class DailySummaryTable(DataTable):
         id: str = 'min-max-spread-table',
         show_compact_precipitation: bool = True,
         show_compact_gust: bool = True,
+        align_wind_direction: bool = False,
     ) -> None:
         super().__init__(
             show_header=False,
@@ -43,6 +45,8 @@ class DailySummaryTable(DataTable):
         self._column_widths: tuple[int, ...] | None = None
         self._show_compact_precipitation = show_compact_precipitation
         self._show_compact_gust = show_compact_gust
+        self._align_wind_direction = align_wind_direction
+        self._wind_direction_width = 0
 
     def set_layout(
         self,
@@ -106,6 +110,14 @@ class DailySummaryTable(DataTable):
 
         # Skip today (index 0), show tomorrow onwards
         days = self.daily_model.forecast_timeseries[1 : self._row_count + 1]
+        if self._align_wind_direction:
+            self._wind_direction_width = max(
+                (
+                    cell_len(self.daily_model.get_wind_direction(index + 1) or '--')
+                    for index in range(len(days))
+                ),
+                default=0,
+            )
         for display_idx, day in enumerate(days):
             self._add_daily_row(display_idx, day)
         if days:
@@ -224,7 +236,13 @@ class DailySummaryTable(DataTable):
             wind_speed_cell.append(f'{wind_gust:.0f}', style=wind_col)
             wind_speed_cell.append(')')
         if DailyColumn.WIND_DIRECTION not in self._visible_columns:
-            wind_speed_cell.append(f' {wind_dir}', style=f'bold {wind_col}')
+            if self._align_wind_direction:
+                wind_dir = wind_dir or '--'
+                spacing = 1 + max(0, self._wind_direction_width - cell_len(wind_dir))
+                wind_speed_cell.append(' ' * spacing)
+                wind_speed_cell.append(wind_dir, style=f'bold {wind_col}')
+            else:
+                wind_speed_cell.append(f' {wind_dir}', style=f'bold {wind_col}')
         wind_speed_cell.justify = 'right'
         gust_cell = Text(f'({wind_gust:.0f})', style=wind_col, justify='right')
         wind_dir_cell = Text(f'{wind_dir}', style=f'bold {wind_col}', justify='right')

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
@@ -17,7 +18,8 @@ from wevva.utils import rain_colour, temp_colour, wind_colour
 
 
 _MINIMUM_WIDTHS = (6, 3, 5, 4, 9)
-_PREFERRED_WIDTHS = (7, 5, 8, 6, 16)
+# Match the daily table's roomy column boundaries once both layouts fit.
+_PREFERRED_WIDTHS = (7, 4, 9, 6, 14)
 _COLUMN_COUNT = len(_MINIMUM_WIDTHS)
 
 
@@ -54,6 +56,7 @@ class DashboardHourlyForecast(Container):
         self._indices: list[int] = []
         self._column_widths: tuple[int, ...] = ()
         self._cell_padding = 0
+        self._direction_width = 0
         self._rebuild_pending = False
 
     def compose(self) -> ComposeResult:
@@ -80,9 +83,7 @@ class DashboardHourlyForecast(Container):
 
     def on_resize(self, event: Resize) -> None:
         event.stop()
-        padding, widths = _fitted_layout(max(1, event.size.width - 1))
-        if padding != self._cell_padding or widths != self._column_widths:
-            self._schedule_rebuild()
+        self._schedule_rebuild()
 
     def update_forecast(self, event: WeatherUpdated) -> None:
         """Render the next 24 hours from an app-owned forecast snapshot."""
@@ -112,8 +113,20 @@ class DashboardHourlyForecast(Container):
         if model is None or not model.forecast_timeseries:
             return
 
+        self._indices = list(
+            range(min(HOURS_WINDOW, len(model.forecast_timeseries)))
+        )
+        self._direction_width = max(
+            cell_len(model.get_wind_direction(index) or '--')
+            for index in self._indices
+        )
+        rows = [self._row_cells(index) for index in self._indices]
+        content_widths = tuple(
+            max(cell_len(row[column].plain) for row in rows)
+            for column in range(_COLUMN_COUNT)
+        )
         self._cell_padding, self._column_widths = _fitted_layout(
-            max(1, self.content_size.width - 1)
+            max(1, self.content_size.width - 1), content_widths,
         )
         table.cell_padding = self._cell_padding
         for key, width in zip(
@@ -123,11 +136,8 @@ class DashboardHourlyForecast(Container):
         ):
             table.add_column('', key=key, width=width)
 
-        self._indices = list(
-            range(min(HOURS_WINDOW, len(model.forecast_timeseries)))
-        )
-        for index in self._indices:
-            table.add_row(*self._row_cells(index), key=f'hour-{index}')
+        for index, row_cells in zip(self._indices, rows, strict=True):
+            table.add_row(*row_cells, key=f'hour-{index}')
         if self._indices:
             row = (
                 self._indices.index(selected_index)
@@ -172,7 +182,7 @@ class DashboardHourlyForecast(Container):
         wind_unit = model.forecast_units.get('wind_speed_10m', '')
         direction = model.get_wind_direction(index) or '--'
         return (
-            Text(f'{hour} ', style='dim'),
+            Text(hour, style='dim'),
             Text(
                 condition.abbr if condition is not None else '--',
                 style=condition_style,
@@ -192,6 +202,7 @@ class DashboardHourlyForecast(Container):
                 direction,
                 unit=wind_unit,
                 wind_style=wind_style,
+                direction_width=self._direction_width,
             ),
         )
 
@@ -215,7 +226,7 @@ def _measure(
     unit: str,
     style: str,
 ) -> Text:
-    text = Text()
+    text = Text(justify='right')
     value_style = style if not _is_number(value) else f'bold {style}'
     text.append(f'{_number(value)}{unit}', style=value_style)
     return text
@@ -227,11 +238,12 @@ def _wind_measure(
     *,
     unit: str,
     wind_style: str,
+    direction_width: int = 0,
 ) -> Text:
-    text = Text()
+    text = Text(justify='right')
     value_style = wind_style if not _is_number(wind) else f'bold {wind_style}'
     text.append(f'{_number(wind)}{unit}', style=value_style)
-    text.append(' ')
+    text.append(' ' * (1 + max(0, direction_width - cell_len(direction))))
     text.append(direction, style=value_style if direction != '--' else 'dim')
     return text
 
@@ -275,11 +287,11 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _fitted_widths(available: int) -> tuple[int, ...]:
-    widths = list(_MINIMUM_WIDTHS)
+def _fitted_widths(available: int, minimums: tuple[int, ...]) -> tuple[int, ...]:
+    widths = list(minimums)
     remaining = max(0, available - sum(widths))
     for index in (4, 2, 3, 1, 0):
-        addition = min(remaining, _PREFERRED_WIDTHS[index] - widths[index])
+        addition = min(remaining, max(0, _PREFERRED_WIDTHS[index] - widths[index]))
         widths[index] += addition
         remaining -= addition
         if remaining == 0:
@@ -287,12 +299,17 @@ def _fitted_widths(available: int) -> tuple[int, ...]:
     return tuple(widths)
 
 
-def _fitted_layout(available: int) -> tuple[int, tuple[int, ...]]:
-    """Add even cell padding only when the rail can retain every field."""
+def _fitted_layout(
+    available: int,
+    content_widths: tuple[int, ...],
+) -> tuple[int, tuple[int, ...]]:
+    """Prefer padding around complete readings, retaining a compact fallback."""
 
-    padding = 1 if available >= sum(_MINIMUM_WIDTHS) + 2 * _COLUMN_COUNT else 0
+    padding = 1 if available >= sum(content_widths) + 2 * _COLUMN_COUNT else 0
     content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
-    return padding, _fitted_widths(content_width)
+    return padding, _fitted_widths(
+        content_width, content_widths if padding else _MINIMUM_WIDTHS,
+    )
 
 
 __all__ = ['DashboardHourlyForecast']

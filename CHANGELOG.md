@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Right-align Dashboard forecast numbers and give wind directions consistent
+  spacing. Fit hourly columns to the displayed readings so one-cell padding
+  is available in narrower rails while preserving complete values and units.
 - Keep crowded Dashboard city labels visible by omitting their temperature
   when a full label cannot fit; restore it as map space becomes available.
 - Preserve complete abbreviated dates and their separation from condition

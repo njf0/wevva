@@ -339,7 +339,13 @@ abbreviated condition, temperature, precipitation chance, and wind speed plus
 spaced direction/arrow without horizontal scrolling. Full `HH:MM` times are
 shown with an explicit separator before the condition; feels-like temperature,
 precipitation amount, and gusts remain in the
-current instruments rather than being repeated in each row. Units inherit
+current instruments rather than being repeated in each row. Hourly temperatures,
+rain probabilities, and wind readings are right-aligned. Each forecast uses a
+consistent direction slot so varying compass names do not move wind speeds
+or arrows between rows. Hourly column widths are measured from its displayed
+24 readings before selecting one-cell padding, allowing that padding in
+narrower rails without clipping longer units or negative temperatures; the
+smallest rails retain their compact fallback. Units inherit
 their value colour, while spacing remains unstyled. The table caps its height
 at its 24 actual rows so the daily/context stack follows it rather than being
 anchored to the rail bottom. The adjacent Dashboard adapter wraps the standard
@@ -347,7 +353,12 @@ anchored to the rail bottom. The adjacent Dashboard adapter wraps the standard
 dashboard columns remain day, abbreviated condition, temperature range, rain
 chance, and wind speed/direction at every rail width; dashboard presentation
 suppresses inline precipitation amount and gusts while leaving standard Weather
-tables unchanged. The columns gain ordinary cell padding when all five still
+tables unchanged. Dashboard daily wind readings use the same consistent
+direction-slot treatment. At roomier widths both tables target matching column
+boundaries, while daily temperature ranges retain their own narrow-width budget.
+An unpadded daily table spends spare wind-column space on separating the
+condition code from the temperature range when the complete wind reading fits.
+The columns gain ordinary cell padding when all five still
 fit without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on

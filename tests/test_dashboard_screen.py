@@ -465,7 +465,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(hourly.table.rows), 24)
             self.assertEqual(hourly.table.max_scroll_x, 0)
             hourly_row = hourly.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05:00 ')
+            self.assertEqual(hourly_row[0].plain, '05:00')
             self.assertEqual(hourly_row[1].plain, 'OC')
             self.assertEqual(hourly_row[2].plain, '13°C')
             self.assertEqual(hourly_row[3].plain, '0%')
@@ -1418,7 +1418,8 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             screen = app.screen
 
             hourly_row = screen.forecast_panel.hourly_forecast.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05:00 ')
+            self.assertEqual(hourly_row[0].plain, '05:00')
+            self.assertEqual(screen.forecast_panel.hourly_forecast.table.cell_padding, 1)
             daily = screen.forecast_panel.daily_forecast.table
             # Complete dates use the spare cell at this rail width; padding
             # returns only once all five columns still fit with it.
