@@ -315,7 +315,6 @@ class SearchDialog(Container):
         self._show_results()
         self._all_places = places
         self.results.update_results(places, preferred_location=self._preferred_location())
-        self.results.focus()
 
         # Extract unique countries and populate filter
         countries = sorted(set(p.get('country', '') for p in places if p.get('country')))

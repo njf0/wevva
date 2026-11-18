@@ -53,7 +53,7 @@ class SearchScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(0)
 
             self.assertEqual(screen.dialog.results.option_count, 20)
-            self.assertTrue(screen.dialog.results.has_focus)
+            self.assertTrue(screen.dialog.search_input.has_focus)
             filter_row = screen.dialog.query_one('#filter-row')
             self.assertFalse(filter_row.has_class('hidden'))
             self.assertEqual(screen.dialog.results.region.y - filter_row.region.bottom, 1)
@@ -176,6 +176,37 @@ class SearchScreenLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(0.05)
 
                 self.assertEqual(queries, ['Berlin'])
+
+    async def test_result_updates_keep_input_focus_for_continued_typing(self) -> None:
+        queries = []
+
+        async def search_fixture(query: str, **_kwargs) -> list[dict[str, object]]:
+            queries.append(query)
+            return [_place(query), dict(_place(f'{query} second'), country='France', country_code='FR')]
+
+        with (
+            patch('wevva.screens.search_screen.search_places', new=search_fixture),
+            patch('wevva.widgets.search_dialog.SEARCH_DEBOUNCE_S', new=0.01),
+        ):
+            app = Wevva()
+            async with app.run_test() as pilot:
+                dialog = app.screen.dialog
+                await pilot.press('b', 'e', 'r')
+                await pilot.pause(0.05)
+                self.assertEqual(queries[-1], 'ber')
+                self.assertEqual(dialog.results.option_count, 2)
+                self.assertTrue(dialog.search_input.has_focus)
+
+                await pilot.press('l', 'i', 'n')
+                await pilot.pause(0.05)
+                self.assertEqual(dialog.search_input.value, 'berlin')
+                self.assertEqual(queries[-1], 'berlin')
+                self.assertTrue(dialog.search_input.has_focus)
+
+                await pilot.press('tab', 'tab', 'tab', 'tab')
+                self.assertTrue(dialog.results.has_focus)
+                await pilot.press('down')
+                self.assertEqual(dialog.results.highlighted, 1)
 
     async def test_coordinate_search_waits_for_enter_then_can_be_selected(self) -> None:
         query_returned = asyncio.Event()

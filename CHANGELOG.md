@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep place-search input focused when results arrive so typing can continue
+  without clicking back into the field.
 - Right-align Dashboard forecast numbers and give wind directions consistent
   spacing. Fit hourly columns to the displayed readings so one-cell padding
   is available in narrower rails while preserving complete values and units.
