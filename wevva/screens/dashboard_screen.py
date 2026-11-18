@@ -2608,7 +2608,7 @@ class DashboardScreen(Screen[None]):
         tabs = self.query_one('#dashboard-pane-tabs', Tabs)
         centre = self.query_one('#dashboard-center-column', Container)
         detail_row = self.query_one('#dashboard-detail-row', Container)
-        show_tropical = self._tropical_snapshot != ()
+        show_tropical = bool(self._tropical_snapshot)
         tropical_tab = tabs.query_one('#dashboard-tab-tropical', Tab)
         if show_tropical:
             if not tropical_tab.display:

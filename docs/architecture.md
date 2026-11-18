@@ -372,9 +372,11 @@ canonical group chooses one real source observation with a valid centre as its
 anchor, ordered by declared classification strength, newest issue time, then
 source and ID. This is a display choice only and does not merge observations.
 The Dashboard retains its last completed tropical snapshot independently of
-cache freshness. A completed empty result hides the tropical detail frame and
-compact Tropical tab, allowing the selected alert to fill the detail row; new
-activity restores both. An active Tropical tab returns to Map when hidden.
+cache freshness. The tropical detail frame and compact Tropical tab start
+hidden until a non-empty result confirms activity, allowing the selected alert
+to fill the detail row during initial discovery. A completed empty result
+hides both again; new activity restores them. An active Tropical tab returns
+to Map when hidden.
 Refreshes and failures preserve this layout and retained content, with a
 Dashboard header status for unavailable data. Discovery requests use the
 warning library's `strict=True` mode, so required provider failures cannot

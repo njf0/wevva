@@ -19,10 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Hide the Dashboard tropical panel and its compact tab after an empty storm
-  result, giving the selected weather alert the full detail row. Restore the
-  panel when activity returns and retain the last layout during refreshes or
-  provider failures.
+- Keep the Dashboard tropical panel and its compact tab hidden until storms
+  are found, giving the selected weather alert the full detail row from
+  startup. Hide them after an empty storm result and retain the last layout
+  during refreshes or provider failures.
 - Update `wevva-warnings` to 0.6.1 for strict tropical discovery that distinguishes
   required provider failures from successful empty results.
 - Remove redundant full-location tooltips from Dashboard place labels.
