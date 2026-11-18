@@ -83,6 +83,7 @@ class WorldLocationLabel(Static, can_focus=True):
         self.location = location
         self._body_text = ''
         self._marker_on_right = False
+        self._compact = False
         self._marker = '•'
         self.label_text = ''
 
@@ -117,14 +118,28 @@ class WorldLocationLabel(Static, can_focus=True):
         if colour:
             self.styles.color = colour
 
-    def set_marker_on_right(self, marker_on_right: bool) -> None:
+    def callout_width(self, *, compact: bool = False) -> int:
+        """Measure full or name-only text independently of its current layout."""
+        body = (
+            (self.location.name.strip() or location_label(self.location))
+            if compact else self._body_text
+        )
+        return cell_len(f'{self._marker} {body}')
+
+    def set_marker_on_right(self, marker_on_right: bool, *, compact: bool | None = None) -> None:
         """Keep the marker at the geographic end of the callout."""
 
         self._marker_on_right = marker_on_right
+        if compact is not None:
+            self._compact = compact
+        body = (
+            (self.location.name.strip() or location_label(self.location))
+            if self._compact else self._body_text
+        )
         label_text = (
-            f'{self._body_text} {self._marker}'
+            f'{body} {self._marker}'
             if marker_on_right
-            else f'{self._marker} {self._body_text}'
+            else f'{self._marker} {body}'
         )
         if label_text != self.label_text:
             self.label_text = label_text
@@ -411,7 +426,10 @@ class WorldLocationsMap(Container):
         labels = self._callout_labels()
         for key, placement in placements.items():
             label = labels[key]
-            label.set_marker_on_right(placement.marker_on_right)
+            if isinstance(label, WorldLocationLabel):
+                label.set_marker_on_right(placement.marker_on_right, compact=placement.used_fallback)
+            else:
+                label.set_marker_on_right(placement.marker_on_right)
             label.display = True
             label.styles.offset = (placement.column, placement.row)
         for key, label in labels.items():
@@ -443,7 +461,7 @@ class WorldLocationsMap(Container):
                 DirectionalCalloutCandidate(
                     key=key,
                     anchor=frame.canvas.cell_position(point),
-                    width=cell_len(label.label_text),
+                    width=label.callout_width(),
                 )
             )
         return candidates

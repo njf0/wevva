@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.resources import files
 import json
 from pathlib import Path
 from typing import Any
@@ -252,6 +253,37 @@ def get_config_path() -> Path:
     return Path.home() / '.config' / 'wevva' / 'config.json'
 
 
+def is_first_run() -> bool:
+    """Recognize a fresh profile without creating or trusting missing data.
+
+    Existing directories (even empty ones), unreadable paths, and symlinks
+    count as prior state. In particular a broken config must never be seeded.
+    """
+    from wevva.services.warning_cache import get_warning_cache_directory
+
+    for path in (get_config_path().parent, get_warning_cache_directory().parent):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return False
+    return True
+
+
+def starter_locations() -> list[dict[str, Any]]:
+    """Return independent, normalized copies of the bundled geocoded places."""
+    resource = files('wevva.data').joinpath('starter_locations.json')
+    return _normalize_saved_locations(json.loads(resource.read_text())['locations'])
+
+
+def initialize_starter_locations() -> bool:
+    """Create a fresh profile once; never overwrite an existing profile."""
+    preferences = dict(DEFAULT_PREFERENCES, saved_locations=starter_locations())
+    return _write_preferences(preferences, first_run=True)
+
+
 def load_preferences() -> dict[str, Any]:
     """Load and validate user preferences from disk.
 
@@ -308,27 +340,37 @@ def load_preferences() -> dict[str, Any]:
     }
 
 
-def _write_preferences(preferences: dict[str, Any]) -> None:
+def _write_preferences(preferences: dict[str, Any], *, first_run: bool = False) -> bool:
     """Write preferences to disk.
 
     Parameters
     ----------
     preferences: dict[str, Any]
         Preferences dictionary to persist.
+    first_run: bool
+        Require absent profile/cache state and exclusively create the file.
 
     Returns
     -------
-    None
-        The config file is updated in place.
+    bool
+        Whether preferences were written. First-run writes can be skipped
+        when another profile or cache already exists.
 
     """
+    if first_run and not is_first_run():
+        return False
     config_path = get_config_path()
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with config_path.open('w') as f:
+        with config_path.open('x' if first_run else 'w') as f:
             json.dump(preferences, f, indent=2)
+    except FileExistsError as error:
+        if first_run:
+            return False
+        raise ConfigWriteError(f'Could not save preferences to {config_path}: {error}') from error
     except OSError as error:
         raise ConfigWriteError(f'Could not save preferences to {config_path}: {error}') from error
+    return True
 
 
 def _remove_replaced_default_from_saved_locations(
@@ -364,6 +406,8 @@ def save_preferences(
     warning_language: str | object = _UNSET,
     default_location_metadata: dict[str, Any] | None | object = _UNSET,
     saved_locations: list[dict[str, Any]] | object = _UNSET,
+    *,
+    add_starter_locations: bool = False,
 ) -> None:
     """Persist preferences and optionally update display/location values.
 
@@ -385,6 +429,8 @@ def save_preferences(
         Optional warning-language update. When omitted, existing value is preserved.
     default_location_metadata: dict[str, Any] | None | object
         Optional default location metadata update. When omitted, existing value is preserved.
+    add_starter_locations: bool
+        Seed bundled locations only if the profile is still fresh at save time.
 
     Returns
     -------
@@ -435,6 +481,15 @@ def save_preferences(
         preferences['default_location_metadata'] = normalized_default
     if saved_locations is not _UNSET:
         preferences['saved_locations'] = _normalize_saved_locations(saved_locations)
+
+    if add_starter_locations:
+        initial_preferences = dict(preferences, saved_locations=starter_locations())
+        if _write_preferences(initial_preferences, first_run=True):
+            return
+        # Setup may have been open while another process saved locations.
+        # The stale first-run choice must not replace that newly saved list.
+        if saved_locations is _UNSET:
+            preferences['saved_locations'] = load_preferences()['saved_locations']
 
     _write_preferences(preferences)
 

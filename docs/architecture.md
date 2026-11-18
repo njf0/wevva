@@ -45,6 +45,18 @@ location when needed, and constructs `wevva.app.Wevva`. The console script is
 `wevva.cli:app` (`pyproject.toml`); `wevva/__main__.py` makes `python -m wevva`
 equivalent.
 
+Only the normal CLI launch and setup can initialize starter locations.
+`config.is_first_run()` requires both the configuration directory and the
+platform/environment-aware Wevva cache directory to be absent; unreadable
+paths also prevent initialization. A fresh launch copies six bundled geocoded
+places from `wevva/data/starter_locations.json` into an exclusively created
+config file before applying explicit CLI default-location choices. Fresh setup
+offers accept/decline and writes only after completing its prompts. The saved
+config itself records that the profile exists, including after a decline or
+deletion of all locations. Preference reads, help, imports, and public Python
+API calls do not seed or write configuration. Startup does not geocode the
+bundled places; forecasts still follow the normal provider paths.
+
 `Wevva` owns session state: the selected `LocationMetadata`, unit/theme
 settings, saved locations, refresh generations, short-lived forecast/warning
 caches, the reusable Alerts Centre/service, the installed Dashboard, and
@@ -384,6 +396,12 @@ between samples. Dashboard `r` advances that sample only while the cell-derived
 cap is below its full-size maximum and actually excludes places; no terminal
 dimension is special-cased. Sampling changes presentation only: every saved
 place remains mounted and available to the full World Locations screen.
+The place budget has a minimum of six when enough places are available.
+If a full Dashboard place callout cannot fit, the same planner tries its full
+city name without the temperature before hiding it. Both presentations retain
+the exact projected marker position. Each reflow measures the complete text
+again, restoring temperatures when space allows; full World Locations labels
+retain their existing complete-text policy.
 Selecting a location changes only its reverse-video emphasis, preserving the
 planner's existing marker side and neighbouring callouts.
 

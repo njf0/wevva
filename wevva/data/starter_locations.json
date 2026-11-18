@@ -1,0 +1,72 @@
+{
+  "source": "Open-Meteo Geocoding API via wevva.services.geocoding.search_places (language=en)",
+  "retrieved_on": "2026-11-17",
+  "locations": [
+    {
+      "latitude": 62.45411,
+      "longitude": -114.37248,
+      "elevation": 252,
+      "name": "Yellowknife",
+      "admin": "North Slave Region;Northwest Territories",
+      "country": "Canada",
+      "country_code": "CA",
+      "timezone": "America/Edmonton",
+      "timezone_abbreviation": ""
+    },
+    {
+      "latitude": 19.72991,
+      "longitude": -155.09073,
+      "elevation": 18,
+      "name": "Hilo",
+      "admin": "Hawaii County;Hawaii",
+      "country": "United States",
+      "country_code": "US",
+      "timezone": "Pacific/Honolulu",
+      "timezone_abbreviation": ""
+    },
+    {
+      "latitude": 6.80448,
+      "longitude": -58.15527,
+      "elevation": 3,
+      "name": "Georgetown",
+      "admin": "Demerara-Mahaica",
+      "country": "Guyana",
+      "country_code": "GY",
+      "timezone": "America/Guyana",
+      "timezone_abbreviation": ""
+    },
+    {
+      "latitude": 5.55602,
+      "longitude": -0.1969,
+      "elevation": 33,
+      "name": "Accra",
+      "admin": "Accra;Greater Accra Region",
+      "country": "Ghana",
+      "country_code": "GH",
+      "timezone": "Africa/Accra",
+      "timezone_abbreviation": ""
+    },
+    {
+      "latitude": 16.41639,
+      "longitude": 120.59306,
+      "elevation": 1493,
+      "name": "Baguio City",
+      "admin": "Province of Benguet;Cordillera",
+      "country": "Philippines",
+      "country_code": "PH",
+      "timezone": "Asia/Manila",
+      "timezone_abbreviation": ""
+    },
+    {
+      "latitude": -41.75262,
+      "longitude": 171.6037,
+      "elevation": 3,
+      "name": "Westport",
+      "admin": "Buller District;West Coast",
+      "country": "New Zealand",
+      "country_code": "NZ",
+      "timezone": "Pacific/Auckland",
+      "timezone_abbreviation": ""
+    }
+  ]
+}

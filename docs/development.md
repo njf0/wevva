@@ -65,12 +65,27 @@ uv run python -m compileall -q wevva
 `uv run wevva setup --no-launch` to save setup choices without starting the
 TUI. The README also documents `uvx --from . wevva` for running a checkout.
 
+Fresh CLI launches save six starter locations only when both the Wevva config
+and cache directories are absent. Run `setup` first to accept or decline them.
+The starter metadata is bundled from Open-Meteo geocoding with its retrieval
+date in `wevva/data/starter_locations.json`; ordinary startup does not repeat
+those lookups. Existing directories, including empty ones, prevent automatic
+seeding. Keep both paths isolated when checking first-run behavior.
+
 ## Validation and packaging
 
 The focused regression suite uses the standard library:
 
 ```bash
 uv run python -m unittest discover -s tests
+```
+
+First-run persistence/setup checks use temporary config and cache paths and
+mock application launch and provider calls:
+
+```bash
+uv run python -m unittest tests.test_first_run
+uv run python -m unittest tests.test_dashboard_screen.DashboardScreenTests.test_six_starters_remain_visible_and_selectable_after_resize
 ```
 
 Warning caching, progress routing, and stale-location safeguards have a smaller

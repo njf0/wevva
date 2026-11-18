@@ -21,10 +21,13 @@ from textual.theme import BUILTIN_THEMES
 from wevva.app import Wevva
 from wevva.config import (
     ConfigWriteError,
+    initialize_starter_locations,
+    is_first_run,
     load_preferences,
     location_metadata_from_config,
     save_default_location,
     save_preferences,
+    starter_locations,
 )
 from wevva.constants import (
     DEFAULT_EMOJI_ENABLED,
@@ -284,7 +287,16 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
         Reloaded preferences after saving setup selections.
 
     """
+    fresh_profile = is_first_run()
     typer.secho('\nWevva setup wizard\n', fg=typer.colors.CYAN, bold=True)
+    add_starters = False
+    if fresh_profile:
+        typer.echo('Starter locations: ' + ', '.join(
+            f"{place['name']} ({place['country']})" for place in starter_locations()
+        ))
+        add_starters = bool(_require_answer(questionary.confirm(
+            'Add these six starter locations?', default=True, style=SETUP_STYLE,
+        ).ask()))
 
     theme = _questionary_select(
         'Choose default theme',
@@ -388,6 +400,7 @@ def _run_setup_wizard(preferences: dict[str, Any]) -> dict[str, Any]:
             emoji_enabled=emoji_enabled,
             warning_language=warning_language,
             default_location_metadata=default_location_metadata,
+            add_starter_locations=add_starters,
         )
     except ConfigWriteError as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
@@ -614,6 +627,12 @@ def main(
     """Launch the Wevva TUI."""
     if ctx.invoked_subcommand is not None:
         return
+
+    try:
+        initialize_starter_locations()
+    except ConfigWriteError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
 
     preferences = _apply_default_location_mutations(
         set_default_location=set_default_location,

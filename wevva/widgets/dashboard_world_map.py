@@ -714,7 +714,13 @@ class DashboardWorldMap(WorldLocationsMap):
         self,
         frame: GeographicFrame,
     ) -> list[DirectionalCalloutCandidate[str]]:
-        location_candidates = super()._callout_candidates(frame)
+        location_candidates = [
+            replace(
+                candidate,
+                fallback_width=self._labels[candidate.key].callout_width(compact=True),
+            )
+            for candidate in super()._callout_candidates(frame)
+        ]
         marker_cell = self._selected_alert_marker_cell(frame)
         if marker_cell is not None:
             location_candidates = [

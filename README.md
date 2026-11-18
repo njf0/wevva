@@ -57,6 +57,15 @@ Requires Python `>=3.12`.
 
 ## First-Time Setup
 
+On a fresh installation, Wevva saves six starter locations: Yellowknife,
+Hilo, Georgetown (Guyana), Accra, Baguio City, and Westport (New Zealand).
+Their bundled place metadata lets the Dashboard open immediately; loading
+weather still needs an internet connection. Existing configurations or Wevva
+cache directories prevent automatic seeding, so your locations are preserved.
+
+Run `setup` before your first normal launch to accept or decline these starter
+locations. Declining or deleting them later keeps your list as you chose it.
+
 > [!TIP]
 > Run the setup wizard to save defaults:
 >
@@ -91,9 +100,9 @@ uvx wevva --set-default-location "New York"
 uvx wevva --clear-default-location
 ```
 
-When a startup location is available, wevva opens on the Dashboard; press `w`
-for the full Weather Forecast screen. With no configured location it opens
-place search first.
+When a startup location is available from saved defaults or saved locations,
+wevva opens on the Dashboard; press `w` for the full Weather Forecast screen.
+Without one it opens place search first.
 
 > [!WARNING]
 > - Emoji rendering support varies depending on terminal support and is disabled by default. Enable it with `--emoji` (or via `wevva setup`).

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Start fresh installations with six geocoded saved locations: Yellowknife,
+  Hilo, Georgetown (Guyana), Accra, Baguio City, and Westport (New Zealand).
+  First-time `setup` offers an accept/decline choice; existing profiles and
+  caches are preserved, and deleted starters are not restored.
 - Mark saved locations covered by fresh cached weather warnings with `!` on
   the Dashboard and full Map View, prioritizing them in the compact Dashboard
   sample.
@@ -25,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep crowded Dashboard city labels visible by omitting their temperature
+  when a full label cannot fit; restore it as map space becomes available.
 - Preserve complete abbreviated dates and their separation from condition
   codes in cramped Dashboard daily forecasts.
 - Keep the configured default pinned on the Dashboard map without treating it

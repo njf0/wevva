@@ -24,7 +24,7 @@ from wevva_warnings.registry import get_source
 from tests.weather_fixtures import warning_alerts, weather_update
 from wevva.app import Wevva
 from wevva.conditions import get_condition
-from wevva.config import location_key
+from wevva.config import location_key, location_metadata_from_config, starter_locations
 from wevva.location_metadata import LocationMetadata
 from wevva.messages import PlaceSelected
 from wevva.screens.dashboard_screen import (
@@ -165,6 +165,54 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             [location.name for location in app.locations_for_dashboard()],
             ['London', 'Tokyo'],
         )
+
+    async def test_six_starters_remain_visible_and_selectable_after_resize(self) -> None:
+        places = [location_metadata_from_config(raw) for raw in starter_locations()]
+        app = self._app()
+        app.default_location = None
+        app.start_on_dashboard = True
+        app.location = places[0]
+        app.saved_locations = places
+        event = weather_update(with_warnings=False)
+        cached_at = app._forecast_cache_clock()
+        app._forecast_cache = {
+            app._forecast_cache_key_for(place): (cached_at, event) for place in places
+        }
+        app._saved_location_weather_summaries = {
+            location_key(place): _summary(temperature)
+            for place, temperature in zip(places, (30, 18, 29, 26, 12, -20))
+        }
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _settle(pilot)
+            screen = app.screen
+            self.assertIsInstance(screen, DashboardScreen)
+            for size in ((80, 24), (120, 30), (160, 45)):
+                with self.subTest(size=size):
+                    await pilot.resize_terminal(*size)
+                    if size == (80, 24):
+                        screen.query_one('#dashboard-pane-tabs', Tabs).active = 'dashboard-tab-map'
+                    await _settle(pilot)
+                    labels = list(screen.world_map.query(DashboardLocationLabel))
+                    self.assertEqual(len(labels), 6)
+                    for label in labels:
+                        self.assertTrue(label.display, label.location.name)
+                        self.assertTrue(label.visible, label.location.name)
+                        self.assertTrue(screen.world_map.content_region.contains_region(label.region))
+                        if size == (160, 45):
+                            self.assertIn('°C', label.label_text)
+                        label.focus()
+                        await pilot.press('enter')
+                        self.assertEqual(screen._selected_location, label.location)
+                    for index, label in enumerate(labels):
+                        for other in labels[index + 1:]:
+                            self.assertFalse(label.region.overlaps(other.region))
+            observation = _tropical_observation(
+                'starter-storm', 'jma_tropical', 'TEST',
+                classification='Tropical Storm', latitude=-20, longitude=50,
+            )
+            screen.world_map.set_tropical_systems([CanonicalTropicalSystem('TEST', [observation])])
+            await _settle(pilot)
+            self.assertTrue(screen.world_map.query_one(DashboardTropicalLabel).display)
 
     async def test_location_warnings_reuse_tabs_with_only_a_top_rule(self) -> None:
         app = self._app()

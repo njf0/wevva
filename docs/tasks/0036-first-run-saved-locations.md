@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — implementation awaits the maintainer's go-ahead.
+Complete — implemented and verified on 17 November 2026.
 
 ## Context
 
@@ -149,14 +149,52 @@ Keep testing narrow: the maintainer explicitly requests avoiding long runs.
 
 ## Decisions and notes
 
-- Proposed behavior: ordinary fresh launches seed automatically; fresh setup
+- Implemented behavior: ordinary fresh launches seed automatically; fresh setup
   offers the choice before seeding. Existing profiles are never auto-filled.
 - Six is the minimum display capacity when enough places exist, not a forced
   minimum number of user-owned locations.
-- Current working-tree edits already touch config, CLI, app, Dashboard, tests,
-  and release documentation. Preserve those edits throughout implementation.
+- The pre-existing working-tree changes were committed separately before
+  implementation; the application version remains 1.0.0.
+- Config-file existence records the first-run decision. No additional marker
+  or preference schema field is needed. Even an empty config directory or a
+  cache-only installation blocks automatic initialization.
+- At 120×30, Georgetown's full name and temperature collided with Accra's
+  callout. Dashboard places now use the shared planner's name-only fallback
+  when complete text cannot fit. The marker stays on its projected cell;
+  larger maps restore the temperature. Full World Locations labels keep their
+  existing complete-text policy.
 
 ## Outcome
 
-Pending implementation. Only this task document has been added; no live
-geocoding, application changes, tests, or user configuration writes performed.
+Bundled all six locations in `wevva/data/starter_locations.json`, obtained
+through live `search_places()` calls on 17 November 2026 and converted through
+the shared metadata/configuration helpers. Country and administrative area
+checks disambiguated the returned candidates. The JSON records the source and
+lookup date; startup needs no further geocoding.
+
+Fresh CLI launches save the six places once before applying explicit default
+location changes. Fresh setup offers accept/decline before its other prompts,
+including with `--no-launch`; cancellation saves nothing. Configuration/cache
+checks and exclusive first-run file creation protect existing profiles,
+including a config created while setup is open. Preference reads, help, and
+Python geocoding API calls remain free of initialization writes. Declining or
+deleting all starters does not restore them later.
+
+Verification:
+
+- The final focused run passed 25 tests in 28.825 seconds:
+  `tests.test_first_run`, `tests.test_config_persistence`, and
+  `DashboardScreenTests.test_six_starters_remain_visible_and_selectable_after_resize`.
+- The Dashboard test exercised initial Dashboard startup, all six visible and
+  non-overlapping labels, keyboard selection at 80×24, 120×30, and 160×45,
+  temperature restoration after expansion, and mixed tropical/location labels.
+- Eight shared callout-planner tests and one mounted full World Locations map
+  check also passed during the placement fix.
+- `uv run --no-sync python -m compileall -q wevva` and `git diff --check` passed.
+  Validation used a temporary uv cache because the sandbox disallows the
+  default uv cache path.
+
+Tests used temporary config/cache paths and mocked launch/provider boundaries;
+the maintainer's real locations and caches were not written. Live forecasts,
+warning-provider responses, and real terminal/font/emoji presentation were not
+exercised. No broad test discovery, release build, or publication was run.
