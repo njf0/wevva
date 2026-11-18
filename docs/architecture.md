@@ -343,9 +343,16 @@ current instruments rather than being repeated in each row. Hourly temperatures,
 rain probabilities, and wind readings are right-aligned. Each forecast uses a
 consistent direction slot so varying compass names do not move wind speeds
 or arrows between rows. Hourly column widths are measured from its displayed
-24 readings before selecting one-cell padding, allowing that padding in
-narrower rails without clipping longer units or negative temperatures; the
-smallest rails retain their compact fallback. Units inherit
+24 readings before selecting one-cell padding. Content widths are not expanded
+to arbitrary preferred targets: condition codes need two cells, and individual
+temperature values grow only when their text requires it. A small shared
+`widgets/forecast_table.py` fitter uses native one-cell padding when it fits;
+otherwise it aligns content within its measured width and adds an explicit
+one-cell separator, including after temperatures and before `100%` rain.
+Exceptionally tight layouts let the final wind field clip inside the viewport
+rather than create hidden horizontal scrolling. The forecast panel retains
+one cell of outer horizontal padding for warnings and all other contents;
+table spacing adapts inside that inset. Units inherit
 their value colour, while spacing remains unstyled. The table caps its height
 at its 24 actual rows so the daily/context stack follows it rather than being
 anchored to the rail bottom. The adjacent Dashboard adapter wraps the standard
@@ -354,12 +361,17 @@ dashboard columns remain day, abbreviated condition, temperature range, rain
 chance, and wind speed/direction at every rail width; dashboard presentation
 suppresses inline precipitation amount and gusts while leaving standard Weather
 tables unchanged. Dashboard daily wind readings use the same consistent
-direction-slot treatment. At roomier widths both tables target matching column
-boundaries, while daily temperature ranges retain their own narrow-width budget.
-An unpadded daily table spends spare wind-column space on separating the
-condition code from the temperature range when the complete wind reading fits.
-The columns gain ordinary cell padding when all five still
-fit without horizontal scrolling. The borderless `ContextBar` stack receives the Dashboard-selected
+direction-slot treatment. Its shared row formatter opts into the same fitter
+only for Dashboard, measuring complete daily ranges independently from single
+hourly values. In compact mode it spends up to two spare cells on extra gaps
+after the temperature range and rain percentage, keeping complete wind readings
+within their existing budget. Daily rows use their full viewport width because all displayed
+days already fit vertically; hourly rows reserve a cell for their scrollbar.
+Both tables explicitly use the full rail viewport width, overriding the app's
+generic auto-width DataTable styling so a late forecast cannot fit daily wind
+against the dimensions of an empty table and leave it clipped to one character.
+Resize forces a coalesced daily reflow even when the selected fields and day
+count are unchanged. The borderless `ContextBar` stack receives the Dashboard-selected
 location explicitly rather than reading the active Weather location; its
 existing density controls show one row per context card at 120x30, expand on
 taller terminals, and omit the cards in compact/medium modes. The Dashboard

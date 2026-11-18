@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep Dashboard temperature and rain fields separated at `100%`, size hourly
+  readings and daily ranges to their content, and keep daily wind readings
+  complete when forecasts arrive after the initial layout. Retain the forecast
+  panel's outer padding around warnings and other content, and use spare daily
+  table width for extra separation after temperature ranges and rain percentages.
 - Keep place-search input focused when results arrive so typing can continue
   without clicking back into the field.
 - Right-align Dashboard forecast numbers and give wind directions consistent

@@ -240,6 +240,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             )
             warning_panel = screen.query_one(DashboardWeatherAlertsPanel)
             self.assertTrue(warning_panel.display)
+            self.assertEqual(warning_panel.region.x, screen.forecast_panel.content_region.x)
+            self.assertGreaterEqual(warning_panel.region.x - screen.forecast_panel.region.x, 2)
+            self.assertEqual(warning_panel.region.right, screen.forecast_panel.content_region.right)
             self.assertEqual(len(warning_panel.tabs.query(Tab)), 2)
             self.assertEqual(warning_panel.border_title, '')
             self.assertEqual(warning_panel.styles.border_top[0], 'solid')
@@ -465,10 +468,10 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(hourly.table.rows), 24)
             self.assertEqual(hourly.table.max_scroll_x, 0)
             hourly_row = hourly.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05:00')
-            self.assertEqual(hourly_row[1].plain, 'OC')
-            self.assertEqual(hourly_row[2].plain, '13°C')
-            self.assertEqual(hourly_row[3].plain, '0%')
+            self.assertEqual(hourly_row[0].plain.strip(), '05:00')
+            self.assertEqual(hourly_row[1].plain.strip(), 'OC')
+            self.assertEqual(hourly_row[2].plain.strip(), '13°C')
+            self.assertEqual(hourly_row[3].plain.strip(), '0%')
             self.assertEqual(hourly_row[4].plain, '8mp/h E ←')
             self.assertEqual(
                 [(span.start, span.end) for span in hourly_row[2].spans],
@@ -504,7 +507,7 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             daily_row = daily.table.get_row_at(0)
             self.assertTrue(
                 daily.table.render_line(0).text.startswith(
-                    f'{daily_row[0].plain} {daily_row[1].plain}'
+                    f'{daily_row[0].plain.rstrip()} {daily_row[1].plain.rstrip()}'
                 )
             )
             self.assertNotIn('/', daily_row[3].plain)
@@ -1374,6 +1377,9 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_157_wide_layout_spaces_tables_and_caps_only_places(self) -> None:
         app = self._app()
+        for _, event in app._forecast_cache.values():
+            for point in event.hourly.forecast_timeseries:
+                point.update(precipitation_probability=100, wind_direction_10m=225)
         app.saved_locations = [
             BERLIN,
             *(
@@ -1418,11 +1424,15 @@ class DashboardScreenTests(unittest.IsolatedAsyncioTestCase):
             screen = app.screen
 
             hourly_row = screen.forecast_panel.hourly_forecast.table.get_row_at(0)
-            self.assertEqual(hourly_row[0].plain, '05:00')
-            self.assertEqual(screen.forecast_panel.hourly_forecast.table.cell_padding, 1)
+            self.assertEqual(hourly_row[0].plain.strip(), '05:00')
+            self.assertEqual(screen.forecast_panel.styles.padding.left, 1)
+            self.assertEqual(screen.forecast_panel.styles.padding.right, 1)
+            self.assertRegex(
+                screen.forecast_panel.hourly_forecast.table.render_line(0).text,
+                r'13°C +100%',
+            )
             daily = screen.forecast_panel.daily_forecast.table
-            # Complete dates use the spare cell at this rail width; padding
-            # returns only once all five columns still fit with it.
+            # Daily ranges need more content width than single hourly values.
             self.assertEqual(daily.cell_padding, 0)
             self.assertEqual(
                 [column.value for column in daily.columns],

@@ -15,6 +15,7 @@ from textual.widgets import DataTable
 from wevva.conditions import get_condition
 from wevva.layout import DailyColumn, daily_column_widths
 from wevva.utils import emoji_prefix, rain_colour, temp_colour, wind_colour
+from wevva.widgets.forecast_table import fit_forecast_rows
 
 
 class DailySummaryTable(DataTable):
@@ -28,6 +29,7 @@ class DailySummaryTable(DataTable):
         show_compact_precipitation: bool = True,
         show_compact_gust: bool = True,
         align_wind_direction: bool = False,
+        fit_columns_to_content: bool = False,
     ) -> None:
         super().__init__(
             show_header=False,
@@ -47,12 +49,15 @@ class DailySummaryTable(DataTable):
         self._show_compact_gust = show_compact_gust
         self._align_wind_direction = align_wind_direction
         self._wind_direction_width = 0
+        self._fit_columns_to_content = fit_columns_to_content
 
     def set_layout(
         self,
         columns: tuple[DailyColumn, ...],
         row_count: int,
         column_widths: tuple[int, ...] | None = None,
+        *,
+        force: bool = False,
     ) -> None:
         """Select complete field groups and complete forecast days."""
 
@@ -69,7 +74,7 @@ class DailySummaryTable(DataTable):
         self._row_count = row_count
         self._column_widths = column_widths
         self.styles.height = row_count
-        if changed and self.daily_model is not None and self.is_mounted:
+        if (changed or force) and self.daily_model is not None and self.is_mounted:
             self._update_display()
 
     def on_mount(self) -> None:
@@ -105,9 +110,6 @@ class DailySummaryTable(DataTable):
             DailyColumn.SUNSET: 'Set',
         }
         widths = self._column_widths or daily_column_widths(self._visible_columns)
-        for column, width in zip(self._visible_columns, widths, strict=True):
-            self.add_column(column_labels[column], key=column.value, width=width)
-
         # Skip today (index 0), show tomorrow onwards
         days = self.daily_model.forecast_timeseries[1 : self._row_count + 1]
         if self._align_wind_direction:
@@ -118,8 +120,16 @@ class DailySummaryTable(DataTable):
                 ),
                 default=0,
             )
-        for display_idx, day in enumerate(days):
-            self._add_daily_row(display_idx, day)
+        formatted_rows = [self._format_daily_row(display_idx, day) for display_idx, day in enumerate(days)]
+        rows = [cells for _, cells in formatted_rows]
+        if self._fit_columns_to_content and rows:
+            self.cell_padding, widths, rows = fit_forecast_rows(
+                rows, max(1, self.content_size.width), extra_gap_after=(2, 3),
+            )
+        for column, width in zip(self._visible_columns, widths, strict=True):
+            self.add_column(column_labels[column], key=column.value, width=width)
+        for (key, _), cells in zip(formatted_rows, rows, strict=True):
+            self.add_row(*cells, key=key)
         if days:
             self.move_cursor(
                 row=min(selected_row, len(days) - 1),
@@ -132,8 +142,8 @@ class DailySummaryTable(DataTable):
         """Convert display index to model index (skipping today at index 0)."""
         return display_idx + 1
 
-    def _add_daily_row(self, display_idx: int, day: dict) -> None:
-        """Add a single daily forecast row with all cells."""
+    def _format_daily_row(self, display_idx: int, day: dict) -> tuple[str, tuple[Text, ...]]:
+        """Format a single daily forecast row before fitting its columns."""
         model_idx = self._day_offset(display_idx)
         theme_vars = self.app.theme_variables
 
@@ -281,5 +291,4 @@ class DailySummaryTable(DataTable):
             DailyColumn.SUNRISE: sunrise_cell,
             DailyColumn.SUNSET: sunset_cell,
         }
-        cells = [cells_by_column[column] for column in self._visible_columns]
-        self.add_row(*cells, key=day_name)
+        return day_name, tuple(cells_by_column[column] for column in self._visible_columns)

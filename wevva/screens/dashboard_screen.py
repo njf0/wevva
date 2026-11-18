@@ -1995,7 +1995,7 @@ class DashboardScreen(Screen[None]):
         """Change layout only after a completed discovery result."""
 
         self._tropical_snapshot = systems
-        self.sub_title = 'View weather for your saved locations'
+        self.sub_title = 'View weather for your default and saved locations'
         self.world_map.set_tropical_systems(systems)
         self._update_visibility()
 

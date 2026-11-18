@@ -18,11 +18,6 @@ _DASHBOARD_COLUMNS = (
     DailyColumn.RAIN,
     DailyColumn.WIND,
 )
-# Keep the complete abbreviated date plus a separating cell. The compact rain
-# and wind forms need less spare width, so they yield space first in the rail.
-_DASHBOARD_MINIMUM_WIDTHS = (7, 2, 7, 3, 9)
-_DASHBOARD_PREFERRED_WIDTHS = (7, 4, 9, 6, 14)
-_COLUMN_COUNT = len(_DASHBOARD_COLUMNS)
 
 
 class DashboardDailyForecast(Container):
@@ -56,12 +51,18 @@ class DashboardDailyForecast(Container):
         self._layout_pending = False
 
     def compose(self) -> ComposeResult:
-        yield DailySummaryTable(
+        table = DailySummaryTable(
             id='dashboard-daily-table',
             show_compact_precipitation=False,
             show_compact_gust=False,
             align_wind_direction=True,
+            fit_columns_to_content=True,
         )
+        # The application's generic DataTable rule uses auto width. Fit these
+        # columns to the rail viewport, not to a previously empty table.
+        table.styles.width = '100%'
+        table.styles.min_width = 0
+        yield table
 
     @property
     def table(self) -> DailySummaryTable:
@@ -101,59 +102,11 @@ class DashboardDailyForecast(Container):
         self._layout_pending = False
         if not self.is_mounted:
             return
-        available = max(1, self.content_size.width - 1)
-        padding = (
-            1
-            if available
-            >= sum(_DASHBOARD_MINIMUM_WIDTHS) + 2 * _COLUMN_COUNT
-            else 0
-        )
-        self.table.cell_padding = padding
-        content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
-        columns, widths = _fitted_layout(content_width)
-        if not padding and widths[1] == 2 and self.table.row_count:
-            wind_width = max(cell.cell_len for cell in self.table.get_column('wind'))
-            if widths[4] > wind_width:
-                # Spend spare wind-column space on a condition/range separator
-                # before growing the numeric fields' already roomy gaps.
-                widths = (widths[0], 3, widths[2], widths[3], widths[4] - 1)
         self.table.set_layout(
-            columns,
+            _DASHBOARD_COLUMNS,
             self._row_count,
-            column_widths=widths,
+            force=True,
         )
-
-
-def _fitted_layout(
-    available: int,
-) -> tuple[tuple[DailyColumn, ...], tuple[int, ...]]:
-    """Fit the dashboard's five useful daily fields without scrolling."""
-
-    return _DASHBOARD_COLUMNS, _fitted_widths(
-        available,
-        _DASHBOARD_MINIMUM_WIDTHS,
-        _DASHBOARD_PREFERRED_WIDTHS,
-        (4, 3, 2, 0, 1),
-    )
-
-
-def _fitted_widths(
-    available: int,
-    minimums: tuple[int, ...],
-    preferred: tuple[int, ...],
-    priority: tuple[int, ...],
-) -> tuple[int, ...]:
-    """Fit standard field groups without introducing horizontal scrolling."""
-
-    widths = list(minimums)
-    remaining = max(0, available - sum(widths))
-    for index in priority:
-        addition = min(remaining, preferred[index] - widths[index])
-        widths[index] += addition
-        remaining -= addition
-        if remaining == 0:
-            break
-    return tuple(widths)
 
 
 __all__ = ['DashboardDailyForecast']

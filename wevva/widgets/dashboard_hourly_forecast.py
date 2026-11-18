@@ -15,12 +15,7 @@ from wevva.conditions import get_condition
 from wevva.constants import HOURS_WINDOW
 from wevva.messages import HourHighlighted, WeatherUpdated
 from wevva.utils import rain_colour, temp_colour, wind_colour
-
-
-_MINIMUM_WIDTHS = (6, 3, 5, 4, 9)
-# Match the daily table's roomy column boundaries once both layouts fit.
-_PREFERRED_WIDTHS = (7, 4, 9, 6, 14)
-_COLUMN_COUNT = len(_MINIMUM_WIDTHS)
+from wevva.widgets.forecast_table import fit_forecast_rows
 
 
 class DashboardHourlyForecast(Container):
@@ -121,12 +116,8 @@ class DashboardHourlyForecast(Container):
             for index in self._indices
         )
         rows = [self._row_cells(index) for index in self._indices]
-        content_widths = tuple(
-            max(cell_len(row[column].plain) for row in rows)
-            for column in range(_COLUMN_COUNT)
-        )
-        self._cell_padding, self._column_widths = _fitted_layout(
-            max(1, self.content_size.width - 1), content_widths,
+        self._cell_padding, self._column_widths, rows = fit_forecast_rows(
+            rows, max(1, self.content_size.width - 1),
         )
         table.cell_padding = self._cell_padding
         for key, width in zip(
@@ -285,31 +276,6 @@ def _number(value: object) -> str:
 
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _fitted_widths(available: int, minimums: tuple[int, ...]) -> tuple[int, ...]:
-    widths = list(minimums)
-    remaining = max(0, available - sum(widths))
-    for index in (4, 2, 3, 1, 0):
-        addition = min(remaining, max(0, _PREFERRED_WIDTHS[index] - widths[index]))
-        widths[index] += addition
-        remaining -= addition
-        if remaining == 0:
-            break
-    return tuple(widths)
-
-
-def _fitted_layout(
-    available: int,
-    content_widths: tuple[int, ...],
-) -> tuple[int, tuple[int, ...]]:
-    """Prefer padding around complete readings, retaining a compact fallback."""
-
-    padding = 1 if available >= sum(content_widths) + 2 * _COLUMN_COUNT else 0
-    content_width = max(1, available - 2 * padding * _COLUMN_COUNT)
-    return padding, _fitted_widths(
-        content_width, content_widths if padding else _MINIMUM_WIDTHS,
-    )
 
 
 __all__ = ['DashboardHourlyForecast']
